@@ -3,7 +3,8 @@
 Include `<cbor_tags/cbor_resumable.h>`, bind caller-owned storage once, and change
 its availability before calling argument-free `resume()`. Operation creation
 runs eagerly; `resume()` reports `need_input`, `need_output`, or terminal `done`.
-Use `result()` to distinguish success from a terminal error.
+Once an operation is `done`, use `result()` to distinguish success from a
+terminal error. Calling `result()` earlier throws `std::logic_error`.
 
 ## Custom codecs and supported combinations
 
@@ -102,6 +103,8 @@ or changing the retained prefix. The default adapter does not support
 A flat `vector<byte>` or `deque<byte>` can instead receive appended bytes
 directly. Typed decoding finishes once the requested values are complete;
 `finish()` closes input and makes a truncated item return `status_code::incomplete`.
+Closing applies to the source, even when the operation is already done: later
+operations on it see the end of input.
 See the [record example](../examples/40_resumable.cpp).
 
 ## Encode to a growable container
@@ -339,10 +342,11 @@ destination changes, or application effects; I/O cancellation is independent.
 The source stays acquired until operation destruction, and repeated `cancel()`
 or `resume()` calls stay terminal.
 
-Declare the waiter last: destroying it detaches its continuation, while a live
-waiter must not outlive its pending operation. Moving an operation preserves
-its waiter; a resumed waiter may destroy the completed operation, but destructive
-reentrancy from a running codec is unsupported.
+Declare the waiter last: destroying it detaches its continuation. Destroying a
+pending operation cancels it, so a waiter that outlives it wakes with
+`status_code::cancelled`. Moving an operation preserves its waiter; a resumed
+waiter may destroy the completed operation, but destructive reentrancy from a
+running codec is unsupported.
 
 ## Read a sequence or validate input
 

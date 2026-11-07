@@ -185,7 +185,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
     ~resume_operation() { release(); }
 
     resume_state resume() {
-        auto &s = *state_;
+        auto &s = checked_state();
         if (s.finished)
             return resume_state::done;
         if (s.control.driving)
@@ -195,55 +195,55 @@ template <typename Context> class [[nodiscard]] resume_operation {
         return drive(s);
     }
     resume_state finish() {
-        auto &s = *state_;
+        auto &s = checked_state();
         if (s.control.driving)
             throw std::logic_error("cannot finish a running codec");
         s.context.source().close();
         return resume();
     }
     void cancel() {
+        // Nothing to cancel in a moved-from operation, same as a finished one
+        if (!state_)
+            return;
         auto &s = *state_;
         if (s.finished)
             return;
         if (s.control.driving)
             throw std::logic_error("cannot cancel a running codec");
 
-        // Retire every suspended handle before destroying its owning frames.
-        // Input retains its committed source position; the dead reader needs no reset.
-        s.control.leaf = {};
-        s.work         = resumable<status_code>{status_code::cancelled};
-        if constexpr (Context::waiting_state == resume_state::need_output)
-            s.context.rollback();
-
-        s.result   = unexpected<status_code>{status_code::cancelled};
-        s.finished = true;
-
         // The waiter may destroy this operation during inline resumption.
-        auto waiter = std::exchange(s.control.waiter, {});
-        if (waiter)
+        if (auto waiter = stop(s))
             waiter.resume();
     }
-    bool                               done() const noexcept { return state_ && state_->finished; }
-    resume_state                       progress() const noexcept { return done() ? resume_state::done : Context::waiting_state; }
-    expected<std::size_t, status_code> result() const { return state_->result; }
-    std::size_t                        committed_bytes() const { return state_ ? state_->context.offset() - state_->start : 0; }
-    auto                               remaining_input() const
+    bool         done() const noexcept { return state_ && state_->finished; }
+    resume_state progress() const noexcept { return done() ? resume_state::done : Context::waiting_state; }
+    expected<std::size_t, status_code> result() const {
+        // incomplete would look like truncated input, so a pending result is a caller bug
+        const auto &s = checked_state();
+        if (!s.finished)
+            throw std::logic_error("resumable operation has not finished");
+        return s.result;
+    }
+    std::size_t committed_bytes() const { return state_ ? state_->context.offset() - state_->start : 0; }
+    auto        remaining_input() const
         requires(Context::waiting_state == resume_state::need_input)
     {
-        return state_->context.remaining_input();
+        return checked_state().context.remaining_input();
     }
 
     auto remaining_output() const
         requires(Context::waiting_state == resume_state::need_output)
     {
-        return state_->context.remaining_output();
+        return checked_state().context.remaining_output();
     }
 
     struct awaiter {
         state                  *owner;
         std::coroutine_handle<> registered{};
-        bool                    await_ready() const noexcept { return owner->finished; }
+        bool                    await_ready() const noexcept { return owner && owner->finished; }
         void                    await_suspend(std::coroutine_handle<> handle) {
+            if (!owner)
+                throw std::logic_error("resumable operation was moved from");
             if (owner->control.waiter)
                 throw std::logic_error("operation already has a waiter");
             registered            = handle;
@@ -261,8 +261,35 @@ template <typename Context> class [[nodiscard]] resume_operation {
     awaiter operator co_await() & noexcept { return {state_.get()}; }
 
   private:
+    state &checked_state() const {
+        if (!state_)
+            throw std::logic_error("resumable operation was moved from");
+        return *state_;
+    }
+
+    // Ends a pending operation as cancelled. Returns the waiter to wake.
+    static std::coroutine_handle<> stop(state &s) noexcept {
+        // Retire every suspended handle before destroying its owning frames.
+        // Input retains its committed source position; the dead reader needs no reset.
+        s.control.leaf = {};
+        s.work         = resumable<status_code>{status_code::cancelled};
+        if constexpr (Context::waiting_state == resume_state::need_output)
+            s.context.rollback();
+
+        s.result   = unexpected<status_code>{status_code::cancelled};
+        s.finished = true;
+        return std::exchange(s.control.waiter, {});
+    }
+
     void release() noexcept {
         if (state_) {
+            // Going away while pending is a cancel. Wake the waiter while the
+            // state it reads still exists, instead of leaving it hanging on freed memory.
+            if (!state_->finished && !state_->control.driving) {
+                if (auto waiter = stop(*state_))
+                    waiter.resume();
+            }
+
             auto &source = state_->context.source();
             // Abandoned partial output must not become part of the next item.
             // Destroy suspended frames before restoring their retry boundary.

@@ -12,6 +12,7 @@
 #include <memory_resource>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -176,8 +177,7 @@ template <template <typename> typename Codec> void check_integer_map_override(st
             // Construction must suspend cleanly while the header has no output.
             REQUIRE_FALSE(encoder.done());
             CHECK(encoder.progress() == resume_state::need_output);
-            REQUIRE_FALSE(encoder.result());
-            CHECK(encoder.result().error() == status_code::incomplete);
+            CHECK_THROWS_AS(static_cast<void>(encoder.result()), std::logic_error);
 
             if (bytewise) {
                 for (auto &byte : bytes) {

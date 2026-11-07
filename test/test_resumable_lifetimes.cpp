@@ -237,6 +237,106 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         CHECK(actual == expected);
     }
 
+    TEST_CASE("destroying a pending operation wakes its waiter with cancelled") {
+        // The waiter outlives the operation here. It used to wait forever, and
+        // destroying it afterwards touched the freed operation state.
+        auto check_cancelled = [](const raw_consumer &consumer, const std::optional<operation_result> &result) {
+            REQUIRE(consumer.done());
+            CHECK_NOTHROW(consumer.rethrow());
+            REQUIRE(result);
+            REQUIRE_FALSE(*result);
+            CHECK(result->error() == status_code::cancelled);
+        };
+
+        SUBCASE("decode") {
+            input_chunks chunks;
+            auto         decoder = make_resumable_decoder(chunks);
+            std::string  pending;
+            auto         operation = std::optional{decoder(pending)};
+
+            std::optional<operation_result> result;
+            auto                            consumer = await_result(*operation, result, [] {});
+            REQUIRE_FALSE(consumer.done());
+            operation.reset();
+            check_cancelled(consumer, result);
+
+            // The source is free for the next operation
+            std::vector<std::byte> bytes;
+            REQUIRE(make_encoder(bytes)(65536));
+            int  actual{};
+            auto next = decoder(actual);
+            chunks.emplace_back(bytes);
+            REQUIRE(next.resume() == resume_state::done);
+            REQUIRE(next.result());
+            CHECK(actual == 65536);
+        }
+        SUBCASE("encode") {
+            output_chunks     output;
+            auto              encoder   = make_resumable_encoder(output);
+            const std::string value     = "no room for this";
+            auto              operation = std::optional{encoder(value)};
+
+            std::optional<operation_result> result;
+            auto                            consumer = await_result(*operation, result, [] {});
+            REQUIRE_FALSE(consumer.done());
+            operation.reset();
+            check_cancelled(consumer, result);
+        }
+    }
+
+    TEST_CASE("result before an operation finishes throws instead of reporting incomplete") {
+        SUBCASE("decode") {
+            std::vector<std::byte> input;
+            auto                   decoder   = make_resumable_decoder(input);
+            int                    value     = 0;
+            auto                   operation = decoder(value);
+            REQUIRE_FALSE(operation.done());
+            CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
+
+            input.push_back(std::byte{0x07});
+            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.result());
+            CHECK(value == 7);
+        }
+        SUBCASE("encode") {
+            output_chunks output;
+            auto          encoder   = make_resumable_encoder(output);
+            auto          operation = encoder(std::string{"pending"});
+            REQUIRE_FALSE(operation.done());
+            CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
+        }
+    }
+
+    TEST_CASE("moved-from operations throw instead of dereferencing nothing") {
+        std::vector<std::byte> input;
+        auto                   decoder   = make_resumable_decoder(input);
+        int                    value     = 0;
+        auto                   operation = decoder(value);
+        auto                   moved     = std::move(operation);
+
+        // NOLINTBEGIN(bugprone-use-after-move)
+        CHECK_FALSE(operation.done());
+        CHECK(operation.committed_bytes() == 0);
+        CHECK_THROWS_AS(operation.resume(), std::logic_error);
+        CHECK_THROWS_AS(operation.finish(), std::logic_error);
+        CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
+        CHECK_THROWS_AS(static_cast<void>(operation.remaining_input()), std::logic_error);
+        CHECK_NOTHROW(operation.cancel()); // nothing to cancel, like a finished one
+
+        std::optional<operation_result> result;
+        auto                            consumer = await_result(operation, result, [] {});
+        REQUIRE(consumer.done());
+        CHECK_THROWS_AS(consumer.rethrow(), std::logic_error);
+        CHECK_FALSE(result);
+        // NOLINTEND(bugprone-use-after-move)
+
+        // The moved-to operation still owns the decode
+        input.push_back(std::byte{0x07});
+        REQUIRE(moved.resume() == resume_state::done);
+        REQUIRE(moved.result());
+        CHECK(value == 7);
+    }
+
     TEST_CASE("input cancellation keeps committed progress without assigning a retired reader position") {
         const int              first_expected  = 7;
         const int              second_expected = 1000;
