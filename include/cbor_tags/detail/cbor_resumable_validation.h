@@ -8,7 +8,7 @@
 
 namespace cbor::tags::detail {
 
-// Reuse the ordinary traversal token decoder, including strict simple encodings.
+// Reuse the one-shot traversal token decoder, including strict simple encodings.
 struct resumable_walk_token {
     catch_all_variant                                       value;
     template <typename Decoder> expected<void, status_code> decode(Decoder &decoder) {
@@ -127,7 +127,7 @@ template <typename Source> class resumable_validation_context : public resumable
   private:
     void flush_window() {
         if (pending_ != 0) {
-            auto &reader = this->ordinary().reader_;
+            auto &reader = this->one_shot().reader_;
             resumable_source_access::consume_window(this->source(), reader.position_, pending_);
             reader.current_offset_ += pending_;
             this->commit();
@@ -147,7 +147,7 @@ template <typename Source> class resumable_validation_context : public resumable
 
     void refresh_window() {
         flush_window();
-        if (const auto window = resumable_source_access::borrow_window(this->source(), this->ordinary().reader_.position_))
+        if (const auto window = resumable_source_access::borrow_window(this->source(), this->one_shot().reader_.position_))
             window_ = *window;
     }
 
@@ -164,7 +164,7 @@ template <typename Source> class resumable_validation_context : public resumable
         if (window_.size() < 9)
             return status_code::success;
 
-        // One ordinary checked call covers all scalar siblings in this window.
+        // A single one-shot checked call covers all scalar siblings in this window.
         // Publish its accepted checkpoint even if a later token failed.
         window_decoder contiguous(window_);
         const auto     result = contiguous(batch);
@@ -191,7 +191,7 @@ template <typename Source> class resumable_validation_context : public resumable
         // Only a boundary token needs the chunk-aware reader and retry path.
         // Flush before it can suspend or traverse already admitted chunks.
         flush_window();
-        return this->ordinary(token);
+        return this->one_shot(token);
     }
 
     resumable_task<status_code> read_item(std::size_t depth, validation_options options) {
@@ -255,7 +255,7 @@ template <typename Source> class resumable_validation_context : public resumable
     template <bool Text> resumable_task<status_code> await_string_payload(std::uint64_t length) {
         utf8_state utf8;
         bool       valid  = true;
-        auto      &reader = this->ordinary().reader_;
+        auto      &reader = this->one_shot().reader_;
         while (length != 0) {
             // A populated window already proves availability; consult the
             // source end only when no contiguous bytes can be borrowed.

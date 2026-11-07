@@ -19,7 +19,7 @@
 
 namespace cbor::tags::detail {
 
-// Retry only the small tagged header through the ordinary codec machinery.
+// Retry only the small tagged header through the one-shot codec machinery.
 template <std::uint64_t Tag, std::size_t ElementSize> struct resumable_typed_array_header {
     std::uint64_t byte_count{};
 
@@ -58,7 +58,7 @@ resumable_task<status_code> resumable_decode_typed_array(Context &context, Array
     static_assert(element_size <= 16U);
 
     resumable_typed_array_header<Tag, element_size> header;
-    const auto                                      header_status = co_await context.ordinary(header);
+    const auto                                      header_status = co_await context.one_shot(header);
     if (header_status != status_code::success) {
         co_return header_status;
     }
@@ -69,7 +69,7 @@ resumable_task<status_code> resumable_decode_typed_array(Context &context, Array
     values.clear();
     values.reserve(element_count);
 
-    auto                               &reader = context.ordinary().reader_;
+    auto                               &reader = context.one_shot().reader_;
     std::array<std::byte, element_size> boundary{};
     std::size_t                         boundary_size{};
     while (values.size() != element_count) {
@@ -170,7 +170,7 @@ resumable_task<status_code> resumable_encode_typed_array(Context &context, Range
         co_return status_code::size_limit_exceeded;
     }
     resumable_typed_array_header<Tag, element_size> header{count * element_size};
-    const auto                                      header_status = co_await context.ordinary(header);
+    const auto                                      header_status = co_await context.one_shot(header);
     if (header_status != status_code::success) {
         co_return header_status;
     }

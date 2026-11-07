@@ -54,7 +54,7 @@ concept ResumableInputSource =
     };
 
 // write() advances the working position by its returned count. A short write
-// means temporary exhaustion; ordinary codec adaptation is library-owned.
+// means temporary exhaustion; one-shot codec adaptation is library-owned.
 // Optional borrow_window()/consume_window(n) expose writable constructed bytes.
 template <typename Source>
 concept ResumableOutputBuffer =

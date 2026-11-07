@@ -1176,10 +1176,10 @@ function(add_resumable_retry_failure CASE DIAGNOSTIC)
 endfunction()
 
 foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG PLAIN OBSERVER_DECODE)
-  add_resumable_retry_failure(${CASE} "ordinary decoding requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_${CASE})
+  add_resumable_retry_failure(${CASE} "one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_${CASE})
 endforeach()
-add_resumable_retry_failure(MEMBER_ENCODE "ordinary encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
-add_resumable_retry_failure(OBSERVER_ENCODE "ordinary encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
+add_resumable_retry_failure(MEMBER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
+add_resumable_retry_failure(OBSERVER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
 add_resumable_retry_failure(NODISCARD "nodiscard" CBOR_RETRY_NODISCARD)
 
 foreach(DIRECTION ENCODE DECODE)

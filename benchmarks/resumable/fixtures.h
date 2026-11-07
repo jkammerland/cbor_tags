@@ -189,7 +189,7 @@ template <typename Map> Map make_integer_map(std::size_t approximate_encoded_siz
     return result;
 }
 
-// Build wire chunks through the ordinary encoder; transport splitting is independent.
+// Build wire chunks through the one-shot encoder; transport splitting is independent.
 template <typename String> bytes encode_string_chunks(const String &value, std::size_t chunk_size) {
     bytes encoded;
     auto  encoder = ct::make_encoder(encoded);

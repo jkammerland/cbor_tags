@@ -40,7 +40,7 @@ int main() {
     auto encoding = encoder(sent);
     assert(encoding.done());
 
-    // Check the selected field order independently through the ordinary array decoder.
+    // Check the selected field order independently through the one-shot array decoder.
     const auto encoded = encoding.result();
     assert(encoded);
     assert(*encoded == encoding.committed_bytes());

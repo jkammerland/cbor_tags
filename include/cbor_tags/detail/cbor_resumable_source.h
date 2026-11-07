@@ -1040,7 +1040,7 @@ template <detail::ResumableOutputStorage Storage> auto make_output_buffer(Storag
 
 namespace detail {
 
-// Ordinary encoders use this library-owned bridge for every public adapter.
+// One-shot encoders use this library-owned bridge for every public adapter.
 // A consumer only implements the source protocol and reports partial writes.
 template <ResumableOutputBuffer Source> struct is_segment_output_buffer<Source> : std::true_type {};
 

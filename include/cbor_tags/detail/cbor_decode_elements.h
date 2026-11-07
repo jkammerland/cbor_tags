@@ -16,7 +16,7 @@ struct decode_elements_available {
     constexpr bool operator()() const noexcept { return true; }
 };
 
-// The caller owns count and append progress. Ordinary decoding uses the empty
+// The caller owns count and append progress. One-shot decoding uses the empty
 // completion callback; resumable decoding retains only completed child items.
 template <typename Decoder, typename Container, typename Appender, typename Completed = ignore_decoded_element,
           typename Available = decode_elements_available>
@@ -36,7 +36,7 @@ constexpr status_code decode_array_elements(Decoder &decoder, Container &value, 
 }
 
 // A consumed break is distinct from a temporarily exhausted input window.
-// Header-context dispatch matches the ordinary indefinite container decoder.
+// Header-context dispatch matches the one-shot indefinite container decoder.
 // Mutable count/break references cannot be swapped; bounds follow min/max order.
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 template <bool CheckBounds = false, typename Decoder, typename Container, typename Appender, typename Completed = ignore_decoded_element,
@@ -77,7 +77,7 @@ constexpr status_code decode_indefinite_array_elements(Decoder &decoder, Contain
 template <typename Container> using decoded_map_pair = std::pair<typename Container::key_type, typename Container::mapped_type>;
 
 // Keep the key when only the mapped value is incomplete. The same loop serves
-// ordinary decoding with no-op callbacks and resumable decoding with checkpoints.
+// one-shot decoding with no-op callbacks and resumable decoding with checkpoints.
 // Progress references are grouped by purpose; bounds follow min/max order.
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 template <bool Indefinite, bool CheckBounds = false, typename Decoder, typename Container, typename Appender,

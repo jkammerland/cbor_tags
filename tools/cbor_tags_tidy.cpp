@@ -27,7 +27,7 @@
     (void)ct::walk_item(range_dec, [](const auto &, const auto &) { return ct::status_code::success; }, {.strict_validation = true});
 }
 
-// Instantiate the separate coroutine adapters without changing ordinary codec modes.
+// Instantiate the separate coroutine adapters without changing one-shot codec modes.
 [[maybe_unused]] void cbor_tags_resumable_tidy_anchor() {
     namespace ct = cbor::tags;
     std::list<std::span<const std::byte>> input;

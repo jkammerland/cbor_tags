@@ -10,7 +10,7 @@ struct encode_elements_available {
     constexpr bool operator()() const noexcept { return true; }
 };
 
-// The ordinary loop has no progress bookkeeping. Resumable callers can retain
+// The one-shot loop has no progress bookkeeping. Resumable callers can retain
 // the completed prefix without changing codec dispatch or element binding.
 template <typename Encoder, typename Iterator, typename Sentinel, typename Completed = encoded_element_complete,
           typename Available = encode_elements_available>
@@ -24,7 +24,7 @@ constexpr void encode_array_elements(Encoder &encoder, Iterator &current, const 
 }
 
 // Commit keys and mapped values separately so a suspended pair never replays
-// its already published key. Ordinary callers use the no-op callback.
+// its already published key. One-shot callers use the no-op callback.
 template <typename Encoder, typename Iterator, typename Sentinel, typename Completed = encoded_element_complete,
           typename Available = encode_elements_available>
 constexpr void encode_map_elements(Encoder &encoder, Iterator &current, const Sentinel &last, bool &key_complete, Completed completed = {},

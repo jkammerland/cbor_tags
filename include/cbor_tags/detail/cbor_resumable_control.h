@@ -12,7 +12,7 @@
 
 namespace cbor::tags {
 
-// Small ordinary items return inline. Only a suspended computation owns a frame.
+// Small one-shot items return inline. Only a suspended computation owns a frame.
 template <typename T> class [[nodiscard]] resumable_task {
   public:
     struct promise_type;
@@ -171,7 +171,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
 
   public:
     template <typename... Args> resume_operation(typename Context::source_type &source, Args &&...args) {
-        // Acquire before constructing a context: an ordinary codec can finish
+        // Acquire before constructing a context: a one-shot codec can finish
         // eagerly while the operation state is being constructed.
         source.acquire();
         try {

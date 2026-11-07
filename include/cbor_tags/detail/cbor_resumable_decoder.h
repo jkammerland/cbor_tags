@@ -28,7 +28,7 @@ concept HasGeometricAppendReservation =
     requires(Appender &append, T &value, std::uint64_t size) { append.template reserve_for_append<true>(value, size); };
 
 // Preserve the normal entrypoint selected by optional/variant/indefinite dispatch.
-// The enclosing ordinary call still owns the complete retry boundary.
+// The enclosing one-shot call still owns the complete retry boundary.
 template <typename T, payload_decode_context Context> struct resume_context_value {
     T                                                      &value;
     template <typename Decoder> expected<void, status_code> decode(Decoder &decoder) {
@@ -86,11 +86,11 @@ template <typename T> struct resume_tag_wrapper {
 template <typename Source, typename Options, template <typename> typename... Codecs>
 class resumable_decode_context : public Codecs<resumable_decode_context<Source, Options, Codecs...>>... {
     using self_type     = resumable_decode_context;
-    using ordinary_type = decoder<Source, Options, cbor_header_decoder, cbor_indefinite_decoder, Codecs...>;
+    using one_shot_type = decoder<Source, Options, cbor_header_decoder, cbor_indefinite_decoder, Codecs...>;
     using mixins        = std::tuple<Codecs<self_type>...>;
     Source         &source_;
     resume_control &control_;
-    ordinary_type   ordinary_;
+    one_shot_type   one_shot_;
     std::size_t     committed_offset_;
 
   public:
@@ -99,62 +99,62 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     static constexpr resume_state waiting_state = resume_state::need_input;
 
     // Borrowed views point into the source, same aliases as the one-shot decoder
-    using bstr_view_t        = typename ordinary_type::bstr_view_t;
-    using tstr_view_t        = typename ordinary_type::tstr_view_t;
-    using encoded_item_view  = typename ordinary_type::encoded_item_view;
-    using encoded_array_view = typename ordinary_type::encoded_array_view;
-    using encoded_map_view   = typename ordinary_type::encoded_map_view;
+    using bstr_view_t        = typename one_shot_type::bstr_view_t;
+    using tstr_view_t        = typename one_shot_type::tstr_view_t;
+    using encoded_item_view  = typename one_shot_type::encoded_item_view;
+    using encoded_array_view = typename one_shot_type::encoded_array_view;
+    using encoded_map_view   = typename one_shot_type::encoded_map_view;
 
-    resumable_decode_context(Source &source, resume_control &control) : source_(source), control_(control), ordinary_(source) {
-        ordinary_.reader_.position_       = source.committed_position();
-        ordinary_.reader_.current_offset_ = ordinary_.reader_.position_.offset();
-        committed_offset_                 = ordinary_.reader_.current_offset_;
+    resumable_decode_context(Source &source, resume_control &control) : source_(source), control_(control), one_shot_(source) {
+        one_shot_.reader_.position_       = source.committed_position();
+        one_shot_.reader_.current_offset_ = one_shot_.reader_.position_.offset();
+        committed_offset_                 = one_shot_.reader_.current_offset_;
     }
     Source        &source() noexcept { return source_; }
     std::size_t    offset() const noexcept { return committed_offset_; }
     auto           remaining_input() const { return source_.remaining(source_.committed_position()); }
-    ordinary_type &ordinary() noexcept { return ordinary_; }
+    one_shot_type &one_shot() noexcept { return one_shot_; }
     auto           wait() noexcept { return control_.wait(); }
-    bool           empty() const { return ordinary_.reader_.empty(source_); }
+    bool           empty() const { return one_shot_.reader_.empty(source_); }
     bool           closed() const { return source_.closed(); }
     void           commit() {
         // The source owns the checkpoint; retain only its scalar progress here.
-        source_.commit(ordinary_.reader_.position_);
-        committed_offset_ = ordinary_.reader_.current_offset_;
+        source_.commit(one_shot_.reader_.position_);
+        committed_offset_ = one_shot_.reader_.current_offset_;
     }
     void rollback() {
-        ordinary_.reader_.position_       = source_.committed_position();
-        ordinary_.reader_.current_offset_ = committed_offset_;
+        one_shot_.reader_.position_       = source_.committed_position();
+        one_shot_.reader_.current_offset_ = committed_offset_;
     }
 
     // A complete normal call is the sole retry boundary, including its nested calls.
-    template <typename T> resumable_task<status_code> ordinary(T &value) {
+    template <typename T> resumable_task<status_code> one_shot(T &value) {
         require_retry<T>();
-        return attempt_ordinary(value);
+        return attempt_one_shot(value);
     }
 
-    template <typename T, payload_decode_context Context> resumable_task<status_code> ordinary(resume_context_value<T, Context> &value) {
+    template <typename T, payload_decode_context Context> resumable_task<status_code> one_shot(resume_context_value<T, Context> &value) {
         require_retry<T, Context>();
-        return attempt_ordinary(value);
+        return attempt_one_shot(value);
     }
 
-    template <typename T> resumable_task<status_code> ordinary(resume_tag_wrapper<T> &value) {
+    template <typename T> resumable_task<status_code> one_shot(resume_tag_wrapper<T> &value) {
         require_retry<T>();
-        return attempt_ordinary(value);
+        return attempt_one_shot(value);
     }
 
     // This internal adapter only checks the group header; it publishes no
     // destination or codec state before completing that check.
-    resumable_task<status_code> ordinary(resume_group_header &value) { return attempt_ordinary(value); }
+    resumable_task<status_code> one_shot(resume_group_header &value) { return attempt_one_shot(value); }
 
   private:
     template <typename T, payload_decode_context Context = payload_decode_context::direct> static consteval void require_retry() {
-        static_assert(resumable_decode_retry_allowed<ordinary_type, T, Context, Codecs<ordinary_type>...>(),
-                      "ordinary decoding requires a resumable hook or resumable_retry_traits decode opt-in");
+        static_assert(resumable_decode_retry_allowed<one_shot_type, T, Context, Codecs<one_shot_type>...>(),
+                      "one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in");
     }
 
-    template <typename T> resumable_task<status_code> attempt_ordinary(T &value) {
-        const auto result = ordinary_(value);
+    template <typename T> resumable_task<status_code> attempt_one_shot(T &value) {
+        const auto result = one_shot_(value);
         if (result) {
             commit();
             return status_code::success;
@@ -185,24 +185,24 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
   private:
     template <typename T> void drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
         while (length != 0 && !empty()) {
-            if (const auto span = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_); span && !span->empty()) {
+            if (const auto span = resumable_source_access::borrow_window(source_, one_shot_.reader_.position_); span && !span->empty()) {
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, span->size()));
                 append(value, span->first(count));
-                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, count);
-                ordinary_.reader_.current_offset_ += count;
+                resumable_source_access::consume_window(source_, one_shot_.reader_.position_, count);
+                one_shot_.reader_.current_offset_ += count;
                 length -= count;
-            } else if constexpr (HasBulkByteRead<decltype(ordinary_.reader_.position_)>) {
+            } else if constexpr (HasBulkByteRead<decltype(one_shot_.reader_.position_)>) {
                 // This scratch range and every native iterator die before a
                 // suspension; only copied bytes reach the destination.
                 std::array<std::byte, 256> bytes;
                 const auto                 requested = static_cast<std::size_t>(std::min<std::uint64_t>(length, bytes.size()));
-                const auto                 count     = ordinary_.reader_.position_.read_bytes(std::span(bytes).first(requested));
+                const auto                 count     = one_shot_.reader_.position_.read_bytes(std::span(bytes).first(requested));
                 assert(count != 0);
                 append(value, std::span<const std::byte>{bytes}.first(count));
-                ordinary_.reader_.current_offset_ += count;
+                one_shot_.reader_.current_offset_ += count;
                 length -= count;
             } else {
-                append(value, static_cast<typename T::value_type>(ordinary_.reader_.read(source_)));
+                append(value, static_cast<typename T::value_type>(one_shot_.reader_.read(source_)));
                 --length;
             }
             commit();
@@ -224,7 +224,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     template <typename Sink> resumable_task<status_code> string_sink(Sink &sink) {
         using header_type = std::conditional_t<IsTstrSink<Sink>, as_text_any, as_bstr_any>;
         header_type header{};
-        auto        status = co_await ordinary(header);
+        auto        status = co_await one_shot(header);
         if (status != status_code::success)
             co_return status;
         if (!header.indefinite)
@@ -236,16 +236,16 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             status = co_await available();
             if (status != status_code::success)
                 co_return status;
-            const auto initial = static_cast<std::byte>(*ordinary_.reader_.position_);
+            const auto initial = static_cast<std::byte>(*one_shot_.reader_.position_);
             if (initial == std::byte{0xff}) {
                 indefinite_break end{};
-                co_return co_await ordinary(end);
+                co_return co_await one_shot(end);
             }
             if ((initial & std::byte{0xe0}) != chunk_major || (initial & std::byte{0x1f}) == std::byte{31})
                 co_return status_code::malformed_structure;
 
             header_type chunk{};
-            status = co_await ordinary(chunk);
+            status = co_await one_shot(chunk);
             if (status != status_code::success)
                 co_return status;
             status = co_await sink_payload(sink, chunk.size);
@@ -279,25 +279,25 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     // It's committed once the callback accepts it.
     template <typename Sink> status_code drain_sink(Sink &sink, std::uint64_t &length) {
         while (length != 0 && !empty()) {
-            if (const auto window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
+            if (const auto window = resumable_source_access::borrow_window(source_, one_shot_.reader_.position_);
                 window && !window->empty()) {
                 const auto count  = static_cast<std::size_t>(std::min<std::uint64_t>(length, window->size()));
                 const auto status = sink.deliver(window->first(count));
                 if (status != status_code::success)
                     return status;
-                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, count);
-                ordinary_.reader_.current_offset_ += count;
+                resumable_source_access::consume_window(source_, one_shot_.reader_.position_, count);
+                one_shot_.reader_.current_offset_ += count;
                 length -= count;
             } else {
                 std::array<std::byte, 256> bytes;
                 const auto                 requested = static_cast<std::size_t>(std::min<std::uint64_t>(length, bytes.size()));
                 std::size_t                count{};
-                if constexpr (HasBulkByteRead<decltype(ordinary_.reader_.position_)>) {
-                    count = ordinary_.reader_.position_.read_bytes(std::span(bytes).first(requested));
-                    ordinary_.reader_.current_offset_ += count;
+                if constexpr (HasBulkByteRead<decltype(one_shot_.reader_.position_)>) {
+                    count = one_shot_.reader_.position_.read_bytes(std::span(bytes).first(requested));
+                    one_shot_.reader_.current_offset_ += count;
                 } else {
                     while (count != requested && !empty())
-                        bytes[count++] = static_cast<std::byte>(ordinary_.reader_.read(source_));
+                        bytes[count++] = static_cast<std::byte>(one_shot_.reader_.read(source_));
                 }
                 assert(count != 0);
                 const auto status = sink.deliver(std::span<const std::byte>{bytes}.first(count));
@@ -316,7 +316,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         static_assert(!consumes_zero_bytes<element_type>(), "as_array_sink elements must consume input, or a large count never ends");
 
         as_array_any header{};
-        auto         status = co_await ordinary(header);
+        auto         status = co_await one_shot(header);
         if (status != status_code::success)
             co_return status;
         for (std::uint64_t index = 0; header.indefinite || index != header.size; ++index) {
@@ -324,9 +324,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 status = co_await available();
                 if (status != status_code::success)
                     co_return status;
-                if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff}) {
+                if (static_cast<std::byte>(*one_shot_.reader_.position_) == std::byte{0xff}) {
                     indefinite_break end{};
-                    co_return co_await ordinary(end);
+                    co_return co_await one_shot(end);
                 }
             }
 
@@ -348,7 +348,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                       "as_map_sink entries must consume input, or a large count never ends");
 
         as_map_any header{};
-        auto       status = co_await ordinary(header);
+        auto       status = co_await one_shot(header);
         if (status != status_code::success)
             co_return status;
         for (std::uint64_t index = 0; header.indefinite || index != header.size; ++index) {
@@ -356,9 +356,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 status = co_await available();
                 if (status != status_code::success)
                     co_return status;
-                if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff}) {
+                if (static_cast<std::byte>(*one_shot_.reader_.position_) == std::byte{0xff}) {
                     indefinite_break end{};
-                    co_return co_await ordinary(end);
+                    co_return co_await one_shot(end);
                 }
             }
 
@@ -372,7 +372,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 status = co_await available();
                 if (status != status_code::success)
                     co_return status;
-                if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff})
+                if (static_cast<std::byte>(*one_shot_.reader_.position_) == std::byte{0xff})
                     co_return status_code::malformed_structure;
             }
             mapped_type mapped{};
@@ -390,7 +390,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     template <typename T> resumable_task<status_code> retry(T &value) {
         for (;;) {
             co_await wait();
-            const auto result = ordinary_(value);
+            const auto result = one_shot_(value);
             if (result) {
                 commit();
                 co_return status_code::success;
@@ -456,9 +456,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return customization(value);
         else if constexpr (has_mixin<U>())
             return mixin(value);
-        else if constexpr (codec_payload_has_customization<ordinary_type, U, payload_decode_context::direct>())
-            // Explicit ordinary customizations precede every structural category.
-            return ordinary(value); // NOLINT(bugprone-branch-clone)
+        else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::direct>())
+            // Explicit one-shot customizations precede every structural category.
+            return one_shot(value); // NOLINT(bugprone-branch-clone)
         else if constexpr (IsStringSink<U>)
             return string_sink(value);
         else if constexpr (IsArraySink<U>)
@@ -469,7 +469,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             using V = std::remove_cvref_t<decltype(value.value())>;
             static_assert(!IsSink<V>, "sinks take no size bounds, return a status_code from the callback instead");
             if constexpr (IsAnyHeader<V> || IsConstView<V>)
-                return ordinary(value);
+                return one_shot(value);
             else if constexpr (IsBoundedSizeWrapper<U>)
                 return bounded_container(value.value(), U::min_size, U::max_size);
             else
@@ -484,7 +484,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return named_map(value.value_);
 #endif
         else if constexpr (IsAnyHeader<U> || (IsTag<U> && !IsAggregate<U> && !IsTaggedTuple<U>))
-            return ordinary(value);
+            return one_shot(value);
         else if constexpr (IsString<U> && !IsConstView<U>)
             return container(value);
         else if constexpr (IsRangeOfCborValues<U>) {
@@ -499,7 +499,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else if constexpr (IsAggregate<U>)
             return aggregate(value);
         else
-            return ordinary(value);
+            return one_shot(value);
     }
 
     template <typename T> resumable_task<status_code> customization(T &value) {
@@ -508,10 +508,10 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             status_code status;
             if constexpr (is_customization_tag_wrapper_v<std::remove_cvref_t<decltype(tag)>>) {
                 resume_tag_wrapper wrapper{tag};
-                status = co_await ordinary(wrapper);
+                status = co_await one_shot(wrapper);
             } else {
                 auto normalized = dynamic_tag<std::uint64_t>{static_cast<std::uint64_t>(std::move(tag))};
-                status          = co_await ordinary(normalized);
+                status          = co_await one_shot(normalized);
             }
             if (status != status_code::success)
                 co_return status;
@@ -529,7 +529,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         if constexpr (has_explicit_hook<T>() || has_mixin<T>())
             return false;
         else
-            return builtin_decode_consumes_zero_bytes<ordinary_type, T>();
+            return builtin_decode_consumes_zero_bytes<one_shot_type, T>();
     }
     template <typename T> static consteval void check_progress() {
         if constexpr (IsMap<T>) {
@@ -546,9 +546,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return container(value, minimum, maximum);
     }
 
-    template <payload_decode_context Context, typename T> resumable_task<status_code> contextual_ordinary(T &value) {
+    template <payload_decode_context Context, typename T> resumable_task<status_code> contextual_one_shot(T &value) {
         resume_context_value<T, Context> wrapper{value};
-        co_return co_await ordinary(wrapper);
+        co_return co_await one_shot(wrapper);
     }
 
     template <typename T> resumable_task<status_code> header_item(T &value) {
@@ -556,8 +556,8 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())
             // Opt-in hooks own dispatch; the final branch handles ordinary direct-compatible items.
             return item(value); // NOLINT(bugprone-branch-clone)
-        else if constexpr (codec_payload_has_customization<ordinary_type, U, payload_decode_context::header>())
-            return contextual_ordinary<payload_decode_context::header>(value);
+        else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::header>())
+            return contextual_one_shot<payload_decode_context::header>(value);
         else if constexpr (IsAggregate<U> && !IsTag<U>)
             return header_group(to_tuple(value));
         else if constexpr (IsUntaggedTuple<U>)
@@ -572,7 +572,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             co_return status == status_code::success ? status_code::unexpected_group_size : status;
         } else if constexpr (count > 1 && Options::wrap_groups) {
             resume_group_header header{count};
-            const auto          status = co_await ordinary(header);
+            const auto          status = co_await one_shot(header);
             if (status != status_code::success)
                 co_return status;
             co_return co_await arguments(std::move(values));
@@ -588,7 +588,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         constexpr auto count = std::tuple_size_v<std::remove_cvref_t<Tuple>>;
         if (force || (count > 1 && Options::wrap_groups)) {
             auto       header = as_array{count};
-            const auto status = co_await ordinary(header);
+            const auto status = co_await one_shot(header);
             if (status != status_code::success)
                 co_return status;
         }
@@ -602,7 +602,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     template <typename T> resumable_task<status_code> tagged_tuple(T &value) {
-        const auto status = co_await ordinary(std::get<0>(value));
+        const auto status = co_await one_shot(std::get<0>(value));
         if (status != status_code::success)
             co_return status;
         co_return co_await group(tuple_tail(value));
@@ -619,11 +619,11 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         auto values = to_tuple(value);
         if constexpr (HasInlineTag<T>) {
             auto       tag    = static_tag<T::cbor_tag>{};
-            const auto status = co_await ordinary(tag);
+            const auto status = co_await one_shot(tag);
             if (status != status_code::success)
                 co_return status;
         } else if constexpr (IsTag<T>) {
-            const auto status = co_await ordinary(std::get<0>(values));
+            const auto status = co_await one_shot(std::get<0>(values));
             if (status != status_code::success)
                 co_return status;
         }
@@ -645,7 +645,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                       "as_named_map may contain at most one as_named_extension field after flattening as_named_group members");
 
         as_map_any header{};
-        auto       status = co_await ordinary(header);
+        auto       status = co_await one_shot(header);
         if (status != status_code::success)
             co_return status;
 
@@ -656,9 +656,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 status = co_await available();
                 if (status != status_code::success)
                     co_return status;
-                if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff}) {
+                if (static_cast<std::byte>(*one_shot_.reader_.position_) == std::byte{0xff}) {
                     indefinite_break end{};
-                    status = co_await ordinary(end);
+                    status = co_await one_shot(end);
                     if (status != status_code::success)
                         co_return status;
                     break;
@@ -824,9 +824,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         auto status = co_await available();
         if (status != status_code::success)
             co_return status;
-        if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xf6}) {
+        if (static_cast<std::byte>(*one_shot_.reader_.position_) == std::byte{0xf6}) {
             std::nullptr_t null{};
-            status = co_await ordinary(null);
+            status = co_await one_shot(null);
             if (status == status_code::success)
                 value.reset();
         } else {
@@ -838,10 +838,10 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         co_return status;
     }
 
-    // Lookahead uses the same ordinary decoder without committing the speculative header.
+    // Lookahead uses the same one-shot decoder without committing the speculative header.
     template <typename T> status_code peek_once(T &value) {
         require_retry<T>();
-        const auto result = ordinary_(value);
+        const auto result = one_shot_(value);
         rollback();
         return result ? status_code::success : result.error();
     }
@@ -879,7 +879,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         auto status = co_await available();
         if (status != status_code::success)
             co_return status;
-        const auto [major, info] = ordinary_.read_initial_byte();
+        const auto [major, info] = one_shot_.read_initial_byte();
         rollback();
         as_tag_any tag{};
         if (major == major_type::Tag) {
@@ -921,8 +921,8 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())
             status = co_await item(decoded);
         else if constexpr (IsTag<U> && !IsVariant<U> && !IsOptional<U>) {
-            if constexpr (codec_payload_has_customization<ordinary_type, U, payload_decode_context::tag>())
-                status = co_await contextual_ordinary<payload_decode_context::tag>(decoded);
+            if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::tag>())
+                status = co_await contextual_one_shot<payload_decode_context::tag>(decoded);
             else
                 status = co_await item(decoded);
         } else
@@ -934,22 +934,22 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     // Probe one codec at a time so missing overloads remain substitution failures
     // on MSVC instead of hard errors inside a pack-expanded requires expression.
-    template <typename Codec, typename T> static consteval bool ordinary_codec_leaf_override() {
+    template <typename Codec, typename T> static consteval bool one_shot_codec_leaf_override() {
         return requires(Codec &codec, T &value) { codec.decode(value); } ||
                requires(Codec &codec, T &value) { codec.decode(value, major_type{}, std::byte{}); };
     }
 
-    template <typename T> static consteval bool ordinary_leaf_override() {
-        return (ordinary_codec_leaf_override<Codecs<ordinary_type>, T>() || ...);
+    template <typename T> static consteval bool one_shot_leaf_override() {
+        return (one_shot_codec_leaf_override<Codecs<one_shot_type>, T>() || ...);
     }
 
     template <typename T> static consteval bool builtin_leaf() {
         if constexpr (!resumable_builtin_leaf<T> || has_explicit_hook<T>() || has_mixin<T>()) {
-            // Explicit hooks own dispatch without instantiating ordinary probes.
+            // Explicit hooks own dispatch without instantiating one-shot probes.
             return false;
         } else {
-            return !ordinary_leaf_override<T>() && !codec_payload_has_customization<ordinary_type, T, payload_decode_context::direct>() &&
-                   !codec_payload_has_customization<ordinary_type, T, payload_decode_context::header>();
+            return !one_shot_leaf_override<T>() && !codec_payload_has_customization<one_shot_type, T, payload_decode_context::direct>() &&
+                   !codec_payload_has_customization<one_shot_type, T, payload_decode_context::header>();
         }
     }
 
@@ -975,8 +975,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         } catch (...) { return resumable_exception_status(); }
     }
 
-    // Drain ordinary elements synchronously. A failed child leaves the logical
-    // count and destination at the last complete element, even after an exception.
+    // Drain leaf elements synchronously with the one-shot decoder. A failed child
+    // leaves the logical count and destination at the last complete element, even
+    // after an exception.
     template <typename T>
 #if defined(__GNUC__) && !defined(__clang__)
     // The cursor and byte counter form a scalar dependency chain. Packing their
@@ -984,7 +985,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     [[gnu::optimize("no-tree-slp-vectorize")]]
 #endif
     status_code segmented_leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
-        auto completed = ordinary_.reader_;
+        auto completed = one_shot_.reader_;
         // Standard arithmetic vectors have identical copy/move semantics. A
         // const scalar keeps the simple push_back path in this segmented loop.
         auto append_element = [&append](T &output, typename T::value_type &&element) {
@@ -994,9 +995,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 append(output, std::move(element));
         };
         const auto status = attempt_decode(
-            [&] { return decode_array_elements(ordinary_, value, append_element, remaining, [&] { completed = ordinary_.reader_; }); });
+            [&] { return decode_array_elements(one_shot_, value, append_element, remaining, [&] { completed = one_shot_.reader_; }); });
 
-        ordinary_.reader_ = completed;
+        one_shot_.reader_ = completed;
         commit();
         return status;
     }
@@ -1028,8 +1029,8 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 return decode_array_elements(contiguous, value, append, remaining, completed, available);
             });
 
-        resumable_source_access::consume_window(source_, ordinary_.reader_.position_, result.completed);
-        ordinary_.reader_.current_offset_ += result.completed;
+        resumable_source_access::consume_window(source_, one_shot_.reader_.position_, result.completed);
+        one_shot_.reader_.current_offset_ += result.completed;
         commit();
         return result.status;
     }
@@ -1038,7 +1039,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     // after the shared scalar loop has finished.
     template <typename T> status_code leaf_elements(T &value, appender<T> &append, std::uint64_t &remaining) {
         while (remaining != 0) {
-            const auto window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
+            const auto window = resumable_source_access::borrow_window(source_, one_shot_.reader_.position_);
             if (!window)
                 return segmented_leaf_elements(value, append, remaining);
 
@@ -1063,7 +1064,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     status_code indefinite_leaf_elements(T &value, appender<T> &append, std::uint64_t &count, bool &ended, std::uint64_t minimum,
                                          std::uint64_t maximum) {
         while (!ended) {
-            const auto  window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
+            const auto  window = resumable_source_access::borrow_window(source_, one_shot_.reader_.position_);
             status_code status;
             if (window && window->size() >= resumable_leaf_decode_size<typename T::value_type>()) {
                 const auto result = decode_leaf_window<resumable_leaf_decode_size<typename T::value_type>()>(
@@ -1071,18 +1072,18 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                         return decode_indefinite_array_elements<true>(contiguous, value, append, count, ended, minimum, maximum, completed,
                                                                       available);
                     });
-                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, result.completed);
-                ordinary_.reader_.current_offset_ += result.completed;
+                resumable_source_access::consume_window(source_, one_shot_.reader_.position_, result.completed);
+                one_shot_.reader_.current_offset_ += result.completed;
                 status = result.status;
             } else {
-                auto       completed = ordinary_.reader_;
+                auto       completed = one_shot_.reader_;
                 const auto start     = count;
                 status               = attempt_decode([&] {
                     return decode_indefinite_array_elements<true>(
-                        ordinary_, value, append, count, ended, minimum, maximum, [&] { completed = ordinary_.reader_; },
+                        one_shot_, value, append, count, ended, minimum, maximum, [&] { completed = one_shot_.reader_; },
                         [&] { return !window || count == start; });
                 });
-                ordinary_.reader_    = completed;
+                one_shot_.reader_    = completed;
             }
             commit();
             if (status != status_code::success)
@@ -1097,25 +1098,25 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         constexpr auto maximum_size =
             resumable_leaf_decode_size<typename T::key_type>() + resumable_leaf_decode_size<typename T::mapped_type>();
         while (!ended && (Indefinite || count != maximum)) {
-            const auto  window = resumable_source_access::borrow_window(source_, ordinary_.reader_.position_);
+            const auto  window = resumable_source_access::borrow_window(source_, one_shot_.reader_.position_);
             status_code status;
             if (window && window->size() >= maximum_size) {
                 const auto result = decode_leaf_window<maximum_size>(*window, [&](auto &contiguous, auto completed, auto available) {
                     return decode_map_elements<Indefinite, true>(contiguous, value, append, entry, key_complete, count, ended, minimum,
                                                                  maximum, completed, available);
                 });
-                resumable_source_access::consume_window(source_, ordinary_.reader_.position_, result.completed);
-                ordinary_.reader_.current_offset_ += result.completed;
+                resumable_source_access::consume_window(source_, one_shot_.reader_.position_, result.completed);
+                one_shot_.reader_.current_offset_ += result.completed;
                 status = result.status;
             } else {
-                auto       completed = ordinary_.reader_;
+                auto       completed = one_shot_.reader_;
                 const auto start     = count;
                 status               = attempt_decode([&] {
                     return decode_map_elements<Indefinite, true>(
-                        ordinary_, value, append, entry, key_complete, count, ended, minimum, maximum,
-                        [&] { completed = ordinary_.reader_; }, [&] { return !window || count == start; });
+                        one_shot_, value, append, entry, key_complete, count, ended, minimum, maximum,
+                        [&] { completed = one_shot_.reader_; }, [&] { return !window || count == start; });
                 });
-                ordinary_.reader_    = completed;
+                one_shot_.reader_    = completed;
             }
             commit();
             if (status != status_code::success)
@@ -1147,7 +1148,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             std::conditional_t<IsTextString<T>, as_text_any,
                                std::conditional_t<IsBinaryString<T>, as_bstr_any, std::conditional_t<IsMap<T>, as_map_any, as_array_any>>>;
         header_type header{};
-        auto        status = co_await ordinary(header);
+        auto        status = co_await one_shot(header);
         if (status != status_code::success)
             co_return status;
         if (require_indefinite && !header.indefinite) {
@@ -1210,20 +1211,20 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 if (status != status_code::success)
                     co_return status;
             }
-            if (header.indefinite && static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff}) {
+            if (header.indefinite && static_cast<std::byte>(*one_shot_.reader_.position_) == std::byte{0xff}) {
                 indefinite_break end{};
-                status = co_await ordinary(end);
+                status = co_await one_shot(end);
                 if (status != status_code::success)
                     co_return status;
                 co_return count < minimum ? status_code::size_limit_exceeded : status_code::success;
             }
             if constexpr (IsString<T>) {
-                const auto initial        = static_cast<std::byte>(*ordinary_.reader_.position_);
+                const auto initial        = static_cast<std::byte>(*one_shot_.reader_.position_);
                 const auto expected_major = IsTextString<T> ? std::byte{0x60} : std::byte{0x40};
                 if ((initial & std::byte{0xe0}) != expected_major || (initial & std::byte{0x1f}) == std::byte{31})
                     co_return status_code::malformed_structure;
                 header_type chunk{};
-                status = co_await ordinary(chunk);
+                status = co_await one_shot(chunk);
                 if (status != status_code::success)
                     co_return status;
                 if (chunk.indefinite)
@@ -1249,7 +1250,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                         status = co_await available();
                         if (status != status_code::success)
                             co_return status;
-                        if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff})
+                        if (static_cast<std::byte>(*one_shot_.reader_.position_) == std::byte{0xff})
                             co_return status_code::malformed_structure;
                     }
                     status = header.indefinite ? co_await header_item(mapped) : co_await item(mapped);

@@ -34,7 +34,7 @@ template <typename... T> inline constexpr bool resumable_encode_wrap_array<wrap_
 template <typename Source> inline constexpr bool  resumable_bounded_output_buffer                         = false;
 template <typename Storage> inline constexpr bool resumable_bounded_output_buffer<output_buffer<Storage>> = !GrowableOutputStorage<Storage>;
 
-// The bounded leaf loop shares the ordinary encoder's cursor. Only its unsigned
+// The bounded leaf loop shares the one-shot encoder's cursor. Only its unsigned
 // primitive path needs forced inlining and one completed-position publication.
 template <typename Options> struct resumable_leaf_encoder : encoder<std::span<std::byte>, Options> {
     using base_type = encoder<std::span<std::byte>, Options>;
@@ -43,18 +43,18 @@ template <typename Options> struct resumable_leaf_encoder : encoder<std::span<st
 
   private:
     struct unsigned_appender {
-        appender<std::span<std::byte>> &ordinary;
+        appender<std::span<std::byte>> &one_shot;
 
-        constexpr void operator()(std::span<std::byte> &output, std::byte value) { ordinary(output, value); }
+        constexpr void operator()(std::span<std::byte> &output, std::byte value) { one_shot(output, value); }
 
         template <typename... Bytes> constexpr void multi_append(std::span<std::byte> &output, Bytes... values) {
             static_assert(sizeof...(Bytes) > 1 && ((sizeof(Bytes) == 1) && ...));
-            ordinary.ensure_capacity(output, sizeof...(Bytes));
+            one_shot.ensure_capacity(output, sizeof...(Bytes));
 
-            auto *const destination = output.data() + ordinary.head_;
+            auto *const destination = output.data() + one_shot.head_;
             std::size_t index{};
             ((destination[index++] = values), ...);
-            ordinary.head_ += sizeof...(Bytes);
+            one_shot.head_ += sizeof...(Bytes);
         }
     };
 
@@ -72,25 +72,25 @@ template <typename Options> struct resumable_leaf_encoder : encoder<std::span<st
 template <typename Source, typename Options, template <typename> typename... Codecs>
 class resumable_encode_context : public Codecs<resumable_encode_context<Source, Options, Codecs...>>... {
     using self_type = resumable_encode_context;
-    using ordinary_type =
+    using one_shot_type =
         encoder<Source, Options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder, cbor_variant_encoder, Codecs...>;
     using mixins = std::tuple<Codecs<self_type>...>;
 
     Source         &source_;
     resume_control &control_;
-    ordinary_type   ordinary_;
+    one_shot_type   one_shot_;
 
   public:
     using source_type                           = Source;
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_output;
 
-    resumable_encode_context(Source &source, resume_control &control) : source_(source), control_(control), ordinary_(source) {}
+    resumable_encode_context(Source &source, resume_control &control) : source_(source), control_(control), one_shot_(source) {}
 
     Source        &source() noexcept { return source_; }
     std::size_t    offset() const { return source_.committed_position().offset(); }
     auto           remaining_output() const { return source_.remaining_output(); }
-    ordinary_type &ordinary() noexcept { return ordinary_; }
+    one_shot_type &one_shot() noexcept { return one_shot_; }
     auto           wait() noexcept { return control_.wait(); }
     bool           closed() const { return source_.closed(); }
     void           commit() { source_.commit(); }
@@ -98,11 +98,11 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     // A complete normal call is the retry boundary, including nested customizations.
     // Its writes stay tentative until the whole call succeeds.
-    template <typename T> resumable_task<status_code> ordinary(T &value) {
-        static_assert(resumable_encode_retry_allowed<ordinary_type, T, Codecs<ordinary_type>...>(),
-                      "ordinary encoding requires a resumable hook or resumable_retry_traits encode opt-in");
+    template <typename T> resumable_task<status_code> one_shot(T &value) {
+        static_assert(resumable_encode_retry_allowed<one_shot_type, T, Codecs<one_shot_type>...>(),
+                      "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in");
         return attempt([this, &value] {
-            const auto result = ordinary_(value);
+            const auto result = one_shot_(value);
             return result ? status_code::success : result.error();
         });
     }
@@ -181,7 +181,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             if (!pending)
                 pending = static_cast<std::byte>(*current);
             auto write = [this, &pending] {
-                ordinary_.appender_(source_, *pending);
+                one_shot_.appender_(source_, *pending);
                 return status_code::success;
             };
             const auto status = write_once(write);
@@ -243,20 +243,20 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     resumable_task<status_code> header(std::uint64_t size, std::byte major) {
         return attempt([this, size, major] {
             // A bounded empty adapter cannot write even the first header byte.
-            // Growable and custom sources retain their ordinary write path.
+            // Growable and custom output buffers retain their one-shot write path.
             if constexpr (resumable_bounded_output_buffer<Source>) {
                 if (const auto window = source_.borrow_window(); window && window->empty())
                     return status_code::incomplete;
             }
 
-            ordinary_.encode_major_and_size(size, major);
+            one_shot_.encode_major_and_size(size, major);
             return status_code::success;
         });
     }
 
     resumable_task<status_code> byte(std::byte value) {
         return attempt([this, value] {
-            ordinary_.appender_(source_, value);
+            one_shot_.appender_(source_, value);
             return status_code::success;
         });
     }
@@ -321,21 +321,21 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     }
 
     template <explicit_hook_type Kind, typename T> resumable_task<status_code> explicit_hook(T &value) {
-        // Member and ADL hooks keep the ordinary class metadata tag convention.
+        // Member and ADL hooks keep the one-shot class metadata tag convention.
         // Mixin hooks implement complete items and manage their own tags.
         if constexpr (IsClassWithTagOverload<std::remove_cvref_t<T>>) {
             auto        tag = get_major_6_tag_from_class(value);
             status_code status;
             if constexpr (is_customization_tag_wrapper_v<std::remove_cvref_t<decltype(tag)>>) {
-                static_assert(resumable_encode_retry_allowed<ordinary_type, decltype(tag), Codecs<ordinary_type>...>(),
-                              "ordinary encoding requires a resumable hook or resumable_retry_traits encode opt-in");
+                static_assert(resumable_encode_retry_allowed<one_shot_type, decltype(tag), Codecs<one_shot_type>...>(),
+                              "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in");
                 status = co_await attempt([this, &tag] {
-                    const auto result = ordinary_(std::move(tag));
+                    const auto result = one_shot_(std::move(tag));
                     return result ? status_code::success : result.error();
                 });
             } else {
                 auto normalized = dynamic_tag<std::uint64_t>{static_cast<std::uint64_t>(std::move(tag))};
-                status          = co_await ordinary(normalized);
+                status          = co_await one_shot(normalized);
             }
             if (status != status_code::success)
                 co_return status;
@@ -358,9 +358,9 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             return explicit_hook<hook>(value);
         else if constexpr (has_mixin<T>())
             return mixin(value);
-        else if constexpr (codec_payload_has_customization<ordinary_type, U, payload_decode_context::direct>())
-            // Explicit ordinary customizations precede every structural category.
-            return ordinary(value); // NOLINT(bugprone-branch-clone)
+        else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::direct>())
+            // Explicit one-shot customizations precede every structural category.
+            return one_shot(value); // NOLINT(bugprone-branch-clone)
         else if constexpr (IsAnyBoundedSizeWrapper<U>) {
             if constexpr (IsBoundedSizeWrapper<U>)
                 return bounded(value.value(), U::min_size, U::max_size);
@@ -375,7 +375,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             return named_map(value.value_);
 #endif
         else if constexpr (is_static_tag_t<U>::value || is_dynamic_tag_t<U> || IsAnyHeader<U>)
-            return ordinary(value);
+            return one_shot(value);
         else if constexpr (IsArrayRangeWrapper<U>)
             return container<false>(value.range_);
         else if constexpr (IsMapRangeWrapper<U>)
@@ -399,7 +399,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         else if constexpr (IsAggregate<U>)
             return aggregate(value);
         else
-            return ordinary(value);
+            return one_shot(value);
     }
 
     template <typename Tuple> static auto tuple_references(Tuple &value) {
@@ -424,7 +424,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     }
 
     template <typename T> resumable_task<status_code> tagged_tuple(T &value) {
-        const auto status = co_await ordinary(std::get<0>(value));
+        const auto status = co_await one_shot(std::get<0>(value));
         if (status != status_code::success)
             co_return status;
         co_return co_await group(tuple_tail(value));
@@ -443,11 +443,11 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         auto values = to_tuple(value);
         if constexpr (HasInlineTag<U>) {
             auto       tag    = static_tag<U::cbor_tag>{};
-            const auto status = co_await ordinary(tag);
+            const auto status = co_await one_shot(tag);
             if (status != status_code::success)
                 co_return status;
         } else if constexpr (IsTag<U>) {
-            const auto status = co_await ordinary(std::get<0>(values));
+            const auto status = co_await one_shot(std::get<0>(values));
             if (status != status_code::success)
                 co_return status;
         }
@@ -564,7 +564,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         if (value.has_value())
             return item(*value);
         return attempt([this] {
-            const auto result = ordinary_(nullptr);
+            const auto result = one_shot_(nullptr);
             return result ? status_code::success : result.error();
         });
     }
@@ -610,14 +610,14 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             return false;
         } else {
             if constexpr (explicit_hook_kind<element>() != explicit_hook_type::none || has_mixin<element>()) {
-                // A bypassed ordinary overload may have a deduced return type whose
+                // A bypassed one-shot overload may have a deduced return type whose
                 // body is intentionally invalid for this context. Do not probe it.
                 return false;
             } else {
-                // Include mutable-only codec overloads, even though the ordinary
+                // Include mutable-only codec overloads, even though the one-shot
                 // array loop itself binds every source element as const.
-                constexpr bool ordinary_override = (requires(Codecs<ordinary_type> &codec, element &item) { codec.encode(item); } || ...);
-                return !ordinary_override && !codec_payload_has_customization<ordinary_type, value, payload_decode_context::direct>();
+                constexpr bool one_shot_override = (requires(Codecs<one_shot_type> &codec, element &item) { codec.encode(item); } || ...);
+                return !one_shot_override && !codec_payload_has_customization<one_shot_type, value, payload_decode_context::direct>();
             }
         }
     }
@@ -643,7 +643,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         auto        completed = source_.position();
         status_code status;
         try {
-            encode_array_elements(ordinary_, current, last, [&] { completed = source_.position(); }, available);
+            encode_array_elements(one_shot_, current, last, [&] { completed = source_.position(); }, available);
             status = status_code::success;
 #if defined(__clang__) && defined(_MSC_VER) && __clang_major__ <= 22
         } catch (...) {
@@ -673,7 +673,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         auto        encode_window = [&](Iterator &position) {
             try {
                 // Capacity for the native type's largest representation guarantees
-                // that the ordinary primitive finishes without a partial write.
+                // that the one-shot primitive finishes without a partial write.
                 encode_array_elements(contiguous, position, window_last, encoded_element_complete{},
                                       [&] { return contiguous.appender_.head_ <= last_start; });
                 return status_code::success;
@@ -741,7 +741,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
                 auto completed = source_.position();
                 try {
                     encode_map_elements(
-                        ordinary_, current, last, key_complete, [&] { completed = source_.position(); },
+                        one_shot_, current, last, key_complete, [&] { completed = source_.position(); },
                         [&, first = true]() mutable { return !window || std::exchange(first, false); });
                 } catch (const encode_status_exception &error) { status = error.status; } catch (...) {
                     status = resumable_exception_status();

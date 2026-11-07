@@ -107,7 +107,7 @@ template <typename Self> struct resumable_bool_codec : codec::base<Self> {
 
     resumable_task<status_code> resumable_decode(bool &value) {
         ++bool_hook_calls::count;
-        const auto status = co_await static_cast<Self &>(*this).ordinary(value);
+        const auto status = co_await static_cast<Self &>(*this).one_shot(value);
         if (status == status_code::success)
             value = !value;
         co_return status;
@@ -130,7 +130,7 @@ template <typename Self> struct committed_rejecting_bool_codec : codec::base<Sel
 
     resumable_task<status_code> resumable_decode(bool &value) {
         ++bool_hook_calls::count;
-        const auto status = co_await static_cast<Self &>(*this).ordinary(value);
+        const auto status = co_await static_cast<Self &>(*this).one_shot(value);
         co_return status == status_code::success ? status_code::no_match_for_tag_simple_on_buffer : status;
     }
 };
