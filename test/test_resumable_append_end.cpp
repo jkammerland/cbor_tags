@@ -28,7 +28,7 @@ using converting_deque = std::deque<unsigned char>;
 TEST_SUITE("resumable/source") {
     TEST_CASE_TEMPLATE("growable append preserves prefix and zero writes", Storage, byte_vector, byte_deque, converting_deque) {
         auto storage = append_end_prefix<Storage>();
-        auto source  = cbor::tags::make_output_source(storage);
+        auto source  = cbor::tags::make_output_buffer(storage);
         CHECK(source.size() == 2);
         CHECK(source.committed_position().offset() == 2);
         CHECK(source.write({}) == 0);
@@ -53,7 +53,7 @@ TEST_SUITE("resumable/source") {
         CHECK(source.committed_position().offset() == 39);
 
         Storage empty;
-        auto    fresh = cbor::tags::make_output_source(empty);
+        auto    fresh = cbor::tags::make_output_buffer(empty);
         CHECK(fresh.write({}) == 0);
         CHECK(empty.empty());
         const std::array one{std::byte{7}};
@@ -65,7 +65,7 @@ TEST_SUITE("resumable/source") {
 
     TEST_CASE_TEMPLATE("growable rollback overwrites then appends only the remainder", Storage, byte_vector, byte_deque, converting_deque) {
         auto             storage    = append_end_prefix<Storage>();
-        auto             source     = cbor::tags::make_output_source(storage);
+        auto             source     = cbor::tags::make_output_buffer(storage);
         const auto       checkpoint = source.position();
         const std::array initial{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
         REQUIRE(source.write(initial) == 4);
@@ -106,7 +106,7 @@ TEST_SUITE("resumable/source") {
 
     TEST_CASE_TEMPLATE("closed growable output permits overwrite but never growth", Storage, byte_vector, byte_deque, converting_deque) {
         auto             storage    = append_end_prefix<Storage>();
-        auto             source     = cbor::tags::make_output_source(storage);
+        auto             source     = cbor::tags::make_output_buffer(storage);
         const auto       checkpoint = source.position();
         const std::array initial{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
         REQUIRE(source.write(initial) == 4);
@@ -148,7 +148,7 @@ TEST_SUITE("resumable/source") {
 
     TEST_CASE("partial converting append recovers through explicit refresh and restore") {
         auto       storage    = append_end_prefix<partially_throwing_bytes>();
-        auto       source     = cbor::tags::make_output_source(storage);
+        auto       source     = cbor::tags::make_output_buffer(storage);
         const auto checkpoint = source.position();
 
         // Fail after physical growth, before the source publishes the new extent.

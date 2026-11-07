@@ -247,7 +247,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
                 chunks.reserve(3);
 
             chunks.emplace_back(capacity);
-            auto source    = make_output_source(chunks);
+            auto source    = make_output_buffer(chunks);
             auto encoder   = make_resumable_encoder(source);
             auto operation = encoder(expected);
             REQUIRE_FALSE(operation.done());
@@ -576,7 +576,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(actual.values() == expected.values());
     }
 
-    TEST_CASE_TEMPLATE("public output source publishes each byte once through partial drains", Ring, resumable_test::ring_source<true, 11>,
+    TEST_CASE_TEMPLATE("public output buffer publishes each byte once through partial drains", Ring, resumable_test::ring_source<true, 11>,
                        resumable_test::ring_source<true, 11, true>) {
         const std::vector<std::string> expected{"first", std::string(96, 'w'), "last"};
         Ring                           sink;
@@ -607,7 +607,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(decoder.tell() == delivered.end());
     }
 
-    TEST_CASE_TEMPLATE("public output source retains a partially written typed element", Ring, resumable_test::ring_source<true, 7>,
+    TEST_CASE_TEMPLATE("public output buffer retains a partially written typed element", Ring, resumable_test::ring_source<true, 7>,
                        resumable_test::ring_source<true, 7, true>) {
         const rfc8746::typed_array<std::uint32_t> expected{std::vector<std::uint32_t>{1, 24, 65536, 123456789}};
         Ring                                      sink;

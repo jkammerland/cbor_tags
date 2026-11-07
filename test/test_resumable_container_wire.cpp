@@ -374,7 +374,7 @@ TEST_SUITE("cbor_wire/resumable") {
                 CAPTURE(cut);
                 std::vector<std::byte> bytes(wire.size());
                 output_chunks          storage;
-                auto                   sink      = make_output_source(storage);
+                auto                   sink      = make_output_buffer(storage);
                 auto                   operation = make_resumable_encoder(sink)(value);
                 storage.emplace_back(std::span{bytes}.first(cut));
                 operation.resume();

@@ -46,7 +46,7 @@ int main() {
     assert(decoder.tell() == committed.end());
 
     // Keep the descriptors and storage alive. Publishing does not authorize
-    // pop_front(); reclaiming capacity needs a custom source (example 46).
+    // pop_front(); reclaiming capacity needs a custom output buffer (example 46).
 
     std::cout << "received: " << received << '\n';
     std::cout << "encoded bytes: " << operation.committed_bytes() << '\n';

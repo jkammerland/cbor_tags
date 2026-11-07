@@ -272,7 +272,7 @@ TEST_SUITE("cbor_wire/resumable") {
             CAPTURE(chunk_size);
             std::array<std::byte, 22> bytes{};
             output_chunks             storage;
-            auto                      sink      = make_output_source(storage);
+            auto                      sink      = make_output_buffer(storage);
             auto                      operation = make_resumable_encoder(sink)(values);
             storage.emplace_back(std::span<std::byte>{});
             operation.resume();
@@ -295,7 +295,7 @@ TEST_SUITE("cbor_wire/resumable") {
             CAPTURE(partial);
             std::vector<std::byte> bytes(2 + partial);
             output_chunks          storage;
-            auto                   sink      = make_output_source(storage);
+            auto                   sink      = make_output_buffer(storage);
             auto                   operation = make_resumable_encoder(sink)(values);
             storage.emplace_back(bytes);
             operation.resume();
@@ -1344,7 +1344,7 @@ TEST_SUITE("cbor_wire/resumable") {
         int                      tagged = 9;
         std::array<std::byte, 7> output{};
         output_chunks            storage;
-        auto                     sink      = make_output_source(storage);
+        auto                     sink      = make_output_buffer(storage);
         auto                     operation = make_resumable_encoder(sink)(empty, single, pair, tag, tagged);
         storage.emplace_back(std::span{output}.first(3));
         operation.resume();

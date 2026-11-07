@@ -22,7 +22,7 @@ namespace {
 using input_storage  = std::list<std::span<const std::byte>>;
 using output_storage = std::list<std::span<std::byte>>;
 using input_type     = decltype(ct::make_input_source(std::declval<input_storage &>()));
-using output_type    = decltype(ct::make_output_source(std::declval<output_storage &>()));
+using output_type    = decltype(ct::make_output_buffer(std::declval<output_storage &>()));
 
 static_assert(ct::CborInputBuffer<input_type>);
 static_assert(std::ranges::bidirectional_range<const input_type>);
@@ -32,7 +32,7 @@ static_assert(ct::CborOutputBuffer<output_type>);
 static_assert(std::ranges::sized_range<const output_type>);
 
 static_assert(ct::ResumableInputSource<input_type>);
-static_assert(ct::ResumableOutputSource<output_type>);
+static_assert(ct::ResumableOutputBuffer<output_type>);
 
 template <typename Range> auto bytes_of(Range &&range) {
     return std::vector<std::byte>(std::ranges::begin(range), std::ranges::end(range));
@@ -132,7 +132,7 @@ template <typename Storage> void check_input_windows(Storage &storage, std::span
 }
 
 template <typename Storage> void check_output_windows(Storage &storage, std::span<const std::byte> expected) {
-    auto source = ct::make_output_source(storage);
+    auto source = ct::make_output_buffer(storage);
     REQUIRE_FALSE(expected.empty());
 
     std::size_t offset{};
@@ -166,7 +166,7 @@ TEST_SUITE("resumable/source") {
     TEST_CASE("zero consumption preserves uninitialized empty input and output cursors") {
         std::vector<std::span<std::byte>> storage;
         auto                              input      = ct::make_input_source(storage);
-        auto                              output     = ct::make_output_source(storage);
+        auto                              output     = ct::make_output_buffer(storage);
         auto                              cursor     = input.begin();
         const auto                        checkpoint = output.position();
         input.consume_window(cursor, 0);
@@ -365,7 +365,7 @@ TEST_SUITE("resumable/source") {
     TEST_CASE("output windows rebind a borrowed vector after reserve only") {
         std::vector<std::byte>                                     bytes(4);
         std::vector<std::ranges::ref_view<std::vector<std::byte>>> storage{std::views::all(bytes)};
-        auto                                                       source = ct::make_output_source(storage);
+        auto                                                       source = ct::make_output_buffer(storage);
         auto                                                       window = source.borrow_window();
         REQUIRE(window->data() == bytes.data());
         window->front() = std::byte{1};
@@ -457,7 +457,7 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 4>          original{};
         std::array<std::byte, 4>          replacement{};
         std::vector<std::span<std::byte>> storage{std::span(original).first(2)};
-        auto                              source = ct::make_output_source(storage);
+        auto                              source = ct::make_output_buffer(storage);
         auto                              window = source.borrow_window();
         window->front()                          = std::byte{1};
         source.consume_window(1);
@@ -545,7 +545,7 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 2> second{};
         std::array<std::byte, 1> last{};
         Storage                  storage{{}, std::span(first), {}};
-        auto                     source = ct::make_output_source(storage);
+        auto                     source = ct::make_output_buffer(storage);
         auto                     window = source.borrow_window();
         REQUIRE(window->size() == first.size());
         (*window)[0] = std::byte{1};
@@ -831,7 +831,7 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 2> first{};
         std::array<std::byte, 3> second{};
         output_storage           storage;
-        auto                     source = ct::make_output_source(storage);
+        auto                     source = ct::make_output_buffer(storage);
         storage.emplace_back(first);
         source.refresh();
         auto checkpoint = source.position();
@@ -855,11 +855,11 @@ TEST_SUITE("resumable/source") {
         CHECK(std::ranges::distance(source.remaining_output()) == 1);
     }
 
-    TEST_CASE("normal codecs operate on typed input and output sources") {
+    TEST_CASE("normal codecs operate on typed input and output buffers") {
         std::deque<unsigned char>                                   first(2);
         std::deque<unsigned char>                                   second(32);
         std::list<std::ranges::ref_view<std::deque<unsigned char>>> storage;
-        auto                                                        output = ct::make_output_source(storage);
+        auto                                                        output = ct::make_output_buffer(storage);
         storage.emplace_back(first);
         storage.emplace_back(second);
         output.refresh();
@@ -884,7 +884,7 @@ TEST_SUITE("resumable/source") {
         std::list<std::byte> second(2);
         std::size_t          increments{};
         unsized_storage      storage;
-        auto                 source = ct::make_output_source(storage);
+        auto                 source = ct::make_output_buffer(storage);
         storage.emplace_back(unsized_chunk{counted_iterator{first.begin(), &increments}, counted_iterator{first.end(), &increments}});
         storage.emplace_back(unsized_chunk{counted_iterator{second.begin(), &increments}, counted_iterator{second.end(), &increments}});
         source.refresh();
@@ -908,7 +908,7 @@ TEST_SUITE("resumable/source") {
         std::array<std::byte, 2>          first{};
         std::array<std::byte, 16>         second{};
         std::vector<std::span<std::byte>> storage;
-        auto                              output = ct::make_output_source(storage);
+        auto                              output = ct::make_output_buffer(storage);
         storage.emplace_back(first);
         output.refresh();
         const auto checkpoint = output.position();

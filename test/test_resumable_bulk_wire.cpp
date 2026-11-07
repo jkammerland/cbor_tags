@@ -90,15 +90,15 @@ class named_helper_source {
 static_assert(ct::ResumableInputSource<named_helper_source>);
 
 // A transport may accept a prefix even when its backing container can grow.
-class bounded_write_source : public ct::output_source<std::vector<std::byte>> {
+class bounded_write_source : public ct::output_buffer<std::vector<std::byte>> {
   public:
-    using output_source::output_source;
+    using output_buffer::output_buffer;
 
     std::optional<std::span<std::byte>> borrow_window() { return std::nullopt; }
     std::size_t                         write(std::span<const std::byte> bytes) {
         if (allowance == 0)
             ++writes_after_exhaustion;
-        const auto count = output_source::write(bytes.first(std::min(bytes.size(), allowance)));
+        const auto count = output_buffer::write(bytes.first(std::min(bytes.size(), allowance)));
         allowance -= count;
         return count;
     }
@@ -107,16 +107,16 @@ class bounded_write_source : public ct::output_source<std::vector<std::byte>> {
     std::size_t writes_after_exhaustion{};
 };
 
-static_assert(ct::ResumableOutputSource<bounded_write_source>);
+static_assert(ct::ResumableOutputBuffer<bounded_write_source>);
 
 // Optional windows do not replace a custom source's write contract.
 class custom_empty_window_source {
-    ct::output_source<std::vector<std::byte>> source_;
+    ct::output_buffer<std::vector<std::byte>> source_;
 
   public:
     using value_type    = std::byte;
     using size_type     = std::size_t;
-    using position_type = ct::output_source<std::vector<std::byte>>::position_type;
+    using position_type = ct::output_buffer<std::vector<std::byte>>::position_type;
 
     explicit custom_empty_window_source(std::vector<std::byte> &storage) : source_(storage) {}
     auto begin() const { return source_.begin(); }
@@ -142,21 +142,21 @@ class custom_empty_window_source {
     std::size_t writes{};
 };
 
-class derived_empty_window_source : public ct::output_source<std::vector<std::byte>> {
+class derived_empty_window_source : public ct::output_buffer<std::vector<std::byte>> {
   public:
-    using output_source::output_source;
+    using output_buffer::output_buffer;
 
     std::optional<std::span<std::byte>> borrow_window() { return std::span<std::byte>{}; }
     std::size_t                         write(std::span<const std::byte> bytes) {
         ++writes;
-        return output_source::write(bytes);
+        return output_buffer::write(bytes);
     }
 
     std::size_t writes{};
 };
 
-static_assert(ct::ResumableOutputSource<custom_empty_window_source>);
-static_assert(ct::ResumableOutputSource<derived_empty_window_source>);
+static_assert(ct::ResumableOutputBuffer<custom_empty_window_source>);
+static_assert(ct::ResumableOutputBuffer<derived_empty_window_source>);
 
 // Count native traversal separately from the adapter's offsets and boundaries.
 struct node_read_counts {
@@ -259,7 +259,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         std::array<std::byte, 26> output;
         output.fill(std::byte{0xcc});
         std::deque<std::span<std::byte>> chunks;
-        auto                             source    = ct::make_output_source(chunks);
+        auto                             source    = ct::make_output_buffer(chunks);
         auto                             encoder   = ct::make_resumable_encoder(source);
         auto                             operation = encoder(value);
 
@@ -316,7 +316,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         for (const bool close_before_start : {false, true}) {
             CAPTURE(close_before_start);
             std::deque<std::span<std::byte>> chunks;
-            auto                             source = ct::make_output_source(chunks);
+            auto                             source = ct::make_output_buffer(chunks);
             if (close_before_start)
                 source.close();
             auto             encoder = ct::make_resumable_encoder(source);
@@ -599,7 +599,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         for (std::size_t cut = 0; cut != expected.size(); ++cut) {
             CAPTURE(cut);
             std::deque<std::deque<std::byte>> chunks{std::deque<std::byte>(cut, std::byte{0xcc})};
-            auto                              source    = ct::make_output_source(chunks);
+            auto                              source    = ct::make_output_buffer(chunks);
             auto                              encoder   = ct::make_resumable_encoder(source);
             auto                              operation = encoder(value);
             REQUIRE(operation.state() == ct::resume_state::need_output);

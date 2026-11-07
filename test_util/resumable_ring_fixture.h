@@ -185,11 +185,11 @@ template <bool Output, std::size_t Capacity, bool Windows = false> class ring_so
 };
 
 static_assert(cbor::tags::ResumableInputSource<ring_source<false, 11>>);
-static_assert(cbor::tags::ResumableOutputSource<ring_source<true, 11>>);
+static_assert(cbor::tags::ResumableOutputBuffer<ring_source<true, 11>>);
 static_assert(std::ranges::sized_range<const ring_source<false, 11>>);
 static_assert(!std::ranges::contiguous_range<ring_source<false, 11>>);
 static_assert(cbor::tags::ResumableInputSource<ring_source<false, 11, true>>);
-static_assert(cbor::tags::ResumableOutputSource<ring_source<true, 11, true>>);
+static_assert(cbor::tags::ResumableOutputBuffer<ring_source<true, 11, true>>);
 static_assert(cbor::tags::detail::HasInputWindow<ring_source<false, 11, true>, ring_source<false, 11, true>::iterator>);
 static_assert(!cbor::tags::detail::HasInputWindow<ring_source<false, 11>, ring_source<false, 11>::iterator>);
 static_assert(cbor::tags::detail::HasOutputWindow<ring_source<true, 11, true>>);

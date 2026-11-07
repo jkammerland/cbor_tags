@@ -490,7 +490,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         REQUIRE(make_encoder(reference)(expected));
         std::vector<std::byte>          bytes(reference.size());
         output_chunks                   storage;
-        auto                            sink      = make_output_source(storage);
+        auto                            sink      = make_output_buffer(storage);
         auto                            operation = std::optional{make_resumable_encoder(sink)(expected)};
         std::optional<operation_result> result;
         auto                            consumer = await_result(*operation, result, [&] { operation.reset(); });

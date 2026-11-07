@@ -31,8 +31,8 @@ template <typename T> inline constexpr bool    resumable_encode_wrap_array      
 template <typename... T> inline constexpr bool resumable_encode_wrap_array<wrap_as_array<T...>> = true;
 
 // Only exact bounded built-in adapters need the empty-header preflight.
-template <typename Source> inline constexpr bool  resumable_bounded_output_source                         = false;
-template <typename Storage> inline constexpr bool resumable_bounded_output_source<output_source<Storage>> = !GrowableOutputStorage<Storage>;
+template <typename Source> inline constexpr bool  resumable_bounded_output_buffer                         = false;
+template <typename Storage> inline constexpr bool resumable_bounded_output_buffer<output_buffer<Storage>> = !GrowableOutputStorage<Storage>;
 
 // The bounded leaf loop shares the ordinary encoder's cursor. Only its unsigned
 // primitive path needs forced inlining and one completed-position publication.
@@ -244,7 +244,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         return attempt([this, size, major] {
             // A bounded empty adapter cannot write even the first header byte.
             // Growable and custom sources retain their ordinary write path.
-            if constexpr (resumable_bounded_output_source<Source>) {
+            if constexpr (resumable_bounded_output_buffer<Source>) {
                 if (const auto window = source_.borrow_window(); window && window->empty())
                     return status_code::incomplete;
             }

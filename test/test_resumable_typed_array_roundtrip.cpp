@@ -102,7 +102,7 @@ template <typename Array, typename EncodeValue> void check_typed_array_encode_sp
         CAPTURE(cut);
         std::vector<std::byte> bytes(size);
         output_chunks          chunks;
-        auto                   sink      = make_output_source(chunks);
+        auto                   sink      = make_output_buffer(chunks);
         auto                   operation = make_resumable_encoder<codec::typed_array>(sink)(value);
         chunks.emplace_back(std::span{bytes}.first(cut));
         operation.resume();
@@ -251,7 +251,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         auto check_output = [&](auto make_operation) {
             std::vector<std::byte> output(size);
             output_chunks          chunks;
-            auto                   sink      = make_output_source(chunks);
+            auto                   sink      = make_output_buffer(chunks);
             auto                   operation = make_operation(sink);
             REQUIRE_FALSE(operation.done());
             for (auto &byte : output) {
@@ -299,7 +299,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         using output_chunk = std::ranges::subrange<std::list<std::byte>::iterator>;
         static_assert(!std::ranges::sized_range<output_chunk>);
         std::list<output_chunk> output_storage;
-        auto                    sink    = make_output_source(output_storage);
+        auto                    sink    = make_output_buffer(output_storage);
         auto                    encoder = make_resumable_encoder<codec::typed_array>(sink)(expected);
         for (auto iterator = output.begin(); iterator != output.end(); ++iterator) {
             output_storage.emplace_back(output_chunk{iterator, std::next(iterator)});
@@ -376,7 +376,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
 
         std::vector<std::byte> output(reference.size());
         output_chunks          output_storage;
-        auto                   sink    = make_output_source(output_storage);
+        auto                   sink    = make_output_buffer(output_storage);
         auto                   encoder = make_resumable_encoder<codec::typed_array>(sink)(expected);
         for (auto &byte : output) {
             output_storage.emplace_back(std::span{&byte, 1});
@@ -396,7 +396,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
 
         std::vector<std::byte> output(reference.size());
         output_chunks          output_storage;
-        auto                   sink    = make_output_source(output_storage);
+        auto                   sink    = make_output_buffer(output_storage);
         auto                   encoder = make_resumable_encoder<typed_array_override, codec::typed_array>(sink)(expected);
         output_storage.emplace_back(std::span{output});
         encoder.close_output();

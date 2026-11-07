@@ -52,7 +52,7 @@ bool encode_resumable(const T &value, bytes &encoded, std::size_t chunk_size) {
 #ifdef CBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY
     auto encoder = ct::make_resumable_encoder<Codecs...>(descriptors);
 #else
-    auto sink    = ct::make_output_source(descriptors);
+    auto sink    = ct::make_output_buffer(descriptors);
     auto encoder = ct::make_resumable_encoder<Codecs...>(sink);
 #endif
     auto operation = encoder(value);

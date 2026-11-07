@@ -57,7 +57,7 @@ concept ResumableInputSource =
 // means temporary exhaustion; ordinary codec adaptation is library-owned.
 // Optional borrow_window()/consume_window(n) expose writable constructed bytes.
 template <typename Source>
-concept ResumableOutputSource =
+concept ResumableOutputBuffer =
     ResumableSource<Source> && std::ranges::forward_range<const Source> &&
     requires(Source &source, const Source &constant, typename Source::position_type position, std::span<const std::byte> bytes) {
         typename Source::value_type;

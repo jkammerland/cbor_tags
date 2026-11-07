@@ -231,7 +231,7 @@ template <bool Output, std::size_t Capacity> class ring_source {
 };
 
 static_assert(ct::ResumableInputSource<ring_source<false, 11>>);
-static_assert(ct::ResumableOutputSource<ring_source<true, 11>>);
+static_assert(ct::ResumableOutputBuffer<ring_source<true, 11>>);
 static_assert(std::ranges::sized_range<const ring_source<false, 11>>);
 static_assert(!std::ranges::contiguous_range<const ring_source<false, 11>>);
 static_assert(!std::ranges::contiguous_range<const ring_source<true, 11>>);

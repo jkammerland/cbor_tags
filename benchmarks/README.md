@@ -201,14 +201,14 @@ cmake --build build/resumable-bench \
 ctest --test-dir build/resumable-bench -R 'resumable_(ordinary_throughput|throughput|latency|allocation|storage)' --output-on-failure
 ```
 
-The default uses explicit input/output sources. Configure with
+The default uses an explicit source and output buffer. Configure with
 `-DCBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY=ON` to measure the named encoder and
 decoder factories that own their adapters. This changes only adapter setup;
 fixtures, feed loops and correctness checks remain identical. Validation continues
 to use an explicit source. For a baseline/candidate comparison, compile the same
 final harness against both header revisions with the same value for this option,
 the same compiler, and identical build flags. A comparison across different
-factory settings also changes the measured API setup and cannot isolate a source
+factory settings also changes the measured API setup and cannot isolate an
 adapter change. The separate storage target always uses the named factories.
 
 `bench_resumable_throughput_one_shot` runs only the ordinary rows. Both throughput
@@ -294,7 +294,7 @@ width-varying unsigned scalar arrays. Its ten `--case` values are:
 | `list-deque` | `list<deque<byte>>` |
 | `vector-list` | `vector<list<byte>>` |
 | `list-list` | `list<list<byte>>` |
-| `ring` | Custom source implementing the public resumable protocol |
+| `ring` | Custom source and output buffer implementing the public resumable protocol |
 
 Input spans view const bytes. Nested storage uses 1460-byte packets. `complete`
 admits all storage before creating the operation; `staged1460` admits storage

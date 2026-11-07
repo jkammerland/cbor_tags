@@ -13,9 +13,9 @@ using namespace cbor::tags;
 using input_storage      = std::list<std::span<const std::byte>>;
 using output_storage     = std::list<std::span<std::byte>>;
 using input_source_type  = decltype(make_input_source(std::declval<input_storage &>()));
-using output_source_type = decltype(make_output_source(std::declval<output_storage &>()));
+using output_buffer_type = decltype(make_output_buffer(std::declval<output_storage &>()));
 using decode_operation   = decltype(make_resumable_decoder(std::declval<input_source_type &>())(std::declval<int &>()));
-using encode_operation   = decltype(make_resumable_encoder(std::declval<output_source_type &>())(std::declval<const int &>()));
+using encode_operation   = decltype(make_resumable_encoder(std::declval<output_buffer_type &>())(std::declval<const int &>()));
 
 static_assert(!std::is_copy_constructible_v<resumable_task<status_code>>);
 static_assert(!std::is_copy_assignable_v<resumable_task<status_code>>);
@@ -46,7 +46,7 @@ static_assert(!std::is_invocable_v<const storage_encoder &, const int &>);
 
 // Explicit-source factories retain safe chained construction.
 using source_decoder = decltype(make_resumable_decoder(std::declval<input_source_type &>()));
-using source_encoder = decltype(make_resumable_encoder(std::declval<output_source_type &>()));
+using source_encoder = decltype(make_resumable_encoder(std::declval<output_buffer_type &>()));
 static_assert(std::is_invocable_v<source_decoder &&, int &>);
 static_assert(std::is_invocable_v<source_encoder &&, const int &>);
 

@@ -110,7 +110,7 @@ constexpr std::string_view status_message(status_code s) {
     case status_code::input_output_aliasing: return "CBOR input and output storage overlap";
     case status_code::unsupported_operation: return "Unsupported CBOR operation for the selected type";
     case status_code::cancelled: return "CBOR operation cancelled";
-    case status_code::capacity_exceeded: return "CBOR data needed at once does not fit the source's storage";
+    case status_code::capacity_exceeded: return "CBOR data needed at once does not fit the bounded storage";
     default: return "Unknown CBOR status code";
     }
 }

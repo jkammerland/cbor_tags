@@ -66,23 +66,23 @@ auto make_resumable_decoder_with_options(Storage &storage) {
     return detail::storage_resumable_factory<detail::resumable_decode_context<source_type, Options, Codecs...>>{storage};
 }
 
-template <template <typename> typename... Codecs, ResumableOutputSource Source> auto make_resumable_encoder(Source &source) {
+template <template <typename> typename... Codecs, ResumableOutputBuffer Source> auto make_resumable_encoder(Source &source) {
     return detail::resumable_factory<detail::resumable_encode_context<Source, default_options, Codecs...>>{{}, source};
 }
 template <template <typename> typename... Codecs, typename Storage>
-    requires(!ResumableOutputSource<Storage>) && requires(Storage &storage) { make_output_source(storage); }
+    requires(!ResumableOutputBuffer<Storage>) && requires(Storage &storage) { make_output_buffer(storage); }
 auto make_resumable_encoder(Storage &storage) {
-    using source_type = decltype(make_output_source(storage));
+    using source_type = decltype(make_output_buffer(storage));
     return detail::storage_resumable_factory<detail::resumable_encode_context<source_type, default_options, Codecs...>>{storage};
 }
-template <IsOptions Options, template <typename> typename... Codecs, ResumableOutputSource Source>
+template <IsOptions Options, template <typename> typename... Codecs, ResumableOutputBuffer Source>
 auto make_resumable_encoder_with_options(Source &source) {
     return detail::resumable_factory<detail::resumable_encode_context<Source, Options, Codecs...>>{{}, source};
 }
 template <IsOptions Options, template <typename> typename... Codecs, typename Storage>
-    requires(!ResumableOutputSource<Storage>) && requires(Storage &storage) { make_output_source(storage); }
+    requires(!ResumableOutputBuffer<Storage>) && requires(Storage &storage) { make_output_buffer(storage); }
 auto make_resumable_encoder_with_options(Storage &storage) {
-    using source_type = decltype(make_output_source(storage));
+    using source_type = decltype(make_output_buffer(storage));
     return detail::storage_resumable_factory<detail::resumable_encode_context<source_type, Options, Codecs...>>{storage};
 }
 } // namespace cbor::tags

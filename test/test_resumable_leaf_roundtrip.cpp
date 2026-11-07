@@ -41,7 +41,7 @@ template <typename Value, typename Wrapped> void check_leaf_splits(const Value &
 
         std::vector<std::byte> encoded(wire.size());
         output_chunks          output;
-        auto                   sink    = make_output_source(output);
+        auto                   sink    = make_output_buffer(output);
         auto                   encoder = make_resumable_encoder(sink)(wrapped);
         output.emplace_back(std::span{encoded}.first(cut));
         encoder.resume();
@@ -172,7 +172,7 @@ void check_float_override(const Value &expected, const WireValue &shifted, std::
             leaf_calls::encoded = 0;
             std::vector<std::byte> encoded(explicit_codec ? wire.size() : ordinary_wire.size());
             output_chunks          output;
-            auto                   sink        = make_output_source(output);
+            auto                   sink        = make_output_buffer(output);
             auto                   run_encoder = [&](auto &value) {
                 auto encoder = make_resumable_encoder<Codec>(sink)(value);
                 if (bytewise) {
@@ -292,7 +292,7 @@ TEST_SUITE("roundtrip/resumable") {
 
         std::vector<std::byte> encoded(wire.size());
         output_chunks          output;
-        auto                   sink    = make_output_source(output);
+        auto                   sink    = make_output_buffer(output);
         auto                   wrapped = as_indefinite{expected};
         auto                   encoder = make_resumable_encoder(sink)(wrapped);
         for (auto &byte : encoded) {
@@ -335,7 +335,7 @@ TEST_SUITE("roundtrip/resumable") {
             leaf_calls::encoded = 0;
             std::vector<std::byte> encoded(wire.size());
             output_chunks          output;
-            auto                   sink    = make_output_source(output);
+            auto                   sink    = make_output_buffer(output);
             auto                   wrapped = as_indefinite{expected};
             auto                   encoder = make_resumable_encoder<bool_codec>(sink)(wrapped);
             if (bytewise) {
@@ -396,7 +396,7 @@ TEST_SUITE("roundtrip/resumable") {
         std::list<std::byte> output(wire.size());
         using output_chunk = std::ranges::subrange<std::list<std::byte>::iterator>;
         std::list<output_chunk> output_storage;
-        auto                    sink    = make_output_source(output_storage);
+        auto                    sink    = make_output_buffer(output_storage);
         auto                    wrapped = as_indefinite{expected};
         auto                    encoder = make_resumable_encoder(sink)(wrapped);
         output_storage.emplace_back(output_chunk{output.begin(), output.end()});

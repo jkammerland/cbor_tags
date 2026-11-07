@@ -197,10 +197,11 @@ program that exposes writable chunks in two steps.
 
 ## Keep owners alive
 
-Declare storage/source, factory, values, operation, and waiter in that order so
-reverse destruction releases borrowers first. A storage-bound factory owns its
-adapter, is immovable, and starts operations only as an lvalue; destroy each
-operation before starting another on the same source, even after completion.
+Declare storage, any explicit source or output buffer, factory, values,
+operation, and waiter in that order so reverse destruction releases borrowers
+first. A storage-bound factory owns its adapter, is immovable, and starts
+operations only as an lvalue; destroy each operation before starting another on
+the same storage, even after completion.
 
 Successive operations retain the committed stream position and buffered tail.
 A failed or cancelled operation keeps what it committed, which can end inside an
@@ -208,9 +209,10 @@ item: the input position can point into a string payload or between array
 elements, and the output can end with part of an item. Discard that input or
 output instead of starting another operation on it.
 
-Use `make_input_source(storage)` or `make_output_source(storage)` when the source
-must outlive a factory or share its position between operation kinds; factories
-borrow these explicit sources, and validators and generators require one.
+Use `make_input_source(storage)` or `make_output_buffer(storage)` when the
+source or output buffer must outlive a factory or share its position between
+operation kinds; factories borrow them, and validators and generators require a
+source.
 
 Default adapters support flat and nested byte ranges, including owning inner
 containers and borrowed spans. Between resumptions, append descriptors or grow
@@ -221,11 +223,11 @@ the last inner range while preserving earlier contents and order:
   outer container relocates owning ranges.
 - Final-range growth needs a sized range or a changed end boundary. Unsized
   ranges must preserve their previously observed end iterator; an unchanged end
-  sentinel cannot expose growth without a custom source.
+  sentinel cannot expose growth without a custom source or output buffer.
 - Shrinking, replacing earlier ranges, removing descriptors, or appending after
   closure violates the adapter's preconditions. Debug assertions check locally
-  detectable violations; malformed CBOR and an already-acquired source remain
-  checked errors.
+  detectable violations; malformed CBOR and an already-acquired source or output
+  buffer remain checked errors.
 
 Mutation and codec driving are serialized. Repeated `resume()` without new
 availability is safe, but the producer should wait for a storage change rather
@@ -351,10 +353,11 @@ string, and a text piece can end inside a UTF-8 sequence. Empty strings and
 chunks make no call.
 
 A piece points into the source when the source lends
-[windows](#implement-a-reclaiming-source), otherwise into a copy. Either way
-it's committed once the callback accepts it, so bounded storage only has to fit
-the string's head. The [ring example](../examples/46_resumable_ring.cpp) passes
-a byte string many times larger than its ring this way.
+[windows](#implement-a-reclaiming-source-or-output-buffer), otherwise into a
+copy. Either way it's committed once the callback accepts it, so bounded storage
+only has to fit the string's head. The
+[ring example](../examples/46_resumable_ring.cpp) passes a byte string many
+times larger than its ring this way.
 
 The functions return `bstr_sink<F>`, `tstr_sink<F>`, `array_sink<T, F>`, and
 `map_sink<K, V, F>`. A record field can be a sink too, so one field streams
@@ -418,9 +421,9 @@ Cancellation destroys suspended frames and wakes the waiter with
 `status_code::cancelled`, preserving committed fields or elements within a
 larger item. It discards tentative output without undoing published I/O,
 destination changes, or application effects; I/O cancellation is independent.
-The source stays acquired until operation destruction, and repeated `cancel()`
-or `resume()` calls stay terminal. Discard the input or output afterwards, as
-after a failure (see [keep owners alive](#keep-owners-alive)).
+The source or output buffer stays acquired until operation destruction, and
+repeated `cancel()` or `resume()` calls stay terminal. Discard the input or
+output afterwards, as after a failure (see [keep owners alive](#keep-owners-alive)).
 
 Declare the waiter last: destroying it detaches its continuation. Destroying a
 pending operation cancels it, so a waiter that outlives it wakes with
@@ -555,7 +558,7 @@ The entire ordinary retry unit must fit retained storage. Prefer hooks for
 large values and for stateful codecs. A retry declaration cannot enable
 `codec::shared_ptr` in a resumable factory.
 
-## Implement a reclaiming source
+## Implement a reclaiming source or output buffer
 
 ```cpp
 #include <cbor_tags/cbor_encoder.h>
@@ -589,13 +592,12 @@ int main() {
 
 An explicit source binds the same way whether it comes from `make_input_source`
 or an application implementation of `ResumableInputSource`. For bounded reuse,
-replace the default adapter with the complete
-[ring source](../examples/46_resumable_ring.cpp), which also implements
-`ResumableOutputSource` and demonstrates publication before reclamation.
+replace the default adapter with a ring like the one in
+[example 46](../examples/46_resumable_ring.cpp), which also implements
+`ResumableOutputBuffer` and demonstrates publication before reclamation.
 
-`<cbor_tags/cbor_resumable_source.h>` defines both source concepts. Implement
-their public members directly; declaring `position_type` selects the custom-source
-contract:
+`<cbor_tags/cbor_resumable_source.h>` defines both concepts. Implement their
+public members directly; declaring `position_type` selects this contract:
 
 - Positions are copyable and expose a monotonic `offset()` of exactly
   `std::size_t`; positions at and after commitment survive permitted mutations.
@@ -613,9 +615,9 @@ contract:
   is not an index into that retained size; unsized input needs no total extent.
 
 Custom sources expose noncontiguous logical traversal even over contiguous
-allocations. A source can also lend windows, contiguous runs of its storage
-that the codec copies in bulk and [sinks](#stream-decoded-data-to-callbacks)
-read in place:
+allocations. Sources and output buffers can also lend windows, contiguous
+runs of their storage that the codec copies in bulk and
+[sinks](#stream-decoded-data-to-callbacks) read in place:
 
 - Input: `borrow_window(position) const` returns
   `std::optional<std::span<const std::byte>>` with the available bytes from
@@ -625,7 +627,7 @@ read in place:
   writable storage at `position()`, and `consume_window(count)` marks `count`
   of those bytes written.
 
-Return `std::nullopt` where the source has no window. Windows end before the
+Return `std::nullopt` where there is no window. Windows end before the
 codec suspends. [Decoded views](#borrow-decoded-strings-and-items) instead hold
 source positions and keep reading through the source after their operation
 ends.
@@ -645,7 +647,7 @@ resumable hook for larger values or reject them under the application's
 capacity policy.
 
 A unit larger than the storage leaves the operation waiting for room that
-reclaiming can't make. A source can report that with
+reclaiming can't make. A source or output buffer can report that with
 `bool at_capacity() const noexcept`, which the operation checks whenever the
 codec suspends: return true when everything after the committed position, the
 bytes to read or the room to write, already spans all of the storage. The

@@ -170,7 +170,7 @@ template <template <typename> typename Codec> void check_integer_map_override(st
 
             std::vector<std::byte> bytes(wire.size());
             output_chunks          output_storage;
-            auto                   sink = make_output_source(output_storage);
+            auto                   sink = make_output_buffer(output_storage);
             override_calls::encoded     = 0;
             auto encoder                = make_resumable_encoder<Codec>(sink)(value);
 
@@ -287,7 +287,7 @@ TEST_SUITE("roundtrip/resumable") {
 
                 std::vector<std::byte> bytes(wire.size());
                 output_chunks          output_storage;
-                auto                   sink    = make_output_source(output_storage);
+                auto                   sink    = make_output_buffer(output_storage);
                 auto                   encoder = make_resumable_encoder(sink)(value);
                 output_storage.emplace_back(std::span{bytes}.first(cut));
                 encoder.resume();

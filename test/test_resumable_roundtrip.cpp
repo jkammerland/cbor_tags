@@ -331,7 +331,7 @@ template <typename T> void check_every_encode_split(const T &expected) {
         CAPTURE(cut);
         std::vector<std::byte> bytes(reference.size());
         output_chunks          storage;
-        auto                   sink      = make_output_source(storage);
+        auto                   sink      = make_output_buffer(storage);
         auto                   operation = make_resumable_encoder(sink)(expected);
 
         storage.emplace_back(std::span{bytes}.first(cut));
@@ -627,7 +627,7 @@ TEST_SUITE("roundtrip/resumable") {
         const auto                       reference = ordinary_bytes(shifted);
         std::vector<std::byte>           bytes(reference.size());
         output_chunks                    output_storage;
-        auto                             sink = make_output_source(output_storage);
+        auto                             sink = make_output_buffer(output_storage);
         integer_codec_calls::encoded          = 0;
         auto encoder                          = make_resumable_encoder<ordinary_uint32_codec>(sink)(expected);
         for (auto &byte : bytes) {
@@ -667,7 +667,7 @@ TEST_SUITE("roundtrip/resumable") {
         REQUIRE(reference.size() > 9U);
         std::vector<std::byte> bytes(reference.size());
         output_chunks          output_storage;
-        auto                   sink  = make_output_source(output_storage);
+        auto                   sink  = make_output_buffer(output_storage);
         integer_codec_calls::encoded = 0;
         auto encoder                 = make_resumable_encoder<ordinary_uint32_codec>(sink)(expected);
         output_storage.emplace_back(bytes);
@@ -721,7 +721,7 @@ TEST_SUITE("roundtrip/resumable") {
         const auto                       reference = ordinary_bytes(shifted);
         std::vector<std::byte>           bytes(reference.size());
         output_chunks                    output_storage;
-        auto                             sink = make_output_source(output_storage);
+        auto                             sink = make_output_buffer(output_storage);
         integer_codec_calls::encoded          = 0;
         auto encoder                          = make_resumable_encoder<explicit_uint32_codec>(sink)(expected);
         for (auto &byte : bytes) {
@@ -761,7 +761,7 @@ TEST_SUITE("roundtrip/resumable") {
             CAPTURE(bytewise);
             std::vector<std::byte> bytes(reference.size());
             output_chunks          output_storage;
-            auto                   sink  = make_output_source(output_storage);
+            auto                   sink  = make_output_buffer(output_storage);
             integer_codec_calls::encoded = 0;
             auto encoder                 = make_resumable_encoder<explicit_only_uint32_codec>(sink)(expected);
             if (bytewise) {
@@ -814,7 +814,7 @@ TEST_SUITE("roundtrip/resumable") {
         std::array chunks{chunk{bytes.begin(), middle}, chunk{middle, bytes.end()}};
         static_assert(!std::ranges::contiguous_range<chunk>);
         std::list<chunk> output_storage;
-        auto             sink    = make_output_source(output_storage);
+        auto             sink    = make_output_buffer(output_storage);
         auto             encoder = make_resumable_encoder(sink)(expected);
         output_storage.insert(output_storage.end(), chunks.begin(), chunks.end());
         encoder.resume();
@@ -1108,7 +1108,7 @@ TEST_SUITE("roundtrip/resumable") {
         const auto                      reference = ordinary_bytes(std::tuple{expected.number, expected.text});
         std::vector<std::byte>          bytes(reference.size());
         output_chunks                   storage;
-        auto                            sink      = make_output_source(storage);
+        auto                            sink      = make_output_buffer(storage);
         auto                            operation = make_resumable_encoder(sink)(expected);
 
         storage.emplace_back(std::span{bytes}.first(bytes.size() - 1));
@@ -1161,7 +1161,7 @@ TEST_SUITE("roundtrip/resumable") {
         const auto                                     ordinary_encodes = expected.front().ordinary_encode_calls;
         std::vector<std::byte>                         bytes(reference.size());
         output_chunks                                  outputs;
-        auto                                           sink    = make_output_source(outputs);
+        auto                                           sink    = make_output_buffer(outputs);
         auto                                           encoder = make_resumable_encoder(sink)(expected);
 
         for (std::size_t index = 0; index < bytes.size(); ++index) {
@@ -1217,7 +1217,7 @@ TEST_SUITE("roundtrip/resumable") {
 
                 std::vector<std::byte> bytes(reference.size());
                 output_chunks          outputs;
-                auto                   sink              = make_output_source(outputs);
+                auto                   sink              = make_output_buffer(outputs);
                 const auto             resumable_encodes = expected.resumable_encode_calls;
                 auto                   encoder           = make_resumable_encoder(sink)(expected);
                 outputs.emplace_back(std::span{bytes}.first(cut));
@@ -1271,7 +1271,7 @@ TEST_SUITE("roundtrip/resumable") {
 
             std::vector<std::byte> bytes(reference.size());
             output_chunks          outputs;
-            auto                   sink            = make_output_source(outputs);
+            auto                   sink            = make_output_buffer(outputs);
             const auto             initial_encodes = metadata_tag_calls::encoded;
             const auto             initial_hooks   = expected.resumable_encode_calls;
             auto                   encoder         = make_resumable_encoder<rvalue_metadata_tag_codec>(sink)(expected);
@@ -1299,7 +1299,7 @@ TEST_SUITE("roundtrip/resumable") {
         const auto                         ordinary_encodes = expected.ordinary_calls;
         std::vector<std::byte>             bytes(reference.size());
         output_chunks                      outputs;
-        auto                               sink    = make_output_source(outputs);
+        auto                               sink    = make_output_buffer(outputs);
         auto                               encoder = make_resumable_encoder(sink)(expected);
         outputs.emplace_back(std::span{bytes}.first(2));
         encoder.resume();

@@ -36,7 +36,7 @@
     auto                                  decode = ct::make_resumable_decoder(source)(text);
     decode.close_input();
     std::list<std::span<std::byte>> output;
-    auto                            sink   = ct::make_output_source(output);
+    auto                            sink   = ct::make_output_buffer(output);
     auto                            encode = ct::make_resumable_encoder(sink)(text);
     encode.cancel();
 }
