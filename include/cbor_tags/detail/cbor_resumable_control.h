@@ -124,7 +124,7 @@ inline status_code resumable_exception_status() noexcept {
 }
 
 template <typename Context> class [[nodiscard]] resume_operation {
-    struct state {
+    struct operation_state {
         resume_control                     control;
         Context                            context;
         resumable<status_code>             work{status_code::success};
@@ -133,15 +133,15 @@ template <typename Context> class [[nodiscard]] resume_operation {
         bool                               finished{};
 
         template <typename... Args>
-        state(typename Context::source_type &source, Args &&...args) : context(source, control), start(context.offset()) {
+        operation_state(typename Context::source_type &source, Args &&...args) : context(source, control), start(context.offset()) {
             work         = context(std::forward<Args>(args)...);
             control.leaf = work.handle();
         }
     };
-    std::unique_ptr<state> state_;
+    std::unique_ptr<operation_state> state_;
 
     // Publish completion before waking user code. The waiter may destroy this operation.
-    static resume_state drive(state &s) {
+    static resume_state drive(operation_state &s) {
         if (s.finished || s.control.driving)
             return s.finished ? resume_state::done : Context::waiting_state;
         s.control.driving = true;
@@ -176,7 +176,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
         source.acquire();
         try {
             source.refresh();
-            state_ = std::make_unique<state>(source, std::forward<Args>(args)...);
+            state_ = std::make_unique<operation_state>(source, std::forward<Args>(args)...);
             drive(*state_);
         } catch (...) {
             state_.reset();
@@ -226,8 +226,8 @@ template <typename Context> class [[nodiscard]] resume_operation {
         if (auto waiter = stop(s))
             waiter.resume();
     }
-    bool         done() const noexcept { return state_ && state_->finished; }
-    resume_state progress() const noexcept { return done() ? resume_state::done : Context::waiting_state; }
+    bool                               done() const noexcept { return state_ && state_->finished; }
+    resume_state                       state() const noexcept { return done() ? resume_state::done : Context::waiting_state; }
     expected<std::size_t, status_code> result() const {
         // incomplete would look like truncated input, so a pending result is a caller bug
         const auto &s = checked_state();
@@ -249,7 +249,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
     }
 
     struct awaiter {
-        state                  *owner;
+        operation_state        *owner;
         std::coroutine_handle<> registered{};
         bool                    await_ready() const noexcept { return owner && owner->finished; }
         void                    await_suspend(std::coroutine_handle<> handle) {
@@ -272,14 +272,14 @@ template <typename Context> class [[nodiscard]] resume_operation {
     awaiter operator co_await() & noexcept { return {state_.get()}; }
 
   private:
-    state &checked_state() const {
+    operation_state &checked_state() const {
         if (!state_)
             throw std::logic_error("resumable operation was moved from");
         return *state_;
     }
 
     // Ends a pending operation with status. Waking the waiter is up to the caller.
-    static void end(state &s, status_code status) noexcept {
+    static void end(operation_state &s, status_code status) noexcept {
         // Retire every suspended handle before destroying its owning frames.
         // Input retains its committed source position; the dead reader needs no reset.
         s.control.leaf = {};
@@ -292,14 +292,14 @@ template <typename Context> class [[nodiscard]] resume_operation {
     }
 
     // Ends a pending operation as cancelled. Returns the waiter to wake.
-    static std::coroutine_handle<> stop(state &s) noexcept {
+    static std::coroutine_handle<> stop(operation_state &s) noexcept {
         end(s, status_code::cancelled);
         return std::exchange(s.control.waiter, {});
     }
 
     // The source says reclaiming can't give the waiting codec more, so it would
     // wait forever
-    static bool stalled(state &s) noexcept {
+    static bool stalled(operation_state &s) noexcept {
         using source_type = typename Context::source_type;
         if constexpr (NamesCapacityReport<source_type>) {
             static_assert(HasCapacityReport<source_type>, "at_capacity() must be a const noexcept member returning bool");

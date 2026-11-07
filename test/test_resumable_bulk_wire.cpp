@@ -263,7 +263,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         auto                             encoder   = ct::make_resumable_encoder(source);
         auto                             operation = encoder(value);
 
-        REQUIRE(operation.progress() == ct::resume_state::need_output);
+        REQUIRE(operation.state() == ct::resume_state::need_output);
         CHECK(operation.committed_bytes() == 0);
         CHECK(source.position().offset() == 0);
         chunks.emplace_back();
@@ -324,7 +324,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             auto             operation = encoder(value);
 
             if (!close_before_start) {
-                REQUIRE(operation.progress() == ct::resume_state::need_output);
+                REQUIRE(operation.state() == ct::resume_state::need_output);
                 REQUIRE(operation.finish() == ct::resume_state::done);
             }
             REQUIRE(operation.done());
@@ -343,7 +343,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         source.allowance = 3;
         auto operation   = encoder(value);
 
-        REQUIRE(operation.progress() == ct::resume_state::need_output);
+        REQUIRE(operation.state() == ct::resume_state::need_output);
         CHECK(operation.committed_bytes() == 3);
         CHECK(source.writes_after_exhaustion == 0);
         CHECK(storage == std::vector<std::byte>{std::byte{0x45}, std::byte{1}, std::byte{2}});
@@ -416,7 +416,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             auto                 decoder = ct::make_resumable_decoder(source);
             std::list<std::byte> actual;
             auto                 operation = decoder(actual);
-            REQUIRE(operation.progress() == ct::resume_state::need_input);
+            REQUIRE(operation.state() == ct::resume_state::need_input);
             CHECK(operation.committed_bytes() == (cut < 3 ? 0 : cut));
 
             const auto grown = cut + 31;
@@ -445,7 +445,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         auto                 decoder = ct::make_resumable_decoder(source);
         std::list<std::byte> actual;
         auto                 operation = decoder(actual);
-        REQUIRE(operation.progress() == ct::resume_state::need_input);
+        REQUIRE(operation.state() == ct::resume_state::need_input);
         REQUIRE(operation.committed_bytes() == 259);
 
         // Move the exhausted list to a new descriptor address without copying
@@ -506,7 +506,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         auto                          decoder = ct::make_resumable_decoder(source);
         std::list<std::byte>          actual;
         auto                          operation = decoder(actual);
-        REQUIRE(operation.progress() == ct::resume_state::need_input);
+        REQUIRE(operation.state() == ct::resume_state::need_input);
         REQUIRE(operation.committed_bytes() == 211);
         REQUIRE(std::ranges::equal(actual, std::span{expected}.first(208)));
 
@@ -541,7 +541,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             std::deque<std::deque<std::byte>> chunks{std::deque<std::byte>(cut, std::byte{0xcc})};
             auto                              encoder   = ct::make_resumable_encoder(chunks);
             auto                              operation = encoder(value);
-            REQUIRE(operation.progress() == ct::resume_state::need_output);
+            REQUIRE(operation.state() == ct::resume_state::need_output);
             CHECK(operation.committed_bytes() == (cut < 3 ? 0 : cut));
 
             chunks.emplace_back();
@@ -571,7 +571,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             auto          operation = decoder(value);
 
             if (cut < 9) {
-                REQUIRE(operation.progress() == ct::resume_state::need_input);
+                REQUIRE(operation.state() == ct::resume_state::need_input);
                 CHECK(value == 0);
             }
 
@@ -602,7 +602,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             auto                              source    = ct::make_output_source(chunks);
             auto                              encoder   = ct::make_resumable_encoder(source);
             auto                              operation = encoder(value);
-            REQUIRE(operation.progress() == ct::resume_state::need_output);
+            REQUIRE(operation.state() == ct::resume_state::need_output);
             CHECK(operation.committed_bytes() == 0);
 
             chunks.emplace_back();
