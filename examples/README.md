@@ -58,6 +58,7 @@ standalone and uses standard-library storage.
 | [37_experimental_cwt_confirmation.cpp](37_experimental_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
 | [38_experimental_cwt_key_thumbprint.cpp](38_experimental_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
 | [39_experimental_cwt_confirmation_token.cpp](39_experimental_cwt_confirmation_token.cpp) | Verify token and presenter possession | Authenticate the issuer assertion, then verify the presenter's challenge signature. |
+| [40_a_resumable.cpp](40_a_resumable.cpp) | Continue a truncated record | A failed one-shot decode is terminal; a resumable decode keeps its progress and finishes once the missing bytes are appended. |
 | [40_resumable.cpp](40_resumable.cpp) | Decode items as input grows | Append bytes to a deque, resume, and inspect the completed values. |
 | [41_resumable_encoding.cpp](41_resumable_encoding.cpp) | Encode into a growable container | Let a deque grow and inspect its committed encoded prefix. |
 | [42_resumable_validation.cpp](42_resumable_validation.cpp) | Validate without constructing values | Validate CBOR structure and UTF-8 across chunks until explicit EOF. |
