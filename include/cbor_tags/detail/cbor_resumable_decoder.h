@@ -47,6 +47,16 @@ template <typename T, payload_decode_context Context> struct resume_context_valu
     }
 };
 
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
+// Without an extension field, a key longer than every field name can't match.
+template <typename Object> consteval std::size_t named_longest_fixed_key() {
+    std::size_t longest = 0;
+    for (const auto key : named_fixed_member_keys<Object>())
+        longest = std::max(longest, key.size());
+    return longest;
+}
+#endif
+
 struct resume_group_header {
     std::uint64_t                                           size;
     template <typename Decoder> expected<void, status_code> decode(Decoder &decoder) {
@@ -287,6 +297,10 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return bounded_container(value, 0, std::numeric_limits<std::uint64_t>::max());
         } else if constexpr (resumable_wrap_array<U>)
             return group(value.values_, true);
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
+        else if constexpr (IsNamedMapWrapper<U>)
+            return named_map(value.value_);
+#endif
         else if constexpr (IsAnyHeader<U> || (IsTag<U> && !IsAggregate<U> && !IsTaggedTuple<U>))
             return ordinary(value);
         else if constexpr (IsString<U> && !IsConstView<U>)
@@ -436,6 +450,174 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else
             co_return co_await group(std::move(values));
     }
+
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
+    // Named maps resume per entry, like positional records. Every complete
+    // key/value pair stays committed, so a suspension never repeats a field.
+    // The rules mirror the one-shot decode_named_map.
+    template <typename Object> resumable<status_code> named_map(Object &object) {
+        using object_type = std::remove_cvref_t<Object>;
+        static_assert(named_fixed_member_keys_are_unique<object_type>(),
+                      "as_named_map fixed field names must be unique after flattening as_named_group members");
+        static_assert(named_flattened_extension_count<object_type>() <= 1U,
+                      "as_named_map may contain at most one as_named_extension field after flattening as_named_group members");
+
+        as_map_any header{};
+        auto       status = co_await ordinary(header);
+        if (status != status_code::success)
+            co_return status;
+
+        reset_named_optionals_and_extensions(object);
+        named_decode_seen<object_type> seen;
+        for (std::uint64_t index = 0; header.indefinite || index != header.size; ++index) {
+            if (header.indefinite) {
+                status = co_await available();
+                if (status != status_code::success)
+                    co_return status;
+                if (static_cast<std::byte>(*ordinary_.reader_.position_) == std::byte{0xff}) {
+                    indefinite_break end{};
+                    status = co_await ordinary(end);
+                    if (status != status_code::success)
+                        co_return status;
+                    break;
+                }
+            }
+            status = co_await named_map_entry(object, seen);
+            if (status != status_code::success)
+                co_return status;
+        }
+        co_return validate_required_named_members(object, seen) ? status_code::success : status_code::unexpected_group_size;
+    }
+
+    template <typename Object, typename Seen> resumable<status_code> named_map_entry(Object &object, Seen &seen) {
+        using object_type = std::remove_cvref_t<Object>;
+
+        // The key lives in this frame until its value has been decoded.
+        std::string key;
+        status_code status;
+        if constexpr (named_flattened_extension_count<object_type>() == 0) {
+            // Reject a key that can't match before reserving its declared length.
+            status = co_await container(key, 0, named_longest_fixed_key<object_type>());
+            if (status == status_code::size_limit_exceeded)
+                co_return status_code::unexpected_group_size;
+        } else
+            status = co_await item(key);
+        if (status != status_code::success)
+            co_return status;
+
+        co_return co_await named_map_value(object, std::string_view{key}, seen);
+    }
+
+    // Matching is synchronous; only the matched value's decode can suspend.
+    template <typename Object, typename Seen> resumable<status_code> named_map_value(Object &object, std::string_view key, Seen &seen) {
+        std::optional<resumable<status_code>> value;
+        auto                                  status = status_code::success;
+        if (!named_member_by_key(object, key, seen, status, value) && !named_extension_by_key(object, key, status, value))
+            return status_code::unexpected_group_size;
+        if (value)
+            return std::move(*value);
+        return status;
+    }
+
+    template <typename Object, typename Seen>
+    bool named_member_by_key(Object &object, std::string_view key, Seen &seen, status_code &status,
+                             std::optional<resumable<status_code>> &value) {
+        return [&]<std::size_t... I>(std::index_sequence<I...>) {
+            return (named_member<I>(object, key, seen, status, value) || ...);
+        }(std::make_index_sequence<aggregate_member_count<std::remove_cvref_t<Object>>()>{});
+    }
+
+    template <std::size_t I, typename Object, typename Seen>
+    bool named_member(Object &object, std::string_view key, Seen &seen, status_code &status, std::optional<resumable<status_code>> &value) {
+        using object_type = std::remove_cvref_t<Object>;
+        auto  fields      = to_tuple(object);
+        auto &field       = std::get<I>(fields);
+        using field_type  = std::remove_cvref_t<decltype(field)>;
+
+        if constexpr (IsNamedGroupWrapper<field_type>)
+            return named_member_by_key(field.value_, key, seen, status, value);
+        else if constexpr (IsNamedExtensionWrapper<field_type>)
+            return false;
+        else {
+            constexpr std::string_view name = aggregate_member_name<object_type, I>();
+            if (key != name)
+                return false;
+            if (named_key_seen(seen, key)) {
+                status = status_code::unexpected_group_size;
+                return true;
+            }
+            seen.add(name);
+            value.emplace(named_field(field));
+            return true;
+        }
+    }
+
+    // An optional field takes a value only once it has decoded completely.
+    template <typename Field> resumable<status_code> named_field(Field &field) {
+        if constexpr (IsOptional<Field>)
+            return named_optional_field(field);
+        else
+            return item(field);
+    }
+
+    template <typename Field> resumable<status_code> named_optional_field(Field &field) {
+        typename Field::value_type decoded{};
+        const auto                 status = co_await item(decoded);
+        if (status == status_code::success)
+            field = std::move(decoded);
+        co_return status;
+    }
+
+    template <typename Object>
+    bool named_extension_by_key(Object &object, std::string_view key, status_code &status, std::optional<resumable<status_code>> &value) {
+        return [&]<std::size_t... I>(std::index_sequence<I...>) {
+            return (named_extension<I>(object, key, status, value) || ...);
+        }(std::make_index_sequence<aggregate_member_count<std::remove_cvref_t<Object>>()>{});
+    }
+
+    template <std::size_t I, typename Object>
+    bool named_extension(Object &object, std::string_view key, status_code &status, std::optional<resumable<status_code>> &value) {
+        auto  fields     = to_tuple(object);
+        auto &field      = std::get<I>(fields);
+        using field_type = std::remove_cvref_t<decltype(field)>;
+
+        if constexpr (IsNamedGroupWrapper<field_type>)
+            return named_extension_by_key(field.value_, key, status, value);
+        else if constexpr (IsNamedExtensionWrapper<field_type>) {
+            using extension_type = named_extension_value_t<field_type>;
+            static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
+                          "as_named_extension requires a map with text-string keys");
+            static_assert(std::constructible_from<typename extension_type::key_type, std::string_view>,
+                          "as_named_extension key type must be constructible from std::string_view");
+            using key_type = typename extension_type::key_type;
+
+            // Resumable input is never contiguous, so a borrowed key can't point into it.
+            if constexpr (is_basic_string_view_v<key_type>) {
+                status = status_code::contiguous_view_on_non_contiguous_data;
+            } else {
+                auto extension_key = make_decode_value_for<key_type>(field.value_);
+                if constexpr (requires { extension_key.assign(key.data(), key.size()); })
+                    extension_key.assign(key.data(), key.size());
+                else
+                    extension_key = key_type{key};
+                if (field.value_.find(extension_key) != field.value_.end())
+                    status = status_code::unexpected_group_size;
+                else
+                    value.emplace(named_extension_value(field.value_, std::move(extension_key)));
+            }
+            return true;
+        } else
+            return false;
+    }
+
+    template <typename Map> resumable<status_code> named_extension_value(Map &map, typename Map::key_type key) {
+        auto       mapped = make_decode_value_for<typename Map::mapped_type>(map);
+        const auto status = co_await item(mapped);
+        if (status == status_code::success)
+            map.emplace(std::move(key), std::move(mapped));
+        co_return status;
+    }
+#endif
 
     resumable<status_code> available() {
         if (!empty())

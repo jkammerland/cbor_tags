@@ -369,6 +369,10 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             return indefinite(value.value_);
         else if constexpr (resumable_encode_wrap_array<U>)
             return group(tuple_references(value.values_), true);
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
+        else if constexpr (IsNamedMapWrapper<U>)
+            return named_map(value.value_);
+#endif
         else if constexpr (is_static_tag_t<U>::value || is_dynamic_tag_t<U> || IsAnyHeader<U>)
             return ordinary(value);
         else if constexpr (IsArrayRangeWrapper<U>)
@@ -451,6 +455,109 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         else
             co_return co_await group(std::move(values));
     }
+
+#if CBOR_TAGS_HAS_NAMED_REFLECTION
+    // Named maps resume per entry, like positional records. The rules mirror
+    // the one-shot encode_named_map.
+    template <typename Object> resumable<status_code> named_map(Object &object) {
+        using object_type = std::remove_cvref_t<Object>;
+        static_assert(named_fixed_member_keys_are_unique<object_type>(),
+                      "as_named_map fixed field names must be unique after flattening as_named_group members");
+        static_assert(named_flattened_extension_count<object_type>() <= 1U,
+                      "as_named_map may contain at most one as_named_extension field after flattening as_named_group members");
+
+        // The one-shot encoder finds a shadowing extension key midway through
+        // the map. Check them all first, so a rejected map writes nothing.
+        if (named_extension_shadows<object_type>(object))
+            co_return status_code::error;
+
+        const auto status = co_await header(named_map_pair_count(object), std::byte{0xa0});
+        if (status != status_code::success)
+            co_return status;
+        co_return co_await named_entries<object_type>(object);
+    }
+
+    template <typename Root, std::size_t I = 0, typename Object> resumable<status_code> named_entries(Object &object) {
+        if constexpr (I == aggregate_member_count<std::remove_cvref_t<Object>>())
+            return status_code::success;
+        else
+            return named_entries_from<Root, I>(object);
+    }
+
+    template <typename Root, std::size_t I, typename Object> resumable<status_code> named_entries_from(Object &object) {
+        const auto status = co_await named_entry<Root, I>(object);
+        if (status != status_code::success)
+            co_return status;
+        co_return co_await named_entries<Root, I + 1>(object);
+    }
+
+    template <typename Root, std::size_t I, typename Object> resumable<status_code> named_entry(Object &object) {
+        using object_type = std::remove_cvref_t<Object>;
+        auto  fields      = to_tuple(object);
+        auto &field       = std::get<I>(fields);
+        using field_type  = std::remove_cvref_t<decltype(field)>;
+
+        if constexpr (IsNamedGroupWrapper<field_type>)
+            return named_entries<Root>(field.value_);
+        else if constexpr (IsNamedExtensionWrapper<field_type>)
+            return named_extension_entries(field.value_);
+        else if constexpr (IsOptional<field_type>) {
+            // An empty optional is left out of the map.
+            if (!field.has_value())
+                return status_code::success;
+            return named_pair<object_type, I>(*field);
+        } else
+            return named_pair<object_type, I>(field);
+    }
+
+    template <typename Object, std::size_t I, typename Value> resumable<status_code> named_pair(Value &value) {
+        std::string_view key    = aggregate_member_name<Object, I>();
+        const auto       status = co_await item(key);
+        if (status != status_code::success)
+            co_return status;
+        co_return co_await item(value);
+    }
+
+    template <typename Map> resumable<status_code> named_extension_entries(Map &map) {
+        for (auto &entry : map) {
+            auto status = co_await item(pair_first(entry));
+            if (status != status_code::success)
+                co_return status;
+            status = co_await item(pair_second(entry));
+            if (status != status_code::success)
+                co_return status;
+        }
+        co_return status_code::success;
+    }
+
+    template <typename Root, typename Object> static bool named_extension_shadows(const Object &object) {
+        return [&]<std::size_t... I>(std::index_sequence<I...>) {
+            return (named_member_shadows<Root, I>(object) || ...);
+        }(std::make_index_sequence<aggregate_member_count<std::remove_cvref_t<Object>>()>{});
+    }
+
+    template <typename Root, std::size_t I, typename Object> static bool named_member_shadows(const Object &object) {
+        const auto  fields = to_tuple(object);
+        const auto &field  = std::get<I>(fields);
+        using field_type   = std::remove_cvref_t<decltype(field)>;
+
+        if constexpr (IsNamedGroupWrapper<field_type>)
+            return named_extension_shadows<Root>(field.value_);
+        else if constexpr (IsNamedExtensionWrapper<field_type>) {
+            using extension_type = named_extension_value_t<field_type>;
+            static_assert(IsMap<extension_type> && IsTextString<typename extension_type::key_type>,
+                          "as_named_extension requires a map with text-string keys");
+            static_assert(std::constructible_from<std::string_view, const typename extension_type::key_type &>,
+                          "as_named_extension key type must be convertible to std::string_view");
+            for (const auto &entry : field.value_) {
+                if (named_key_matches_fixed_member<Root>(std::string_view{pair_first(entry)}))
+                    return true;
+            }
+            return false;
+        } else
+            return false;
+    }
+#endif
 
     template <typename T> resumable<status_code> optional(T &value) {
         if (value.has_value())
