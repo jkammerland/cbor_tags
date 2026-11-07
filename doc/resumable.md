@@ -45,7 +45,7 @@ repeating completed work without copying or replacing the destination.
 
 | Combination | Contract |
 | --- | --- |
-| Core values, containers, and reflected records | Structural progress resumes at completed headers, fields, and elements. |
+| Core values, containers, and reflected records, including `as_named_map` | Structural progress resumes at completed headers, fields, map entries, and elements. |
 | Member, ADL, or mixin resumable hooks | The hook retains progress and owns its effects. Hooks take precedence over ordinary customizations. |
 | Ordinary customizations | Require a declaration for each applicable customization and direction. |
 | `codec::typed_array` | Owning array decoding and owning/borrowed-range encoding have native hooks. Other wrapper forms require a hook or retry declaration. |
@@ -200,6 +200,11 @@ adapter, is immovable, and starts operations only as an lvalue; destroy each
 operation before starting another on the same source, even after completion.
 
 Successive operations retain the committed stream position and buffered tail.
+A failed or cancelled operation keeps what it committed, which can end inside an
+item: the input position can point into a string payload or between array
+elements, and the output can end with part of an item. Discard that input or
+output instead of starting another operation on it.
+
 Use `make_input_source(storage)` or `make_output_source(storage)` when the source
 must outlive a factory or share its position between operation kinds; factories
 borrow these explicit sources, and validators and generators require one.
@@ -320,13 +325,7 @@ int main() {
         assert(waiter.succeeded()); // The example waiter observed cancellation.
         assert(notifications == 1);
         assert(operation.committed_bytes() == committed);
-    } // Destroy the operation before acquiring this source again.
-
-    input.push_back(std::span<const std::byte>{wire}.last(1));
-    auto tail = decoder(second);
-    assert(tail.done());
-    assert(tail.result());
-    assert(second == 1000);
+    } // This input stays discarded after the cancel.
 }
 ```
 
@@ -340,7 +339,8 @@ Cancellation destroys suspended frames and wakes the waiter with
 larger item. It discards tentative output without undoing published I/O,
 destination changes, or application effects; I/O cancellation is independent.
 The source stays acquired until operation destruction, and repeated `cancel()`
-or `resume()` calls stay terminal.
+or `resume()` calls stay terminal. Discard the input or output afterwards, as
+after a failure (see [keep owners alive](#keep-owners-alive)).
 
 Declare the waiter last: destroying it detaches its continuation. Destroying a
 pending operation cancels it, so a waiter that outlives it wakes with
@@ -537,7 +537,14 @@ instead hold source positions and keep reading through the source after their
 operation ends.
 
 Reclaim bytes strictly before commitment only after every decoded view,
-external borrow, or pending I/O using them has ended. Output publication tracks newly committed
-ranges independently of reclamation. Bounded storage must fit an ordinary
-codec's whole retry unit; use a resumable hook for larger values or reject them
-under the application's capacity policy.
+external borrow, or pending I/O using them has ended. Output publication tracks
+newly committed ranges independently of reclamation.
+
+Bounded storage must fit the largest unit that is retried whole, in both
+directions. For built-in types that's one CBOR head, at most 9 bytes: string
+payloads pass through in pieces, and arrays and maps one element or entry at a
+time. `codec::typed_array` needs up to 18 bytes for its tag and byte-string
+heads together. A [decoded view](#borrow-decoded-strings-and-items) or a value
+with a [retry declaration](#ordinary-retry-declarations) needs its whole item.
+Use a resumable hook for larger values or reject them under the application's
+capacity policy.
