@@ -52,7 +52,7 @@ template <std::uint64_t Tag, std::size_t ElementSize> struct resumable_typed_arr
 };
 
 template <std::uint64_t Tag, bool NativeOrder, typename Context, typename Array, typename Convert>
-resumable<status_code> resumable_decode_typed_array(Context &context, Array &array, Convert convert) {
+resumable_task<status_code> resumable_decode_typed_array(Context &context, Array &array, Convert convert) {
     using value_type            = typename Array::value_type;
     constexpr auto element_size = sizeof(value_type);
     static_assert(element_size <= 16U);
@@ -132,7 +132,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
 
 // Output bytes may span several windows, but an element is published atomically.
 template <typename Context>
-resumable<status_code> resumable_encode_typed_array_boundary(Context &context, std::span<const std::byte> bytes) {
+resumable_task<status_code> resumable_encode_typed_array_boundary(Context &context, std::span<const std::byte> bytes) {
     while (!bytes.empty()) {
         const auto available = resumable_source_access::borrow_window(context.source());
         if (available && !available->empty()) {
@@ -160,7 +160,7 @@ resumable<status_code> resumable_encode_typed_array_boundary(Context &context, s
 }
 
 template <std::uint64_t Tag, typename Context, typename Range, typename Fill>
-resumable<status_code> resumable_encode_typed_array(Context &context, Range &values, Fill fill) {
+resumable_task<status_code> resumable_encode_typed_array(Context &context, Range &values, Fill fill) {
     using value_type            = std::ranges::range_value_t<Range>;
     constexpr auto element_size = sizeof(value_type);
     static_assert(element_size <= 16U);

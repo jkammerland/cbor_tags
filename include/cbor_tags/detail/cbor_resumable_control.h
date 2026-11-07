@@ -13,7 +13,7 @@
 namespace cbor::tags {
 
 // Small ordinary items return inline. Only a suspended computation owns a frame.
-template <typename T> class [[nodiscard]] resumable {
+template <typename T> class [[nodiscard]] resumable_task {
   public:
     struct promise_type;
     using handle_type = std::coroutine_handle<promise_type>;
@@ -23,7 +23,7 @@ template <typename T> class [[nodiscard]] resumable {
         std::exception_ptr      error;
         std::coroutine_handle<> continuation{std::noop_coroutine()};
 
-        resumable           get_return_object() noexcept { return resumable{handle_type::from_promise(*this)}; }
+        resumable_task      get_return_object() noexcept { return resumable_task{handle_type::from_promise(*this)}; }
         std::suspend_always initial_suspend() const noexcept { return {}; }
         struct final_awaiter {
             bool                    await_ready() const noexcept { return false; }
@@ -35,9 +35,9 @@ template <typename T> class [[nodiscard]] resumable {
         void          unhandled_exception() noexcept { error = std::current_exception(); }
     };
 
-    resumable(T value) : ready_(std::move(value)) {}
-    resumable(resumable &&other) noexcept : ready_(std::move(other.ready_)), handle_(std::exchange(other.handle_, {})) {}
-    resumable &operator=(resumable &&other) noexcept {
+    resumable_task(T value) : ready_(std::move(value)) {}
+    resumable_task(resumable_task &&other) noexcept : ready_(std::move(other.ready_)), handle_(std::exchange(other.handle_, {})) {}
+    resumable_task &operator=(resumable_task &&other) noexcept {
         if (this != &other) {
             if (handle_)
                 handle_.destroy();
@@ -46,8 +46,8 @@ template <typename T> class [[nodiscard]] resumable {
         }
         return *this;
     }
-    resumable(const resumable &) = delete;
-    ~resumable() {
+    resumable_task(const resumable_task &) = delete;
+    ~resumable_task() {
         if (handle_)
             handle_.destroy();
     }
@@ -56,7 +56,7 @@ template <typename T> class [[nodiscard]] resumable {
     handle_type handle() const noexcept { return handle_; }
     T           result() {
         if (!done())
-            throw std::logic_error("resumable result is not ready");
+            throw std::logic_error("resumable_task result is not ready");
         if (ready_)
             return std::move(*ready_);
         auto &promise = handle_.promise();
@@ -66,7 +66,7 @@ template <typename T> class [[nodiscard]] resumable {
         return std::move(*promise.value);
     }
     struct awaiter {
-        resumable               value;
+        resumable_task          value;
         bool                    await_ready() const noexcept { return value.done(); }
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> parent) const noexcept {
             value.handle_.promise().continuation = parent;
@@ -77,7 +77,7 @@ template <typename T> class [[nodiscard]] resumable {
     awaiter operator co_await() && noexcept { return {std::move(*this)}; }
 
   private:
-    explicit resumable(handle_type handle) noexcept : handle_(handle) {}
+    explicit resumable_task(handle_type handle) noexcept : handle_(handle) {}
     std::optional<T> ready_;
     handle_type      handle_{};
 };
@@ -127,7 +127,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
     struct operation_state {
         resume_control                     control;
         Context                            context;
-        resumable<status_code>             work{status_code::success};
+        resumable_task<status_code>        work{status_code::success};
         expected<std::size_t, status_code> result{unexpected<status_code>{status_code::incomplete}};
         std::size_t                        start{};
         bool                               finished{};
@@ -283,7 +283,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
         // Retire every suspended handle before destroying its owning frames.
         // Input retains its committed source position; the dead reader needs no reset.
         s.control.leaf = {};
-        s.work         = resumable<status_code>{status};
+        s.work         = resumable_task<status_code>{status};
         if constexpr (Context::waiting_state == resume_state::need_output)
             s.context.rollback();
 
@@ -320,7 +320,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
             auto &source = state_->context.source();
             // Abandoned partial output must not become part of the next item.
             // Destroy suspended frames before restoring their retry boundary.
-            state_->work = resumable<status_code>{status_code::cancelled};
+            state_->work = resumable_task<status_code>{status_code::cancelled};
             if constexpr (Context::waiting_state == resume_state::need_output)
                 state_->context.rollback();
             state_.reset();

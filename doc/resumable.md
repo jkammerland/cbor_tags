@@ -31,7 +31,7 @@ struct record {
     }
 
     template <class Decoder>
-    ct::resumable<ct::status_code> resumable_decode(Decoder &decoder) {
+    ct::resumable_task<ct::status_code> resumable_decode(Decoder &decoder) {
         co_return co_await decoder(ct::wrap_as_array{first, second});
     }
 };
@@ -460,12 +460,12 @@ struct message {
 };
 
 template <class Decoder>
-ct::resumable<ct::status_code> resumable_decode(Decoder &decoder, message &value) {
+ct::resumable_task<ct::status_code> resumable_decode(Decoder &decoder, message &value) {
     co_return co_await decoder(ct::wrap_as_array{value.name, value.values});
 }
 
 template <class Encoder>
-ct::resumable<ct::status_code> resumable_encode(Encoder &encoder, const message &value) {
+ct::resumable_task<ct::status_code> resumable_encode(Encoder &encoder, const message &value) {
     co_return co_await encoder(ct::wrap_as_array{value.name, value.values});
 }
 
@@ -490,7 +490,7 @@ int main() {
 }
 ```
 
-ADL, member, and codec-mixin hooks return exactly `resumable<status_code>`;
+ADL, member, and codec-mixin hooks return exactly `resumable_task<status_code>`;
 `resumable_transcode` is the symmetric alternative. Explicit hooks take
 precedence over ordinary codecs; see the
 [custom hook example](../examples/45_resumable_custom_hook.cpp).
