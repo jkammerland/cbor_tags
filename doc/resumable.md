@@ -220,6 +220,59 @@ Mutation and codec driving are serialized. Repeated `resume()` without new
 availability is safe, but the producer should wait for a storage change rather
 than busy-loop; empty input alone never signals EOF.
 
+## Borrow decoded strings and items
+
+A resumable decoder can return views into its input instead of copying. Name
+the view types through the decoder, as with a one-shot decoder over
+non-contiguous input ([borrowed decode views](experimental_ranges.md#borrowed-decode-views)):
+
+```cpp
+#include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_resumable.h>
+#include <cassert>
+#include <cstddef>
+#include <iterator>
+#include <string>
+#include <vector>
+
+namespace ct = cbor::tags;
+
+int main() {
+    std::vector<std::byte> wire;
+    const auto encoded = ct::make_encoder(wire)(std::string{"station"}, std::vector<int>{1, 2, 3});
+    assert(encoded);
+
+    std::vector<std::byte> input;
+    auto decoder = ct::make_resumable_decoder(input);
+    decltype(decoder)::tstr_view_t name;
+    decltype(decoder)::encoded_array_view values;
+    {
+        auto operation = decoder(name, values);
+        input.insert(input.end(), wire.begin(), wire.end());
+        operation.resume();
+        assert(operation.result());
+    }
+
+    input.reserve(input.capacity() * 2); // The views survive reallocation.
+    assert(std::string(name) == "station");
+    assert(std::ranges::distance(values.bytes()) == 4); // 83 01 02 03
+}
+```
+
+The decoder provides `tstr_view_t`, `bstr_view_t`, `encoded_item_view`,
+`encoded_array_view`, and `encoded_map_view`. They point into the source, not
+the operation, so they outlive the operation, and with the default adapters
+they survive reallocation of the bound storage. Keep the source or the
+storage-bound decoder alive, and don't reclaim the bytes while a view uses them.
+
+`std::string_view` and `std::span<const std::byte>` can't be decoded resumably.
+They need contiguous input and resumable sources are never contiguous, so the
+operation fails with `status_code::contiguous_view_on_non_contiguous_data` as
+soon as the string header arrives.
+
+Each view completes in one step: its whole string or item must be in retained
+storage at once. Bounded storage, such as a ring, must be large enough for it.
+
 ## Await completion or cancel
 
 ```cpp
@@ -475,12 +528,12 @@ contract:
 
 Custom sources expose noncontiguous logical traversal even over contiguous
 allocations; optional borrow/consume windows provide contiguous bulk access.
-Temporary codec windows end before suspension. Decoded `span` and `string_view`
-values instead retain application borrows, require stable backing storage, and
-cannot represent bytes spanning separate allocations.
+Temporary codec windows end before suspension. [Decoded views](#borrow-decoded-strings-and-items)
+instead hold source positions and keep reading through the source after their
+operation ends.
 
-Reclaim bytes strictly before commitment only after every external borrow or
-pending I/O using them has ended. Output publication tracks newly committed
+Reclaim bytes strictly before commitment only after every decoded view,
+external borrow, or pending I/O using them has ended. Output publication tracks newly committed
 ranges independently of reclamation. Bounded storage must fit an ordinary
 codec's whole retry unit; use a resumable hook for larger values or reject them
 under the application's capacity policy.

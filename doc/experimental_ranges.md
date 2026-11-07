@@ -333,6 +333,9 @@ decltype(dec)::tstr_view_t text;
 dec(text);
 ```
 
+Resumable decoders provide the same aliases; see
+[borrow decoded strings and items](resumable.md#borrow-decoded-strings-and-items).
+
 ## Encoded Item Views
 
 A successfully decoded encoded item view refers to one complete CBOR item,

@@ -7,7 +7,20 @@
 namespace cbor::tags {
 
 namespace detail {
-template <typename Context> struct resumable_factory {
+// Decoders name their borrowed view types like the one-shot decoder,
+// e.g. decltype(decoder)::tstr_view_t. Encoders have none.
+template <typename Context> struct resumable_view_types {};
+template <typename Context>
+    requires requires { typename Context::tstr_view_t; }
+struct resumable_view_types<Context> {
+    using bstr_view_t        = typename Context::bstr_view_t;
+    using tstr_view_t        = typename Context::tstr_view_t;
+    using encoded_item_view  = typename Context::encoded_item_view;
+    using encoded_array_view = typename Context::encoded_array_view;
+    using encoded_map_view   = typename Context::encoded_map_view;
+};
+
+template <typename Context> struct resumable_factory : resumable_view_types<Context> {
     typename Context::source_type              &source;
     template <typename... T> [[nodiscard]] auto operator()(T &&...values) const {
         return resume_operation<Context>{source, std::forward<T>(values)...};
@@ -16,7 +29,7 @@ template <typename Context> struct resumable_factory {
 
 // The adapter's cursors refer back to it. Keep it at the factory's address and
 // lend it only from a named factory that outlives its operations and views.
-template <typename Context> class storage_resumable_factory {
+template <typename Context> class storage_resumable_factory : public resumable_view_types<Context> {
     typename Context::source_type source_;
 
   public:
@@ -34,7 +47,7 @@ template <typename Context> class storage_resumable_factory {
 } // namespace detail
 
 template <template <typename> typename... Codecs, ResumableInputSource Source> auto make_resumable_decoder(Source &source) {
-    return detail::resumable_factory<detail::resumable_decode_context<Source, default_options, Codecs...>>{source};
+    return detail::resumable_factory<detail::resumable_decode_context<Source, default_options, Codecs...>>{{}, source};
 }
 template <template <typename> typename... Codecs, typename Storage>
     requires(!ResumableInputSource<Storage>) && requires(Storage &storage) { make_input_source(storage); }
@@ -44,7 +57,7 @@ auto make_resumable_decoder(Storage &storage) {
 }
 template <IsOptions Options, template <typename> typename... Codecs, ResumableInputSource Source>
 auto make_resumable_decoder_with_options(Source &source) {
-    return detail::resumable_factory<detail::resumable_decode_context<Source, Options, Codecs...>>{source};
+    return detail::resumable_factory<detail::resumable_decode_context<Source, Options, Codecs...>>{{}, source};
 }
 template <IsOptions Options, template <typename> typename... Codecs, typename Storage>
     requires(!ResumableInputSource<Storage>) && requires(Storage &storage) { make_input_source(storage); }
@@ -54,7 +67,7 @@ auto make_resumable_decoder_with_options(Storage &storage) {
 }
 
 template <template <typename> typename... Codecs, ResumableOutputSource Source> auto make_resumable_encoder(Source &source) {
-    return detail::resumable_factory<detail::resumable_encode_context<Source, default_options, Codecs...>>{source};
+    return detail::resumable_factory<detail::resumable_encode_context<Source, default_options, Codecs...>>{{}, source};
 }
 template <template <typename> typename... Codecs, typename Storage>
     requires(!ResumableOutputSource<Storage>) && requires(Storage &storage) { make_output_source(storage); }
@@ -64,7 +77,7 @@ auto make_resumable_encoder(Storage &storage) {
 }
 template <IsOptions Options, template <typename> typename... Codecs, ResumableOutputSource Source>
 auto make_resumable_encoder_with_options(Source &source) {
-    return detail::resumable_factory<detail::resumable_encode_context<Source, Options, Codecs...>>{source};
+    return detail::resumable_factory<detail::resumable_encode_context<Source, Options, Codecs...>>{{}, source};
 }
 template <IsOptions Options, template <typename> typename... Codecs, typename Storage>
     requires(!ResumableOutputSource<Storage>) && requires(Storage &storage) { make_output_source(storage); }

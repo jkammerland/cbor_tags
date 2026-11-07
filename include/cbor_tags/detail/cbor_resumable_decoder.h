@@ -98,6 +98,13 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_input;
 
+    // Borrowed views point into the source, same aliases as the one-shot decoder
+    using bstr_view_t        = typename ordinary_type::bstr_view_t;
+    using tstr_view_t        = typename ordinary_type::tstr_view_t;
+    using encoded_item_view  = typename ordinary_type::encoded_item_view;
+    using encoded_array_view = typename ordinary_type::encoded_array_view;
+    using encoded_map_view   = typename ordinary_type::encoded_map_view;
+
     resumable_decode_context(Source &source, resume_control &control) : source_(source), control_(control), ordinary_(source) {
         ordinary_.reader_.position_       = source.committed_position();
         ordinary_.reader_.current_offset_ = ordinary_.reader_.position_.offset();
