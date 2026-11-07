@@ -9,6 +9,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -154,6 +155,36 @@ template <bool Output, std::size_t Capacity> class ring_source {
         retained_ = through.offset();
     }
 
+    // Optional windows let the codec copy whole runs of the storage instead of
+    // single bytes, and let sinks see input in place. A run ends where the
+    // storage wraps.
+    std::optional<std::span<const std::byte>> borrow_window(iterator &from) const
+        requires(!Output)
+    {
+        const auto physical = from.offset() % Capacity;
+        return std::span<const std::byte>{bytes_.data() + physical,
+            std::min(limit() - from.offset(), Capacity - physical)};
+    }
+    void consume_window(iterator &from, std::size_t count) const
+        requires(!Output)
+    {
+        assert(count <= limit() - from.offset());
+        from.absolute += count;
+    }
+    std::optional<std::span<std::byte>> borrow_window()
+        requires(Output)
+    {
+        const auto physical = working_ % Capacity;
+        return std::span<std::byte>{bytes_.data() + physical,
+            std::min(retained_ + Capacity - working_, Capacity - physical)};
+    }
+    void consume_window(std::size_t count)
+        requires(Output)
+    {
+        assert(count <= retained_ + Capacity - working_);
+        working_ += count;
+    }
+
   private:
     static void check_capacity_end(std::size_t retained) {
         if (retained > std::numeric_limits<std::size_t>::max() - Capacity) {
@@ -193,6 +224,15 @@ static_assert(std::ranges::sized_range<const ring_source<false, 11>>);
 static_assert(!std::ranges::contiguous_range<const ring_source<false, 11>>);
 static_assert(!std::ranges::contiguous_range<const ring_source<true, 11>>);
 
+// FNV-1a, so the image can be checked without storing it
+constexpr std::uint32_t fnv1a_basis = 2'166'136'261U;
+std::uint32_t fnv1a(std::uint32_t hash, std::span<const std::byte> bytes) {
+    for (const auto byte : bytes) {
+        hash = (hash ^ std::to_integer<std::uint32_t>(byte)) * 16'777'619U;
+    }
+    return hash;
+}
+
 template <std::size_t Capacity>
 void publish(ring_source<true, Capacity> &output, std::vector<std::byte> &transport) {
     // Copy only committed bytes. The local borrow ends before reclamation.
@@ -205,6 +245,7 @@ void publish(ring_source<true, Capacity> &output, std::vector<std::byte> &transp
 
 /**
 readings = [* uint]
+image = bstr
 */
 int main() {
     constexpr std::size_t initial_offset = 100;
@@ -217,7 +258,13 @@ int main() {
     // Every integer retry fits the ring; the complete array is much larger.
     const std::vector<std::uint32_t> sent{0, 1, 23, 24, 255, 256, 65'535, 65'536, 1'000'000, 23, 24,
         255, 256, 65'535, 65'536, 1'000'000, 255, 256, 65'535, 65'536, 1'000'000};
-    auto encoding = encoder(sent);
+
+    // The image is many times the ring. Its payload passes through in pieces.
+    std::vector<std::byte> image(1'000);
+    for (std::size_t index = 0; index < image.size(); ++index) {
+        image[index] = static_cast<std::byte>(index * 7);
+    }
+    auto encoding = encoder(sent, image);
     std::vector<std::byte> transport;
     std::size_t output_resumptions{};
     while (!encoding.done()) {
@@ -238,13 +285,22 @@ int main() {
     assert(output.committed_position().offset() == initial_offset + transport.size());
     assert(output.size() == 0);
     assert(output_resumptions > 1);
-    assert(transport.size() > 3 * capacity);
+    assert(transport.size() > image.size());
 
     // Admit short chunks, preserving any uncommitted integer across each refill.
     ring_source<false, capacity> input(initial_offset);
     auto decoder = ct::make_resumable_decoder(input);
     std::vector<std::uint32_t> received;
-    auto decoding = decoder(received);
+
+    // The sink hashes the image as it arrives instead of storing it. Each piece
+    // points into the ring and is only valid during the call.
+    std::uint32_t image_hash = fnv1a_basis;
+    std::size_t image_pieces{};
+    auto decoding = decoder(received, ct::as_bstr_sink([&](std::span<const std::byte> piece) {
+        assert(piece.size() <= capacity);
+        image_hash = fnv1a(image_hash, piece);
+        ++image_pieces;
+    }));
     std::size_t supplied{};
     std::size_t input_resumptions{};
     while (!decoding.done()) {
@@ -265,6 +321,8 @@ int main() {
     assert(*decoded == transport.size());
     assert(decoding.committed_bytes() == transport.size());
     assert(received == sent);
+    assert(image_hash == fnv1a(fnv1a_basis, image));
+    assert(image_pieces > 1);
     assert(supplied == transport.size());
     assert(input.committed_position().offset() == initial_offset + transport.size());
     assert(input_resumptions > 1);
