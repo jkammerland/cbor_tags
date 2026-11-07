@@ -634,7 +634,17 @@ Bounded storage must fit the largest unit that is retried whole, in both
 directions. For built-in types that's one CBOR head, at most 9 bytes: string
 payloads pass through in pieces, and arrays and maps one element or entry at a
 time. `codec::typed_array` needs up to 18 bytes for its tag and byte-string
-heads together. A [decoded view](#borrow-decoded-strings-and-items) or a value
-with a [retry declaration](#ordinary-retry-declarations) needs its whole item.
-Use a resumable hook for larger values or reject them under the application's
+heads together, and takes each element whole. A
+[decoded view](#borrow-decoded-strings-and-items) or a value with a
+[retry declaration](#ordinary-retry-declarations) needs its whole item. Use a
+resumable hook for larger values or reject them under the application's
 capacity policy.
+
+A unit larger than the storage leaves the operation waiting for room that
+reclaiming can't make. A source can report that with
+`bool at_capacity() const noexcept`, which the operation checks whenever the
+codec suspends: return true when everything after the committed position, the
+bytes to read or the room to write, already spans all of the storage. The
+operation then fails with `status_code::capacity_exceeded` instead of waiting.
+The [ring example](../examples/46_resumable_ring.cpp) implements it for both
+directions.

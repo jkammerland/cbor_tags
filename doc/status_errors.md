@@ -85,6 +85,8 @@ input ownership and destination behavior.
 | `unexpected_group_size` | An array, map, or payload has the wrong size for a fixed-size destination. |
 | `out_of_memory` | Allocation failed or the destination cannot hold the requested size. |
 | `no_match_for_*` | The input does not match the requested type or tag. A variant may try another compatible alternative. |
+| `cancelled` | A [resumable operation](resumable.md#await-completion-or-cancel) was cancelled, or destroyed while pending. |
+| `capacity_exceeded` | A resumable operation needs more bytes at once than its bounded source can hold, as the source's `at_capacity()` reported. See [reclaiming sources](resumable.md#implement-a-reclaiming-source). |
 
 Malformed input stops variant decoding. These results describe the requested
 item; successful typed decoding does not validate trailing input.

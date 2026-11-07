@@ -185,6 +185,18 @@ template <bool Output, std::size_t Capacity> class ring_source {
         working_ += count;
     }
 
+    // Also optional. Everything after the committed position, bytes to read or
+    // room to write, already spans the ring, so reclaiming can't give a waiting
+    // codec more. Its operation fails with capacity_exceeded instead of waiting
+    // forever.
+    bool at_capacity() const noexcept {
+        if constexpr (Output) {
+            return retained_ + Capacity - committed_ == Capacity;
+        } else {
+            return available_ - committed_ == Capacity;
+        }
+    }
+
   private:
     static void check_capacity_end(std::size_t retained) {
         if (retained > std::numeric_limits<std::size_t>::max() - Capacity) {
@@ -328,6 +340,21 @@ int main() {
     assert(input_resumptions > 1);
     input.reclaim(input.committed_position());
     assert(input.size() == 0);
+
+    // A view of the image would need all of it in the ring at once. Thanks to
+    // at_capacity() that's an error instead of a wait that never ends.
+    ring_source<false, capacity> view_input(initial_offset);
+    auto view_decoder = ct::make_resumable_decoder(view_input);
+    std::vector<std::uint32_t> readings;
+    decltype(view_decoder)::bstr_view_t image_view;
+    auto viewing = view_decoder(readings, image_view);
+    for (std::size_t offered{}; !viewing.done();) {
+        view_input.reclaim(view_input.committed_position());
+        offered += view_input.append(std::span<const std::byte>{transport}.subspan(offered));
+        viewing.resume();
+    }
+    assert(!viewing.result());
+    assert(viewing.result().error() == ct::status_code::capacity_exceeded);
 
     std::cout << "encoded and decoded " << transport.size() << " bytes through " << capacity
               << "-byte rings\n";

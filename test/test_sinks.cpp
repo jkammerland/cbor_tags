@@ -138,6 +138,8 @@ template <std::size_t Capacity, bool Windows> struct ring_run {
                                            std::size_t cancel_at = std::numeric_limits<std::size_t>::max()) {
         resumable_test::ring_source<false, Capacity, Windows> ring;
         const auto                                            origin = ring.committed_position().offset();
+        // A sink drains the ring as it goes, so a full ring never means a stall
+        ring.reports_capacity = true;
 
         auto decoder   = make_resumable_decoder(ring);
         auto operation = decoder(as_bstr_sink([&](std::span<const std::byte> piece) {
@@ -397,6 +399,9 @@ TEST_SUITE("roundtrip/sinks") {
         std::vector<std::string>                     got_names;
         std::map<std::uint32_t, std::vector<int>>    got_groups;
         auto                                         decoder = make_resumable_decoder(ring);
+
+        // Elements commit as they go, so a full ring never means a stall
+        ring.reports_capacity = true;
         auto operation = decoder(as_array_sink<std::string>([&](std::string name) { got_names.push_back(std::move(name)); }),
                                  as_map_sink<std::uint32_t, std::vector<int>>(
                                      [&](std::uint32_t key, std::vector<int> values) { got_groups.emplace(key, std::move(values)); }));

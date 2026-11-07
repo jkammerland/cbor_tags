@@ -92,6 +92,15 @@ concept HasResumableSuspendHook = requires(Context &context) {
     { context.suspend() } -> std::same_as<void>;
 };
 
+// Any at_capacity() opts in, so a misdeclared one fails to compile instead of
+// being ignored
+template <typename Source>
+concept NamesCapacityReport = requires(Source &source) { source.at_capacity(); };
+template <typename Source>
+concept HasCapacityReport = requires(const Source &source) {
+    { source.at_capacity() } noexcept -> std::same_as<bool>;
+};
+
 struct resume_control {
     std::coroutine_handle<> leaf{};
     std::coroutine_handle<> waiter{};
@@ -149,6 +158,8 @@ template <typename Context> class [[nodiscard]] resume_operation {
             s.result   = status == status_code::success ? expected<std::size_t, status_code>{s.context.offset() - s.start}
                                                         : expected<std::size_t, status_code>{unexpected<status_code>{status}};
             s.finished = true;
+        } else if (stalled(s)) {
+            end(s, status_code::capacity_exceeded);
         }
         s.control.driving   = false;
         auto       waiter   = s.finished ? std::exchange(s.control.waiter, {}) : std::coroutine_handle<>{};
@@ -267,18 +278,34 @@ template <typename Context> class [[nodiscard]] resume_operation {
         return *state_;
     }
 
-    // Ends a pending operation as cancelled. Returns the waiter to wake.
-    static std::coroutine_handle<> stop(state &s) noexcept {
+    // Ends a pending operation with status. Waking the waiter is up to the caller.
+    static void end(state &s, status_code status) noexcept {
         // Retire every suspended handle before destroying its owning frames.
         // Input retains its committed source position; the dead reader needs no reset.
         s.control.leaf = {};
-        s.work         = resumable<status_code>{status_code::cancelled};
+        s.work         = resumable<status_code>{status};
         if constexpr (Context::waiting_state == resume_state::need_output)
             s.context.rollback();
 
-        s.result   = unexpected<status_code>{status_code::cancelled};
+        s.result   = unexpected<status_code>{status};
         s.finished = true;
+    }
+
+    // Ends a pending operation as cancelled. Returns the waiter to wake.
+    static std::coroutine_handle<> stop(state &s) noexcept {
+        end(s, status_code::cancelled);
         return std::exchange(s.control.waiter, {});
+    }
+
+    // The source says reclaiming can't give the waiting codec more, so it would
+    // wait forever
+    static bool stalled(state &s) noexcept {
+        using source_type = typename Context::source_type;
+        if constexpr (NamesCapacityReport<source_type>) {
+            static_assert(HasCapacityReport<source_type>, "at_capacity() must be a const noexcept member returning bool");
+            return std::as_const(s.context.source()).at_capacity();
+        } else
+            return false;
     }
 
     void release() noexcept {

@@ -14,7 +14,8 @@
 
 namespace resumable_test {
 
-// A bounded public-API consumer with absolute positions, contiguous windows only on request.
+// A bounded public-API consumer with absolute positions. Windows are a template option,
+// capacity reports a runtime one, so tests can still see a source without them.
 // Tests retire the committed prefix, forcing live codec positions across wraparound.
 template <bool Output, std::size_t Capacity, bool Windows = false> class ring_source {
   public:
@@ -148,6 +149,17 @@ template <bool Output, std::size_t Capacity, bool Windows = false> class ring_so
         }
         working_ += count;
     }
+
+    // Everything after the committed position, bytes to read or room to write,
+    // already spans the ring, so reclaiming can't give the codec more
+    bool at_capacity() const noexcept {
+        if constexpr (Output) {
+            return reports_capacity && retained_ + Capacity - committed_ == Capacity;
+        } else {
+            return reports_capacity && available_ - committed_ == Capacity;
+        }
+    }
+    bool reports_capacity{};
 
     // Lets tests tell borrowed pieces from copies
     bool stores(const std::byte *pointer) const {
