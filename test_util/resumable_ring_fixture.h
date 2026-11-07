@@ -5,16 +5,18 @@
 #include <cassert>
 #include <cbor_tags/cbor_resumable_source.h>
 #include <cstddef>
+#include <functional>
 #include <iterator>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
 
 namespace resumable_test {
 
-// A bounded public-API consumer with absolute positions and no contiguous windows.
+// A bounded public-API consumer with absolute positions, contiguous windows only on request.
 // Tests retire the committed prefix, forcing live codec positions across wraparound.
-template <bool Output, std::size_t Capacity> class ring_source {
+template <bool Output, std::size_t Capacity, bool Windows = false> class ring_source {
   public:
     using value_type = std::byte;
     using size_type  = std::size_t;
@@ -117,6 +119,41 @@ template <bool Output, std::size_t Capacity> class ring_source {
         retained_ = through;
     }
 
+    // Windows stop where the storage wraps
+    std::optional<std::span<const std::byte>> borrow_window(iterator &from) const
+        requires(Windows && !Output)
+    {
+        const auto physical = from.absolute % Capacity;
+        return std::span<const std::byte>{bytes_.data() + physical, std::min(limit() - from.absolute, Capacity - physical)};
+    }
+    void consume_window(iterator &from, std::size_t count) const
+        requires(Windows && !Output)
+    {
+        if (count > limit() - from.absolute) {
+            throw std::logic_error("consuming past the available input");
+        }
+        from.absolute += count;
+    }
+    std::optional<std::span<std::byte>> borrow_window()
+        requires(Windows && Output)
+    {
+        const auto physical = working_ % Capacity;
+        return std::span<std::byte>{bytes_.data() + physical, std::min(retained_ + Capacity - working_, Capacity - physical)};
+    }
+    void consume_window(std::size_t count)
+        requires(Windows && Output)
+    {
+        if (count > retained_ + Capacity - working_) {
+            throw std::logic_error("consuming past the output capacity");
+        }
+        working_ += count;
+    }
+
+    // Lets tests tell borrowed pieces from copies
+    bool stores(const std::byte *pointer) const {
+        return !std::less<const std::byte *>{}(pointer, bytes_.data()) && std::less<const std::byte *>{}(pointer, bytes_.data() + Capacity);
+    }
+
   private:
     std::size_t limit() const {
         if constexpr (Output) {
@@ -139,5 +176,11 @@ static_assert(cbor::tags::ResumableInputSource<ring_source<false, 11>>);
 static_assert(cbor::tags::ResumableOutputSource<ring_source<true, 11>>);
 static_assert(std::ranges::sized_range<const ring_source<false, 11>>);
 static_assert(!std::ranges::contiguous_range<ring_source<false, 11>>);
+static_assert(cbor::tags::ResumableInputSource<ring_source<false, 11, true>>);
+static_assert(cbor::tags::ResumableOutputSource<ring_source<true, 11, true>>);
+static_assert(cbor::tags::detail::HasInputWindow<ring_source<false, 11, true>, ring_source<false, 11, true>::iterator>);
+static_assert(!cbor::tags::detail::HasInputWindow<ring_source<false, 11>, ring_source<false, 11>::iterator>);
+static_assert(cbor::tags::detail::HasOutputWindow<ring_source<true, 11, true>>);
+static_assert(!cbor::tags::detail::HasOutputWindow<ring_source<true, 11>>);
 
 } // namespace resumable_test

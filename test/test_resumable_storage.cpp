@@ -407,13 +407,14 @@ TEST_SUITE("roundtrip/resumable_storage") {
 }
 
 TEST_SUITE("roundtrip/resumable_storage") {
-    TEST_CASE("public sized source reclaims a nonzero prefix during decoding") {
+    TEST_CASE_TEMPLATE("public sized source reclaims a nonzero prefix during decoding", Ring, resumable_test::ring_source<false, 11>,
+                       resumable_test::ring_source<false, 11, true>) {
         const std::vector<std::string> expected{"first", std::string(96, 'r'), "last"};
         std::vector<std::byte>         wire;
         REQUIRE(make_encoder(wire)(expected));
-        resumable_test::ring_source<false, 11> source;
-        std::vector<std::string>               actual;
-        auto                                   operation = make_resumable_decoder(source)(actual);
+        Ring                     source;
+        std::vector<std::string> actual;
+        auto                     operation = make_resumable_decoder(source)(actual);
 
         for (std::size_t supplied = 0; supplied != wire.size();) {
             const auto count =
@@ -433,13 +434,14 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(source.size() == 0);
     }
 
-    TEST_CASE("public sized source preserves a partial typed element across reclamation") {
+    TEST_CASE_TEMPLATE("public sized source preserves a partial typed element across reclamation", Ring,
+                       resumable_test::ring_source<false, 11>, resumable_test::ring_source<false, 11, true>) {
         const rfc8746::typed_array<std::uint32_t> expected{std::vector<std::uint32_t>{1, 24, 65536, 123456789}};
         std::vector<std::byte>                    wire;
         REQUIRE(make_encoder<codec::typed_array>(wire)(expected));
-        resumable_test::ring_source<false, 11> source;
-        rfc8746::typed_array<std::uint32_t>    actual;
-        auto                                   operation = make_resumable_decoder<codec::typed_array>(source)(actual);
+        Ring                                source;
+        rfc8746::typed_array<std::uint32_t> actual;
+        auto                                operation = make_resumable_decoder<codec::typed_array>(source)(actual);
 
         for (const auto &byte : wire) {
             REQUIRE(source.append(std::span{&byte, 1}) == 1);
@@ -453,12 +455,13 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(actual.values() == expected.values());
     }
 
-    TEST_CASE("public output source publishes each byte once through partial drains") {
-        const std::vector<std::string>        expected{"first", std::string(96, 'w'), "last"};
-        resumable_test::ring_source<true, 11> sink;
-        auto                                  operation = make_resumable_encoder(sink)(expected);
-        std::vector<std::byte>                delivered;
-        auto                                  published = sink.begin().offset();
+    TEST_CASE_TEMPLATE("public output source publishes each byte once through partial drains", Ring, resumable_test::ring_source<true, 11>,
+                       resumable_test::ring_source<true, 11, true>) {
+        const std::vector<std::string> expected{"first", std::string(96, 'w'), "last"};
+        Ring                           sink;
+        auto                           operation = make_resumable_encoder(sink)(expected);
+        std::vector<std::byte>         delivered;
+        auto                           published = sink.begin().offset();
 
         // A partial drain leaves an unsent committed tail while encoding can continue.
         while (!operation.done() || published != sink.committed_position().offset()) {
@@ -483,9 +486,10 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(decoder.tell() == delivered.end());
     }
 
-    TEST_CASE("public output source retains a partially written typed element") {
+    TEST_CASE_TEMPLATE("public output source retains a partially written typed element", Ring, resumable_test::ring_source<true, 7>,
+                       resumable_test::ring_source<true, 7, true>) {
         const rfc8746::typed_array<std::uint32_t> expected{std::vector<std::uint32_t>{1, 24, 65536, 123456789}};
-        resumable_test::ring_source<true, 7>      sink;
+        Ring                                      sink;
         auto                                      operation = make_resumable_encoder<codec::typed_array>(sink)(expected);
         std::vector<std::byte>                    delivered;
         auto                                      published = sink.begin().offset();
