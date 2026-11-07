@@ -202,14 +202,15 @@ ctest --test-dir build/resumable-bench -R 'resumable_(ordinary_throughput|throug
 ```
 
 The default uses an explicit source and output buffer. Configure with
-`-DCBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY=ON` to measure the named encoder and
-decoder factories that own their adapters. This changes only adapter setup;
-fixtures, feed loops and correctness checks remain identical. Validation continues
-to use an explicit source. For a baseline/candidate comparison, compile the same
-final harness against both header revisions with the same value for this option,
-the same compiler, and identical build flags. A comparison across different
-factory settings also changes the measured API setup and cannot isolate an
-adapter change. The separate storage target always uses the named factories.
+`-DCBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY=ON` to measure resumable encoders
+and decoders bound directly to storage, which own their adapters. This changes
+only adapter setup; fixtures, feed loops and correctness checks remain
+identical. Validation continues to use an explicit source. For a
+baseline/candidate comparison, compile the same final harness against both
+header revisions with the same value for this option, the same compiler, and
+identical build flags. A comparison across different
+settings of this option also changes the measured API setup and cannot isolate
+an adapter change. The separate storage target always binds storage directly.
 
 `bench_resumable_throughput_one_shot` runs only the one-shot rows. Both
 throughput drivers automatically build and load the same private one-shot
@@ -305,9 +306,10 @@ storage. The ring control has a 1460-byte capacity, starts at a nonzero absolute
 offset, wraps, and reclaims only committed bytes. It has bounded admission rows
 only and bypasses the built-in storage adapters.
 
-Every row includes factory and operation construction, storage reset, admission,
-completion checks, and calls to `resume()` when needed. Value destination reservation, fixed output
-backing, and supported outer-container reservation happen outside timing.
+Every row includes encoder or decoder and operation construction, storage reset,
+admission, completion checks, and calls to `resume()` when needed. Value
+destination reservation, fixed output backing, and supported outer-container
+reservation happen outside timing.
 `timed_storage_scope` identifies owning-packet copying/allocation, descriptor
 allocation, deque allocation, and ring publication copying. These scopes differ
 between storage types; use matched rows across header revisions to assess a code

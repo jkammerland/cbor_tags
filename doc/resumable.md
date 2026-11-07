@@ -4,8 +4,8 @@ The one-shot encoder and decoder (`make_encoder`, `make_decoder`) handle a whole
 item per call, and running out of input or output space ends the call. A
 resumable operation suspends instead and continues where it stopped.
 
-Include `<cbor_tags/cbor_resumable.h>`, bind caller-owned storage once, and change
-its availability before calling argument-free `resume()`. Operation creation
+Include `<cbor_tags/cbor_resumable.h>`, bind caller-owned storage once, then add
+more input or output space and call argument-free `resume()`. Operation creation
 runs eagerly; `resume()` reports `need_input`, `need_output`, or `finished`.
 Once an operation is finished, use `result()` to distinguish success from a
 terminal error. Calling `result()` earlier throws `std::logic_error`.
@@ -13,9 +13,9 @@ terminal error. Calling `result()` earlier throws `std::logic_error`.
 ## Custom codecs and supported combinations
 
 One-shot member, ADL, and mixin customizations need a resumable hook or an
-explicit [retry declaration](#one-shot-retry-declarations). A factory does not
-infer retry safety from the destination type or from a codec being supplied by
-the library.
+explicit [retry declaration](#one-shot-retry-declarations). Retry safety is
+never inferred from the destination type or from a codec being supplied by the
+library.
 
 For a record containing two strings, retain progress in a hook:
 
@@ -53,7 +53,7 @@ repeating completed work without copying or replacing the destination.
 | Member, ADL, or mixin resumable hooks | The hook retains progress and owns its effects. Hooks take precedence over one-shot customizations. |
 | One-shot customizations | Require a declaration for each applicable customization and direction. |
 | `codec::typed_array` | Owning array decoding and owning/borrowed-range encoding have native hooks. Other wrapper forms require a hook or retry declaration. |
-| `codec::shared_ptr` | Rejected by resumable factories, including encoding. Graph scope updates require a state-preserving resumable implementation. One-shot encoders and decoders support it. |
+| `codec::shared_ptr` | Rejected by resumable encoders and decoders. Graph scope updates require a state-preserving resumable implementation. One-shot encoders and decoders support it. |
 | [Sinks](#stream-decoded-data-to-callbacks) | String pieces reach the callback as they arrive and are committed once accepted. Elements and entries resume like container children. |
 
 Changing transport chunk boundaries must preserve the values of every
@@ -100,7 +100,7 @@ int main() {
 }
 ```
 
-Keep the chunk descriptors and their owners alive, and append without removing
+Keep the chunks and their owners alive, and append without removing
 or changing the retained prefix. The default adapter does not support
 `pop_front()` reclamation; use an explicit custom source for that, as in the
 [ring example](../examples/46_resumable_ring.cpp).
@@ -190,7 +190,7 @@ int main() {
 
 Only `committed_bytes()` may be published; capacity and tentative writes are not
 encoded length. When no more room will come, `close_output()` ends a waiting
-operation with `status_code::incomplete`. These default chunk descriptors stay
+operation with `status_code::incomplete`. These default chunks stay
 append-only even after publication; the
 [ring example](../examples/46_resumable_ring.cpp) shows explicit publication and
 reclamation ownership.
@@ -201,11 +201,11 @@ program that exposes writable chunks in two steps.
 
 ## Keep owners alive
 
-Declare storage, any explicit source or output buffer, factory, values,
-operation, and waiter in that order so reverse destruction releases borrowers
-first. A storage-bound factory owns its adapter, is immovable, and starts
-operations only as an lvalue; destroy each operation before starting another on
-the same storage, even after completion.
+Declare storage, any explicit source or output buffer, the resumable encoder or
+decoder, values, operation, and waiter in that order so reverse destruction
+releases borrowers first. An encoder or decoder bound directly to storage owns
+its adapter, is immovable, and starts operations only as an lvalue; destroy each
+operation before starting another on the same storage, even after completion.
 
 Successive operations retain the committed stream position and buffered tail.
 A failed or cancelled operation keeps what it committed, which can end inside an
@@ -214,12 +214,12 @@ elements, and the output can end with part of an item. Discard that input or
 output instead of starting another operation on it.
 
 Use `make_input_source(storage)` or `make_output_buffer(storage)` when the
-source or output buffer must outlive a factory or share its position between
-operation kinds; factories borrow them, and validators and generators require a
-source.
+source or output buffer must outlive one encoder or decoder, or share its
+position between operation kinds. Encoders and decoders borrow them; validators
+and generators require a source.
 
 Default adapters support flat and nested byte ranges, including owning inner
-containers and borrowed spans. Between resumptions, append descriptors or grow
+containers and borrowed spans. Between resumptions, append chunks or grow
 the last inner range while preserving earlier contents and order:
 
 - Indexable storage may reallocate; positions are logical indexes. Node-based
@@ -228,14 +228,15 @@ the last inner range while preserving earlier contents and order:
 - Final-range growth needs a sized range or a changed end boundary. Unsized
   ranges must preserve their previously observed end iterator; an unchanged end
   sentinel cannot expose growth without a custom source or output buffer.
-- Shrinking, replacing earlier ranges, removing descriptors, or appending after
+- Shrinking, replacing earlier ranges, removing chunks, or appending after
   closure violates the adapter's preconditions. Debug assertions check locally
   detectable violations; malformed CBOR and an already-acquired source or output
   buffer remain checked errors.
 
 Mutation and codec driving are serialized. Repeated `resume()` without new
-availability is safe, but the producer should wait for a storage change rather
-than busy-loop; running out of input never closes it, only `close_input()` does.
+input or output space is safe, but the producer should wait for a storage change
+rather than busy-loop; running out of input never closes it, only
+`close_input()` does.
 
 ## Borrow decoded strings and items
 
@@ -560,7 +561,7 @@ Calling `context.one_shot(value)` from a hook uses the same declaration checks.
 
 The entire one-shot retry unit must fit retained storage. Prefer hooks for
 large values and for stateful codecs. A retry declaration cannot enable
-`codec::shared_ptr` in a resumable factory.
+`codec::shared_ptr` in a resumable encoder or decoder.
 
 ## Implement a reclaiming source or output buffer
 
@@ -615,8 +616,9 @@ public members directly; declaring `position_type` selects this contract:
   `refresh()` runs before driving, and `close()` and `closed()` mark the end of
   input or output.
 - A sized input source reports its retained size and supplies
-  `remaining_size(position)` for exact availability. A nonzero absolute offset
-  is not an index into that retained size; unsized input needs no total extent.
+  `remaining_size(position)` with the exact count of bytes left. A nonzero
+  absolute offset is not an index into that retained size; unsized input needs
+  no total extent.
 
 Custom sources expose noncontiguous logical traversal even over contiguous
 allocations. Sources and output buffers can also lend windows, contiguous

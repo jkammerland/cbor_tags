@@ -61,7 +61,7 @@ int main() {
     assert(received_sequence == sequence);
     assert(operation.remaining_input().empty());
 
-    // Keep descriptors and their owner until destruction. Reclaiming consumed
+    // Keep the chunks and their owner until destruction. Reclaiming consumed
     // chunks during an operation requires a custom source, as in example 46.
     return 0;
 }

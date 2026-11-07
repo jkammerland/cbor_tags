@@ -45,7 +45,7 @@ int main() {
     assert(received == sent);
     assert(decoder.tell() == committed.end());
 
-    // Keep the descriptors and storage alive. Publishing does not authorize
+    // Keep the chunks and storage alive. Publishing does not authorize
     // pop_front(); reclaiming capacity needs a custom output buffer (example 46).
 
     std::cout << "received: " << received << '\n';
