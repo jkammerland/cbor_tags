@@ -2,6 +2,7 @@
 #include "cbor_tags/cbor_resumable.h"
 #include "cbor_tags/codec/typed_array.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <deque>
@@ -61,5 +62,31 @@ int main() {
     assert(!rejected.result());
     assert(rejected.result().error() == ct::status_code::size_limit_exceeded);
     assert(few == std::vector<float>{9.0F});
+
+    // A view borrows the floats from the input instead of copying them, so the whole array has to
+    // be in the input at once. Name its type through the decoder
+    std::vector<std::byte> received;
+    auto view_decoder = ct::make_resumable_decoder<ct::codec::typed_array>(received);
+    ct::rfc8746::typed_array_view_for<float, decltype(view_decoder)> view;
+    {
+        auto viewing = view_decoder(view);
+
+        // The first chunk isn't enough. Nothing commits until the whole array is there
+        received.insert(received.end(), buffer.begin(), buffer.begin() + 9);
+        const auto partial_state = viewing.resume();
+        assert(partial_state == ct::resume_state::need_input);
+        assert(viewing.committed_bytes() == 0);
+
+        received.insert(received.end(), buffer.begin() + 9, buffer.end());
+        const auto view_state = viewing.resume();
+        assert(view_state == ct::resume_state::finished);
+        assert(viewing.result());
+    }
+
+    // The view points into 'received', not into the operation. So it outlives the operation, and
+    // still works after 'received' reallocates
+    received.reserve(received.capacity() * 2);
+    assert(view.size() == sent.size());
+    assert(std::ranges::equal(view.values(), sent));
     return 0;
 }
