@@ -52,7 +52,7 @@ repeating completed work without copying or replacing the destination.
 | Core values, containers, and reflected records, including `as_named_map` | Structural progress resumes at completed headers, fields, map entries, and elements. |
 | Member, ADL, or mixin resumable hooks | The hook retains progress and owns its effects. Hooks take precedence over one-shot customizations. |
 | One-shot customizations | Require a declaration for each applicable customization and direction. |
-| `codec::typed_array` | Owning array decoding and owning/borrowed-range encoding have native hooks. Other wrapper forms require a hook or retry declaration. |
+| `codec::typed_array` | Owning arrays and `as_typed_array(...)` ranges have native hooks in both directions, also inside `as_bounded_size`. Other wrapper forms require a hook or retry declaration. |
 | `codec::shared_ptr` | Rejected by resumable encoders and decoders. Graph scope updates require a state-preserving resumable implementation. One-shot encoders and decoders support it. |
 | [Sinks](#stream-decoded-data-to-callbacks) | String pieces reach the callback as they arrive and are committed once accepted. Elements and entries resume like container children. |
 
@@ -519,11 +519,14 @@ Reservable destinations may allocate from validated lengths before payload
 arrival; use `as_bounded_size<0, limit>(values)` or a bounded allocator to impose
 application limits, with allocation failure reported as `out_of_memory`.
 
-With `codec::typed_array`, owning RFC 8746 arrays resume into numeric storage,
-and encoding accepts owning arrays or borrowed ranges. Headers and complete
-elements commit independently; the definite byte-string payload may cross
-transport chunks. Other wrappers need an applicable hook or retry declaration;
-borrowed views keep the one-shot input-lifetime rules.
+With `codec::typed_array`, owning RFC 8746 arrays and `as_typed_array(...)`
+ranges resume in both directions, with or without `as_bounded_size`. Decoding
+follows the one-shot
+[destination rules](rfc8746_typed_arrays.md#copied-and-borrowed-decode-forms)
+and checks bounds and the destination size before it commits the header.
+Headers and complete elements commit independently; the definite byte-string
+payload may cross transport chunks. Other wrappers need an applicable hook or
+retry declaration; borrowed views keep the one-shot input-lifetime rules.
 
 ### One-shot retry declarations
 

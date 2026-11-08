@@ -1075,11 +1075,27 @@ template <typename Self> struct typed_array : base<Self> {
 
     template <typename T, rfc8746::typed_array_byte_order ByteOrder>
     resumable_task<status_code> resumable_decode(rfc8746::typed_array<T, ByteOrder> &array) {
-        using value_type = std::remove_cv_t<T>;
-        return tags::detail::resumable_decode_typed_array<rfc8746::typed_array_traits<value_type, ByteOrder>::tag,
-                                                          rfc8746::detail::native_matches_byte_order<ByteOrder>>(
-            static_cast<Self &>(*this), array,
-            [](std::span<const std::byte> bytes) { return rfc8746::detail::from_endian<ByteOrder, value_type>(bytes); });
+        return resumable_decode_values<ByteOrder, false>(array.values(), 0, std::numeric_limits<std::uint64_t>::max());
+    }
+
+    template <typename R, rfc8746::typed_array_byte_order ByteOrder>
+        requires tags::detail::TypedArrayDestinationRange<R>
+    resumable_task<status_code> resumable_decode(rfc8746::detail::typed_array_range_ref<R, ByteOrder> &array) {
+        return resumable_decode_values<ByteOrder, true>(array.values(), 0, std::numeric_limits<std::uint64_t>::max());
+    }
+
+    template <typename Array, std::size_t Min, std::size_t Max>
+        requires(rfc8746::OwnedTypedArrayTarget<Array> || rfc8746::MutableTypedArrayRangeTarget<Array>)
+    resumable_task<status_code> resumable_decode(bounded_size<Array, Min, Max> &bounded) {
+        using array_type = std::remove_cvref_t<Array>;
+        rfc8746::detail::validate_static_typed_array_bounds<Min, Max, typename array_type::value_type, array_type::byte_order>();
+        return resumable_decode_bounded(bounded.value(), Min, Max);
+    }
+
+    template <typename Array>
+        requires(rfc8746::OwnedTypedArrayTarget<Array> || rfc8746::MutableTypedArrayRangeTarget<Array>)
+    resumable_task<status_code> resumable_decode(dynamic_bounded_size<Array> &bounded) {
+        return resumable_decode_bounded(bounded.value(), bounded.min_size(), bounded.max_size());
     }
 
     template <typename T, rfc8746::typed_array_byte_order ByteOrder>
@@ -1097,6 +1113,20 @@ template <typename Self> struct typed_array : base<Self> {
     template <typename R, rfc8746::typed_array_byte_order ByteOrder>
     resumable_task<status_code> resumable_encode(const rfc8746::detail::typed_array_range_ref<R, ByteOrder> &array) {
         return resumable_encode_values<ByteOrder>(array.values());
+    }
+
+    template <typename Array, std::size_t Min, std::size_t Max>
+        requires rfc8746::TypedArrayEncodeTarget<Array>
+    resumable_task<status_code> resumable_encode(const bounded_size<Array, Min, Max> &bounded) {
+        using array_type = std::remove_cvref_t<Array>;
+        rfc8746::detail::validate_static_typed_array_bounds<Min, Max, typename array_type::value_type, array_type::byte_order>();
+        return resumable_encode_bounded(bounded.value(), Min, Max);
+    }
+
+    template <typename Array>
+        requires rfc8746::TypedArrayEncodeTarget<Array>
+    resumable_task<status_code> resumable_encode(const dynamic_bounded_size<Array> &bounded) {
+        return resumable_encode_bounded(bounded.value(), bounded.min_size(), bounded.max_size());
     }
 
     template <typename Array, std::size_t Min, std::size_t Max>
@@ -1445,6 +1475,22 @@ template <typename Self> struct typed_array : base<Self> {
     }
 
   private:
+    // Owning arrays take any length, like one-shot decoding. Other destinations
+    // must fit the payload before anything is written.
+    template <rfc8746::typed_array_byte_order ByteOrder, bool CheckDestination, typename R>
+    resumable_task<status_code> resumable_decode_values(R &values, std::uint64_t min, std::uint64_t max) {
+        using value_type = std::ranges::range_value_t<R>;
+        return tags::detail::resumable_decode_typed_array<rfc8746::typed_array_traits<value_type, ByteOrder>::tag,
+                                                          rfc8746::detail::native_matches_byte_order<ByteOrder>, CheckDestination>(
+            static_cast<Self &>(*this), values, min, max,
+            [](std::span<const std::byte> bytes) { return rfc8746::detail::from_endian<ByteOrder, value_type>(bytes); });
+    }
+
+    template <typename Array> resumable_task<status_code> resumable_decode_bounded(Array &array, std::uint64_t min, std::uint64_t max) {
+        using array_type = std::remove_cvref_t<Array>;
+        return resumable_decode_values<array_type::byte_order, rfc8746::MutableTypedArrayRangeTarget<array_type>>(array.values(), min, max);
+    }
+
     template <rfc8746::typed_array_byte_order ByteOrder, typename Range>
     resumable_task<status_code> resumable_encode_values(Range &values) {
         using value_type = std::ranges::range_value_t<Range>;
@@ -1452,6 +1498,14 @@ template <typename Self> struct typed_array : base<Self> {
             static_cast<Self &>(*this), values, [](std::span<std::byte> output, std::span<const value_type> input) {
                 rfc8746::detail::write_endian_payload_to<ByteOrder>(output, input);
             });
+    }
+
+    // Checked before the header goes out, so nothing is written on a miss
+    template <typename Array> resumable_task<status_code> resumable_encode_bounded(const Array &array, std::size_t min, std::size_t max) {
+        if (tags::detail::bounded_size_status(typed_array_element_count(array), min, max) != status_code::success) {
+            return status_code::size_limit_exceeded;
+        }
+        return resumable_encode(array);
     }
 
     template <typename T, rfc8746::typed_array_byte_order ByteOrder>

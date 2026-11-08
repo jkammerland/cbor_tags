@@ -106,7 +106,9 @@ std::optional<ring_result> encode_through_ring(const T &value, std::size_t wire_
 
 // Typed arrays have no ==, so compare what they hold
 template <typename T> bool same_value(const T &left, const T &right) {
-    if constexpr (requires { left.values(); })
+    if constexpr (IsAnyBoundedSizeWrapper<T>)
+        return same_value(left.value(), right.value());
+    else if constexpr (requires { left.values(); })
         return std::ranges::equal(left.values(), right.values());
     else
         return left == right;
@@ -697,5 +699,26 @@ TEST_SUITE("roundtrip/resumable_storage") {
         sweep_capacity_reports(std::map<std::string, std::int64_t>{{"a", -1}, {std::string(30, 'k'), 1LL << 40}}, 9);
         sweep_capacity_reports<codec::typed_array>(rfc8746::typed_array<std::uint32_t>{std::vector<std::uint32_t>{1, 24, 65536, 123456789}},
                                                    4);
+        sweep_capacity_reports<codec::typed_array>(
+            bounded_size<rfc8746::typed_array<std::uint32_t>, 0, 8>{
+                rfc8746::typed_array<std::uint32_t>{std::vector<std::uint32_t>{1, 24, 65536, 123456789}}},
+            4);
+    }
+
+    TEST_CASE_TEMPLATE("a bounded borrowed typed array streams through a ring smaller than itself", Windows, std::false_type,
+                       std::true_type) {
+        const std::vector<std::uint32_t> expected{1, 24, 65536, 123456789, 7, 8};
+        std::vector<std::byte>           wire;
+        REQUIRE(make_encoder<codec::typed_array>(wire)(rfc8746::as_typed_array(expected)));
+        REQUIRE(wire.size() > 11);
+
+        // The 11 byte ring never holds the whole array
+        std::vector<std::uint32_t> actual{99};
+        auto                       bounded = as_bounded_size<0, 8>(rfc8746::as_typed_array(actual));
+        const auto                 result  = decode_through_ring<11, Windows::value, codec::typed_array>(wire, 1, bounded, true);
+        REQUIRE(result.has_value());
+        REQUIRE(*result);
+        CHECK(**result == wire.size());
+        CHECK(actual == expected);
     }
 }

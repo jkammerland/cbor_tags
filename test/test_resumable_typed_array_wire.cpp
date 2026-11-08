@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <iterator>
 #include <list>
+#include <memory>
 #include <ranges>
 #include <span>
 #include <vector>
@@ -53,6 +54,60 @@ void check_bad_typed_array_header(std::initializer_list<std::byte> bytes, status
         REQUIRE_FALSE(operation.result());
         CHECK(operation.result().error() == expected);
         CHECK(actual.values() == std::vector<std::uint16_t>{99});
+    }
+}
+
+// Only max_size() differs from std::allocator
+template <typename T> struct capped_allocator {
+    using value_type = T;
+
+    capped_allocator() = default;
+    template <typename U> constexpr capped_allocator(const capped_allocator<U> &) noexcept {}
+
+    T                        *allocate(std::size_t count) { return std::allocator<T>{}.allocate(count); }
+    void                      deallocate(T *pointer, std::size_t count) noexcept { std::allocator<T>{}.deallocate(pointer, count); }
+    [[nodiscard]] std::size_t max_size() const noexcept { return 1; }
+
+    friend bool operator==(const capped_allocator &, const capped_allocator &) = default;
+};
+
+// Typed arrays have no ==, so compare what they hold
+template <typename Storage> const auto &stored_values(const Storage &storage) {
+    if constexpr (requires { storage.values(); }) {
+        return storage.values();
+    } else {
+        return storage;
+    }
+}
+
+// Rejects at every split with the one-shot status, before committing input or
+// touching the destination. make_value wraps a fresh copy of initial.
+template <typename Storage, typename MakeValue>
+void check_rejected_destination(std::span<const std::byte> bytes, const Storage &initial, MakeValue make_value, status_code expected) {
+    Storage one_shot_storage = initial;
+    auto    one_shot_value   = make_value(one_shot_storage);
+    auto    one_shot         = make_decoder<codec::typed_array>(bytes)(one_shot_value);
+    REQUIRE_FALSE(one_shot);
+    CHECK(one_shot.error() == expected);
+
+    for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+        CAPTURE(cut);
+        input_chunks chunks;
+        auto         source    = make_input_source(chunks);
+        Storage      storage   = initial;
+        auto         operation = make_resumable_decoder<codec::typed_array>(source)(make_value(storage));
+        chunks.emplace_back(bytes.first(cut));
+        operation.resume();
+        if (!operation.done()) {
+            chunks.emplace_back(bytes.subspan(cut));
+            operation.close_input();
+        }
+
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == expected);
+        CHECK(source.committed_position().offset() == 0);
+        CHECK(std::ranges::equal(stored_values(storage), stored_values(initial)));
     }
 }
 
@@ -222,6 +277,102 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             CHECK(source.committed_position().offset() == header.size());
         }
         CHECK(actual.values().empty());
+    }
+
+    TEST_CASE("typed array bounds reject lengths like one-shot decoding") {
+        const std::array two{std::byte{0xd8}, std::byte{0x45}, std::byte{0x44}, std::byte{0x34},
+                             std::byte{0x12}, std::byte{0xcd}, std::byte{0xab}};
+        const std::array odd{std::byte{0xd8}, std::byte{0x45}, std::byte{0x43}, std::byte{0x34}, std::byte{0x12}, std::byte{0xcd}};
+        const auto owned  = [](std::size_t min, std::size_t max) { return [=](auto &array) { return as_bounded_size(array, min, max); }; };
+        const auto ranged = [](std::size_t min, std::size_t max) {
+            return [=](auto &values) { return as_bounded_size(rfc8746::as_typed_array(values), min, max); };
+        };
+        const array_type                 initial{99};
+        const std::vector<std::uint16_t> initial_values{99};
+
+        check_rejected_destination(std::span{two}, initial, owned(0, 1), status_code::size_limit_exceeded);
+        check_rejected_destination(std::span{two}, initial, owned(3, 5), status_code::size_limit_exceeded);
+        check_rejected_destination(std::span{two}, initial_values, ranged(0, 1), status_code::size_limit_exceeded);
+        check_rejected_destination(std::span{two}, initial_values, ranged(3, 5), status_code::size_limit_exceeded);
+        check_rejected_destination(
+            std::span{two}, initial, [](auto &array) { return as_bounded_size<0, 1>(array); }, status_code::size_limit_exceeded);
+        check_rejected_destination(
+            std::span{two}, initial_values, [](auto &values) { return as_bounded_size<3, 5>(rfc8746::as_typed_array(values)); },
+            status_code::size_limit_exceeded);
+
+        // An odd length past a bound reports the bound, inside it the alignment
+        check_rejected_destination(std::span{odd}, initial, owned(0, 1), status_code::size_limit_exceeded);
+        check_rejected_destination(std::span{odd}, initial_values, ranged(0, 1), status_code::size_limit_exceeded);
+        check_rejected_destination(std::span{odd}, initial, owned(0, 4), status_code::unexpected_group_size);
+        check_rejected_destination(std::span{odd}, initial_values, ranged(0, 4), status_code::unexpected_group_size);
+    }
+
+    TEST_CASE("typed array bounds reject a long header before reserving storage") {
+        // Claims 1 GiB of payload, none of which arrives
+        const std::array header{std::byte{0xd8}, std::byte{0x45}, std::byte{0x5a}, std::byte{0x40},
+                                std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+        auto             check = [&](auto &values, auto value) {
+            const auto   capacity = values.capacity();
+            input_chunks chunks{std::span<const std::byte>{header}};
+            auto         source    = make_input_source(chunks);
+            auto         operation = make_resumable_decoder<codec::typed_array>(source)(value);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::size_limit_exceeded);
+            CHECK(source.committed_position().offset() == 0);
+            CHECK(values == std::vector<std::uint16_t>{99});
+            CHECK(values.capacity() == capacity);
+        };
+
+        array_type owned{99};
+        check(owned.values(), as_bounded_size<0, 16>(owned));
+        check(owned.values(), as_bounded_size(owned, 0, 16));
+        std::vector<std::uint16_t> values{99};
+        check(values, as_bounded_size<0, 16>(rfc8746::as_typed_array(values)));
+        check(values, as_bounded_size(rfc8746::as_typed_array(values), 0, 16));
+    }
+
+    TEST_CASE("borrowed destinations reject counts they can't hold like one-shot decoding") {
+        std::array<std::uint16_t, 3> fixed{97, 98, 99};
+        check_rejected_destination(
+            std::span{encoded}, fixed, [](auto &array) { return rfc8746::as_typed_array(std::span{array}); },
+            status_code::unexpected_group_size);
+
+        const std::list<std::uint16_t> linked{97, 98, 99};
+        check_rejected_destination(
+            std::span{encoded}, linked, [](auto &list) { return rfc8746::as_typed_array(std::ranges::subrange(list)); },
+            status_code::unexpected_group_size);
+
+        const std::vector<std::uint16_t, capped_allocator<std::uint16_t>> capped{99};
+        check_rejected_destination(
+            std::span{encoded}, capped, [](auto &values) { return rfc8746::as_typed_array(values); }, status_code::size_limit_exceeded);
+    }
+
+    TEST_CASE("typed array bounds reject an encode before writing") {
+        const array_type                 expected{0x1234, 0xabcd};
+        const std::vector<std::uint16_t> values{0x1234, 0xabcd};
+        auto                             check = [](const auto &value) {
+            std::vector<std::byte> one_shot_bytes;
+            const auto             one_shot = make_encoder<codec::typed_array>(one_shot_bytes)(value);
+            REQUIRE_FALSE(one_shot);
+            CHECK(one_shot.error() == status_code::size_limit_exceeded);
+
+            std::array<std::byte, encoded.size()> output{};
+            output_chunks                         chunks{std::span{output}};
+            auto                                  sink      = make_output_buffer(chunks);
+            auto                                  operation = make_resumable_encoder<codec::typed_array>(sink)(value);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::size_limit_exceeded);
+            CHECK(operation.committed_bytes() == 0);
+            CHECK(sink.position().offset() == 0);
+        };
+
+        check(as_bounded_size<0, 1>(expected));
+        check(as_bounded_size<3, 5>(expected));
+        check(as_bounded_size(expected, 0, 1));
+        check(as_bounded_size<0, 1>(rfc8746::as_typed_array(values)));
+        check(as_bounded_size(rfc8746::as_typed_array(values), 3, 5));
     }
 
     TEST_CASE("typed array leaves following items available and reports the consumed size") {

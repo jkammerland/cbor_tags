@@ -7,7 +7,9 @@
 #include <cbor_tags/codec/typed_array.h>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <doctest/doctest.h>
+#include <forward_list>
 #include <iterator>
 #include <list>
 #include <ranges>
@@ -153,6 +155,49 @@ template <typename T> void check_typed_array_byte_orders(std::vector<T> values) 
     check_typed_array_splits(rfc8746::typed_array<T, rfc8746::typed_array_byte_order::big>{std::move(values)});
 }
 
+template <rfc8746::typed_array_byte_order Order, typename R> auto as_destination(R &&range) {
+    if constexpr (Order == rfc8746::typed_array_byte_order::big) {
+        return rfc8746::as_typed_array_be(std::forward<R>(range));
+    } else {
+        return rfc8746::as_typed_array(std::forward<R>(range));
+    }
+}
+
+template <typename Storage> const auto &stored_values(const Storage &storage) {
+    if constexpr (requires { storage.values(); }) {
+        return storage.values();
+    } else {
+        return storage;
+    }
+}
+
+// Decodes into a copy of initial at every split. make_value wraps the copy in
+// whatever gets decoded, like as_typed_array or a bound.
+template <rfc8746::typed_array_byte_order Order, typename Storage, typename MakeValue>
+void check_destination_splits(const std::vector<std::uint32_t> &expected, const Storage &initial, MakeValue make_value) {
+    const auto bytes = typed_array_bytes(rfc8746::typed_array<std::uint32_t, Order>{expected});
+    const auto input = std::span<const std::byte>{bytes};
+    for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+        CAPTURE(cut);
+        input_chunks chunks;
+        auto         source    = make_input_source(chunks);
+        Storage      storage   = initial;
+        auto         operation = make_resumable_decoder<codec::typed_array>(source)(make_value(storage));
+        chunks.emplace_back(input.first(cut));
+        operation.resume();
+        if (!operation.done()) {
+            chunks.emplace_back(input.subspan(cut));
+            operation.close_input();
+        }
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == bytes.size());
+        CHECK(std::ranges::empty(operation.remaining_input()));
+        CHECK(std::ranges::equal(stored_values(storage), expected));
+    }
+}
+
 // An explicit codec hook remains the selected customization before this codec.
 template <typename Self> struct typed_array_override : codec::base<Self> {
     using codec::base<Self>::decode;
@@ -175,28 +220,79 @@ template <typename Self> struct typed_array_override : codec::base<Self> {
 } // namespace
 
 TEST_SUITE("roundtrip/resumable_typed_array") {
-    TEST_CASE("opposite endian typed arrays preserve non default constructible elements at every split") {
-        constexpr auto order =
-            std::endian::native == std::endian::little ? rfc8746::typed_array_byte_order::big : rfc8746::typed_array_byte_order::little;
-        const rfc8746::typed_array<std::uint32_t, order> expected{0, 0x12345678, 0xffffffff};
-        const auto                                       bytes = typed_array_bytes(expected);
+    TEST_CASE("typed arrays preserve non default constructible elements at every split in both byte orders") {
+        auto check = []<rfc8746::typed_array_byte_order Order>() {
+            const rfc8746::typed_array<std::uint32_t, Order> expected{0, 0x12345678, 0xffffffff};
+            const auto                                       bytes = typed_array_bytes(expected);
 
-        for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
-            CAPTURE(cut);
-            std::vector<std::byte>                              input(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(cut));
-            auto                                                decoder = make_resumable_decoder<codec::typed_array>(input);
-            rfc8746::typed_array<non_default_typed_word, order> actual;
-            auto                                                operation = decoder(actual);
+            for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+                CAPTURE(cut);
+                std::vector<std::byte>                              input(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(cut));
+                auto                                                decoder = make_resumable_decoder<codec::typed_array>(input);
+                rfc8746::typed_array<non_default_typed_word, Order> actual;
+                auto                                                operation = decoder(actual);
 
-            input.insert(input.end(), bytes.begin() + static_cast<std::ptrdiff_t>(cut), bytes.end());
-            const auto state = operation.close_input();
-            REQUIRE(state == resume_state::finished);
-            REQUIRE(operation.result());
-            CHECK(*operation.result() == bytes.size());
-            REQUIRE(actual.values().size() == expected.values().size());
-            for (std::size_t index = 0; index != expected.values().size(); ++index)
-                CHECK(actual.values()[index].value == expected.values()[index]);
-        }
+                input.insert(input.end(), bytes.begin() + static_cast<std::ptrdiff_t>(cut), bytes.end());
+                const auto state = operation.close_input();
+                REQUIRE(state == resume_state::finished);
+                REQUIRE(operation.result());
+                CHECK(*operation.result() == bytes.size());
+                REQUIRE(actual.values().size() == expected.values().size());
+                for (std::size_t index = 0; index != expected.values().size(); ++index)
+                    CHECK(actual.values()[index].value == expected.values()[index]);
+            }
+        };
+        check.template operator()<rfc8746::typed_array_byte_order::little>();
+        check.template operator()<rfc8746::typed_array_byte_order::big>();
+    }
+
+    TEST_CASE("borrowed destination ranges decode at every split in both byte orders") {
+        const std::vector<std::uint32_t> expected{1, 0x12345678, 0xffffffff};
+        auto                             check = [&]<rfc8746::typed_array_byte_order Order>() {
+            auto wrap = [](auto &range) { return as_destination<Order>(range); };
+
+            // Growable ranges drop what they held before
+            check_destination_splits<Order>(expected, std::vector<std::uint32_t>{99, 98}, wrap);
+            check_destination_splits<Order>(expected, std::deque<std::uint32_t>{99}, wrap);
+            check_destination_splits<Order>(expected, std::list<std::uint32_t>{99}, wrap);
+            check_destination_splits<Order>(expected, std::forward_list<std::uint32_t>{99}, wrap);
+
+            // Fixed ranges of the right size are overwritten in place
+            check_destination_splits<Order>(expected, std::array<std::uint32_t, 3>{99, 98, 97}, wrap);
+            check_destination_splits<Order>(expected, std::array<std::uint32_t, 3>{99, 98, 97},
+                                            [](auto &array) { return as_destination<Order>(std::span{array}); });
+            check_destination_splits<Order>(expected, std::list<std::uint32_t>(3, 99),
+                                            [](auto &list) { return as_destination<Order>(std::ranges::subrange(list)); });
+        };
+        check.template operator()<rfc8746::typed_array_byte_order::little>();
+        check.template operator()<rfc8746::typed_array_byte_order::big>();
+    }
+
+    TEST_CASE("bounded typed arrays decode at every split") {
+        using order = rfc8746::typed_array_byte_order;
+        const std::vector<std::uint32_t> expected{1, 0x12345678, 0xffffffff};
+
+        // Exact bounds keep both edges in play
+        check_destination_splits<order::little>(expected, rfc8746::typed_array<std::uint32_t>{99},
+                                                [](auto &array) { return as_bounded_size<3, 3>(array); });
+        check_destination_splits<order::big>(expected, rfc8746::typed_array<std::uint32_t, order::big>{99},
+                                             [](auto &array) { return as_bounded_size(array, 3, 3); });
+        check_destination_splits<order::little>(expected, std::vector<std::uint32_t>{99},
+                                                [](auto &values) { return as_bounded_size<3, 3>(rfc8746::as_typed_array(values)); });
+        check_destination_splits<order::big>(expected, std::list<std::uint32_t>{99},
+                                             [](auto &values) { return as_bounded_size(rfc8746::as_typed_array_be(values), 0, 3); });
+    }
+
+    TEST_CASE("bounded typed arrays encode at every split") {
+        using order = rfc8746::typed_array_byte_order;
+        const rfc8746::typed_array<std::uint32_t, order::big> expected{1, 0x12345678, 0xffffffff};
+        const std::vector<std::uint32_t>                      values{1, 0x12345678, 0xffffffff};
+        const std::list<std::uint32_t>                        linked(values.begin(), values.end());
+
+        check_typed_array_encode_splits(expected, as_bounded_size<3, 3>(expected));
+        check_typed_array_encode_splits(expected, as_bounded_size(expected, 3, 3));
+        check_typed_array_encode_splits(expected, as_bounded_size<0, 3>(rfc8746::as_typed_array_be(values)));
+        check_typed_array_encode_splits(expected, as_bounded_size(rfc8746::as_typed_array_be(linked), 3, 8));
     }
 
     TEST_CASE("owning typed arrays preserve integer and floating representations at every transport split") {
