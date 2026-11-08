@@ -35,8 +35,8 @@ struct string_pair {
     std::string second;
     bool        operator==(const string_pair &) const = default;
 
-    template <typename Encoder> auto                   encode(Encoder &encoder) const { return encoder(wrap_as_array{first, second}); }
-    template <typename Decoder> auto                   decode(Decoder &decoder) { return decoder(wrap_as_array{first, second}); }
+    template <typename Encoder> auto                        encode(Encoder &encoder) const { return encoder(wrap_as_array{first, second}); }
+    template <typename Decoder> auto                        decode(Decoder &decoder) { return decoder(wrap_as_array{first, second}); }
     template <typename Encoder> resumable_task<status_code> resumable_encode(Encoder &encoder) const {
         co_return co_await encoder(wrap_as_array{first, second});
     }

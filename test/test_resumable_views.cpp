@@ -5,7 +5,6 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_raw_views.h>
 #include <cbor_tags/cbor_resumable.h>
-
 #include <cstdint>
 #include <deque>
 #include <list>
@@ -32,7 +31,8 @@ concept has_view_types = requires {
 
 // Both decoder factory kinds name their views, encoders have none.
 static_assert(has_view_types<decltype(make_resumable_decoder(std::declval<std::vector<std::byte> &>()))>);
-static_assert(has_view_types<decltype(make_resumable_decoder(std::declval<decltype(make_input_source(std::declval<input_chunks &>())) &>()))>);
+static_assert(
+    has_view_types<decltype(make_resumable_decoder(std::declval<decltype(make_input_source(std::declval<input_chunks &>())) &>()))>);
 static_assert(!has_view_types<decltype(make_resumable_encoder(std::declval<std::vector<std::byte> &>()))>);
 
 template <typename T> std::vector<std::byte> encode_one(const T &value) {

@@ -187,7 +187,7 @@ int main() {
     return operation.done() ? 0 : 1;
 #else
     resumable_task<status_code> ready{status_code::success};
-    auto                   awaiter = std::move(ready).operator co_await();
+    auto                        awaiter = std::move(ready).operator co_await();
     return awaiter.await_ready() && awaiter.await_resume() == status_code::success ? 0 : 1;
 #endif
 }

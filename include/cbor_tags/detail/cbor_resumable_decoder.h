@@ -694,7 +694,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     template <typename Object, typename Seen>
     resumable_task<status_code> named_map_value(Object &object, std::string_view key, Seen &seen) {
         std::optional<resumable_task<status_code>> value;
-        auto                                  status = status_code::success;
+        auto                                       status = status_code::success;
         if (!named_member_by_key(object, key, seen, status, value) && !named_extension_by_key(object, key, status, value))
             return status_code::unexpected_group_size;
         if (value)

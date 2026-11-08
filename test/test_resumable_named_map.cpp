@@ -53,7 +53,9 @@ struct named_extended {
     as_named_extension<std::map<std::string, std::string>> extra;
 };
 
-bool same_extended(const named_extended &lhs, const named_extended &rhs) { return lhs.id == rhs.id && lhs.extra.value_ == rhs.extra.value_; }
+bool same_extended(const named_extended &lhs, const named_extended &rhs) {
+    return lhs.id == rhs.id && lhs.extra.value_ == rhs.extra.value_;
+}
 
 // The one-shot decoder is the reference: every input split must give its
 // status, and on success the same value.
@@ -168,6 +170,7 @@ TEST_SUITE("cbor_wire/resumable") {
 
     TEST_CASE("named maps report the one-shot status for malformed entries at every split") {
         // Entries reused below: "name": "a", "values": [], "id": 1.
+        // clang-format off
         const std::string name_a    = "646e616d65" "6161";
         const std::string no_values = "6676616c756573" "80";
         const std::string id_1      = "626964" "01";
@@ -182,6 +185,7 @@ TEST_SUITE("cbor_wire/resumable") {
             "bf" + name_a + "6676616c756573" "8101" + id_1 + "ff",  // indefinite map
             "a1" "74" + repeat("6b", 20) + "01",                    // 20-byte key, longer than every field
         };
+        // clang-format on
         for (const auto &hex : cases) {
             CAPTURE(hex);
             const auto wire = to_bytes(hex);
@@ -193,7 +197,7 @@ TEST_SUITE("cbor_wire/resumable") {
     TEST_CASE("named map keys that can't match fail before their payload arrives") {
         // A key header declaring 1 GiB. Waiting for that payload, or reserving
         // it, would be pointless: no field name is that long.
-        std::vector<std::byte> input = to_bytes("a17a40000000");
+        std::vector<std::byte> input   = to_bytes("a17a40000000");
         auto                   decoder = make_resumable_decoder(input);
         named_station          received{};
         auto                   operation = decoder(as_named_map{received});
@@ -203,7 +207,7 @@ TEST_SUITE("cbor_wire/resumable") {
     }
 
     TEST_CASE("named maps encode per entry with the one-shot bytes at every output split") {
-        named_station station{.name = std::string(100, 'n'), .values = {1, 10, 1000}, .note = std::nullopt, .id = 7};
+        named_station  station{.name = std::string(100, 'n'), .values = {1, 10, 1000}, .note = std::nullopt, .id = 7};
         named_extended extended{.id = "device"};
         extended.extra.value_ = {{"k1", "v1"}, {"k2", std::string(30, 'v')}};
         const named_reading reading{
@@ -267,7 +271,9 @@ TEST_SUITE("cbor_wire/resumable") {
 
     TEST_CASE("named map extension values with duplicate keys are rejected at every split") {
         // {"id": "a", "k": "v", "k": "w"}
+        // clang-format off
         check_named_map_splits<named_extended>(to_bytes("a3" "6269646161" "616b6176" "616b6177"), same_extended);
+        // clang-format on
     }
 }
 

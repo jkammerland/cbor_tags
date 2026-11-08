@@ -674,7 +674,7 @@ TEST_SUITE("Views errors") {
                        test_util::basic_string_view<std::byte>) {
         const auto data = std::deque<std::byte>{std::byte{0x43}, std::byte{0x61}}; // h'616263', 1 of 3 payload bytes
 
-        auto view = T{};
+        auto view  = T{};
         auto check = [&](auto &&target) {
             auto result = make_decoder(data)(target);
             REQUIRE_FALSE(result);
