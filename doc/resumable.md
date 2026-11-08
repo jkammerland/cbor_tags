@@ -525,8 +525,10 @@ follows the one-shot
 [destination rules](rfc8746_typed_arrays.md#copied-and-borrowed-decode-forms)
 and checks bounds and the destination size before it commits the header.
 Headers and complete elements commit independently; the definite byte-string
-payload may cross transport chunks. Other wrappers need an applicable hook or
-retry declaration; borrowed views keep the one-shot input-lifetime rules.
+payload may cross transport chunks, as in the
+[typed-array example](../examples/47_resumable_typed_array.cpp). Other wrappers
+need an applicable hook or retry declaration; borrowed views keep the one-shot
+input-lifetime rules.
 
 ### One-shot retry declarations
 
