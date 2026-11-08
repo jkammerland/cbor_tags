@@ -15,7 +15,8 @@ terminal error. Calling `result()` earlier throws `std::logic_error`.
 One-shot member, ADL, and mixin customizations need a resumable hook or an
 explicit [retry declaration](#one-shot-retry-declarations). Retry safety is
 never inferred from the destination type or from a codec being supplied by the
-library.
+library. Library codecs provide their own hooks and declarations; the table
+below lists them.
 
 For a record containing two strings, retain progress in a hook:
 
@@ -52,7 +53,7 @@ repeating completed work without copying or replacing the destination.
 | Core values, containers, and reflected records, including `as_named_map` | Structural progress resumes at completed headers, fields, map entries, and elements. |
 | Member, ADL, or mixin resumable hooks | The hook retains progress and owns its effects. Hooks take precedence over one-shot customizations. |
 | One-shot customizations | Require a declaration for each applicable customization and direction. |
-| `codec::typed_array` | Owning arrays and `as_typed_array(...)` ranges have native hooks in both directions, also inside `as_bounded_size`. Other wrapper forms require a hook or retry declaration. |
+| `codec::typed_array` | Owning arrays and `as_typed_array(...)` ranges have native hooks in both directions. Typed-array views have a decode retry declaration. Both also work inside `as_bounded_size`. Other wrapper forms require a hook or retry declaration. |
 | `codec::shared_ptr` | Rejected by resumable encoders and decoders. Graph scope updates require a state-preserving resumable implementation. One-shot encoders and decoders support it. |
 | [Sinks](#stream-decoded-data-to-callbacks) | String pieces reach the callback as they arrive and are committed once accepted. Elements and entries resume like container children. |
 
@@ -526,9 +527,22 @@ follows the one-shot
 and checks bounds and the destination size before it commits the header.
 Headers and complete elements commit independently; the definite byte-string
 payload may cross transport chunks, as in the
-[typed-array example](../examples/47_resumable_typed_array.cpp). Other wrappers
-need an applicable hook or retry declaration; borrowed views keep the one-shot
-input-lifetime rules.
+[typed-array example](../examples/47_resumable_typed_array.cpp).
+
+Typed-array views are [decoded views](#borrow-decoded-strings-and-items). Name
+them through the decoder:
+
+```cpp
+auto decoder = ct::make_resumable_decoder<ct::codec::typed_array>(input);
+ct::rfc8746::typed_array_view_for<float, decltype(decoder)> samples;
+auto operation = decoder(samples);
+```
+
+Use `typed_array_view_be_for` for big-endian views. The library declares their
+one-shot decoding [retry-safe](#one-shot-retry-declarations), with or without
+`as_bounded_size`, so a view commits nothing until its whole item has arrived.
+A `typed_array_view<T>` stores a span and fails like `std::span<const std::byte>`.
+Other wrappers need an applicable hook or retry declaration.
 
 ### One-shot retry declarations
 
@@ -650,12 +664,12 @@ newly committed ranges independently of reclamation.
 Bounded storage must fit the largest unit that is retried whole, in both
 directions. For built-in types that's one CBOR head, at most 9 bytes: string
 payloads pass through in pieces, and arrays and maps one element or entry at a
-time. `codec::typed_array` needs up to 18 bytes for its tag and byte-string
-heads together, and takes each element whole. A
-[decoded view](#borrow-decoded-strings-and-items) or a value with a
-[retry declaration](#one-shot-retry-declarations) needs its whole item. Use a
-resumable hook for larger values or reject them under the application's
-capacity policy.
+time. `codec::typed_array` arrays and ranges need up to 18 bytes for their tag
+and byte-string heads together, and take each element whole. A
+[decoded view](#borrow-decoded-strings-and-items), typed-array views included,
+or a value with a [retry declaration](#one-shot-retry-declarations) needs its
+whole item. Use a resumable hook for larger values or reject them under the
+application's capacity policy.
 
 A unit larger than the storage leaves the operation waiting for room that
 reclaiming can't make. A source or output buffer can report that with

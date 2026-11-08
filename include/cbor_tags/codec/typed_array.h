@@ -802,18 +802,29 @@ class typed_array_view {
     std::size_t payload_size_{};
 };
 
+namespace detail {
+
+// Contiguous input gives spans. Everything else names its own bstr view,
+// resumable decoders too since they have no input buffer.
+template <typename Decoder> struct typed_array_payload_view {
+    using type = typename Decoder::bstr_view_t;
+};
+template <typename Decoder>
+    requires IsContiguous<typename Decoder::input_buffer_type>
+struct typed_array_payload_view<Decoder> {
+    using type = std::span<const std::byte>;
+};
+
+template <typename Decoder> using typed_array_payload_view_t = typename typed_array_payload_view<std::remove_cvref_t<Decoder>>::type;
+
+} // namespace detail
+
 template <IsTypedArrayElement T, typename Decoder>
-using typed_array_view_for =
-    typed_array_view<T, std::conditional_t<IsContiguous<typename std::remove_cvref_t<Decoder>::input_buffer_type>,
-                                           std::span<const std::byte>, typename std::remove_cvref_t<Decoder>::bstr_view_t>>;
+using typed_array_view_for = typed_array_view<T, detail::typed_array_payload_view_t<Decoder>>;
 
 template <typename T, typename Decoder>
     requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
-using typed_array_view_be_for =
-    typed_array_view<T,
-                     std::conditional_t<IsContiguous<typename std::remove_cvref_t<Decoder>::input_buffer_type>, std::span<const std::byte>,
-                                        typename std::remove_cvref_t<Decoder>::bstr_view_t>,
-                     typed_array_byte_order::big>;
+using typed_array_view_be_for = typed_array_view<T, detail::typed_array_payload_view_t<Decoder>, typed_array_byte_order::big>;
 
 template <typename T>
     requires IsTypedArrayElementFor<T, typed_array_byte_order::big>
@@ -1812,6 +1823,31 @@ template <typename Self> struct typed_array : base<Self> {
 };
 
 } // namespace cbor::tags::codec
+
+namespace cbor::tags {
+
+// One-shot view decoding only assigns the view once the whole payload is there,
+// so retrying it is safe. Views don't encode.
+template <typename T, rfc8746::detail::TypedArrayPayloadRange ByteRange, rfc8746::typed_array_byte_order ByteOrder, typename Self>
+struct resumable_retry_traits<rfc8746::typed_array_view<T, ByteRange, ByteOrder>, codec::typed_array<Self>> {
+    static constexpr bool encode = false;
+    static constexpr bool decode = true;
+};
+
+// Same with bounds, they're checked before the payload
+template <rfc8746::TypedArrayViewTarget Array, std::size_t Min, std::size_t Max, typename Self>
+struct resumable_retry_traits<bounded_size<Array, Min, Max>, codec::typed_array<Self>> {
+    static constexpr bool encode = false;
+    static constexpr bool decode = true;
+};
+
+template <rfc8746::TypedArrayViewTarget Array, typename Self>
+struct resumable_retry_traits<dynamic_bounded_size<Array>, codec::typed_array<Self>> {
+    static constexpr bool encode = false;
+    static constexpr bool decode = true;
+};
+
+} // namespace cbor::tags
 
 namespace cbor::tags::rfc8746 {
 

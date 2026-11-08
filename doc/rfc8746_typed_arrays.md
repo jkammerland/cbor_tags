@@ -232,6 +232,8 @@ dec(view);
 ```
 
 Use `typed_array_view_be_for<T, Decoder>` for non-contiguous big-endian views.
+Both aliases also name views for
+[resumable decoders](resumable.md#compose-custom-codecs).
 
 ### Destination Failures
 

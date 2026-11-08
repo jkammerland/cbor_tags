@@ -111,6 +111,37 @@ void check_rejected_destination(std::span<const std::byte> bytes, const Storage 
     }
 }
 
+// Same for views. One-shot decoding over contiguous bytes needs a span view,
+// but checks in the same order.
+template <typename MakeValue> void check_rejected_view(std::span<const std::byte> bytes, MakeValue make_value, status_code expected) {
+    rfc8746::typed_array_view<std::uint16_t> one_shot_view;
+    decltype(auto)                           one_shot_value = make_value(one_shot_view);
+    auto                                     one_shot       = make_decoder<codec::typed_array>(bytes)(one_shot_value);
+    REQUIRE_FALSE(one_shot);
+    CHECK(one_shot.error() == expected);
+
+    for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+        CAPTURE(cut);
+        input_chunks                                                    chunks;
+        auto                                                            source  = make_input_source(chunks);
+        auto                                                            decoder = make_resumable_decoder<codec::typed_array>(source);
+        rfc8746::typed_array_view_for<std::uint16_t, decltype(decoder)> view;
+        auto                                                            operation = decoder(make_value(view));
+        chunks.emplace_back(bytes.first(cut));
+        operation.resume();
+        if (!operation.done()) {
+            chunks.emplace_back(bytes.subspan(cut));
+            operation.close_input();
+        }
+
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == expected);
+        CHECK(source.committed_position().offset() == 0);
+        CHECK(view.size() == 0);
+    }
+}
+
 } // namespace
 
 // This observer always rejects before mutating state, including on retries of
@@ -346,6 +377,34 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         const std::vector<std::uint16_t, capped_allocator<std::uint16_t>> capped{99};
         check_rejected_destination(
             std::span{encoded}, capped, [](auto &values) { return rfc8746::as_typed_array(values); }, status_code::size_limit_exceeded);
+    }
+
+    TEST_CASE("typed array views reject lengths like one-shot decoding") {
+        const std::array odd{std::byte{0xd8}, std::byte{0x45}, std::byte{0x43}, std::byte{0x34}, std::byte{0x12}, std::byte{0xcd}};
+        const auto bounded = [](std::size_t min, std::size_t max) { return [=](auto &view) { return as_bounded_size(view, min, max); }; };
+
+        check_rejected_view(std::span{encoded}, [](auto &view) { return as_bounded_size<0, 1>(view); }, status_code::size_limit_exceeded);
+        check_rejected_view(std::span{encoded}, bounded(3, 5), status_code::size_limit_exceeded);
+
+        // An odd length past a bound reports the bound, otherwise the alignment
+        check_rejected_view(std::span{odd}, bounded(0, 1), status_code::size_limit_exceeded);
+        check_rejected_view(std::span{odd}, bounded(0, 4), status_code::unexpected_group_size);
+        check_rejected_view(std::span{odd}, [](auto &view) -> auto & { return view; }, status_code::unexpected_group_size);
+    }
+
+    TEST_CASE("a typed array view over a span fails once the string head arrives") {
+        // Resumable sources are never contiguous
+        input_chunks                             chunks;
+        auto                                     source = make_input_source(chunks);
+        rfc8746::typed_array_view<std::uint16_t> view;
+        auto                                     operation = make_resumable_decoder<codec::typed_array>(source)(view);
+        chunks.emplace_back(std::span{encoded}.first(2));
+        CHECK(operation.resume() == resume_state::need_input);
+        chunks.emplace_back(std::span{encoded}.subspan(2, 1));
+        CHECK(operation.resume() == resume_state::finished);
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::contiguous_view_on_non_contiguous_data);
+        CHECK(source.committed_position().offset() == 0);
     }
 
     TEST_CASE("typed array bounds reject an encode before writing") {

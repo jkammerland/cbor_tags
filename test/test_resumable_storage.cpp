@@ -687,6 +687,24 @@ TEST_SUITE("roundtrip/resumable_storage") {
             CHECK(operation.result().error() == status_code::capacity_exceeded);
             CHECK(operation.committed_bytes() == 0);
         }
+
+        SUBCASE("typed array view") {
+            // Unlike an owning array, which takes its elements one at a time
+            std::vector<std::byte> wire;
+            REQUIRE(make_encoder<codec::typed_array>(wire)(rfc8746::typed_array<std::uint32_t>{1, 2, 3}));
+            resumable_test::ring_source<false, 11> source;
+            source.reports_capacity = true;
+
+            auto                                                            decoder = make_resumable_decoder<codec::typed_array>(source);
+            rfc8746::typed_array_view_for<std::uint32_t, decltype(decoder)> view;
+            auto                                                            operation = decoder(view);
+            REQUIRE(source.append(wire) == 11);
+            operation.resume();
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::capacity_exceeded);
+            CHECK(operation.committed_bytes() == 0);
+        }
     }
 
     TEST_CASE("capacity reports end exactly the runs that would stall") {
@@ -720,5 +738,33 @@ TEST_SUITE("roundtrip/resumable_storage") {
         REQUIRE(*result);
         CHECK(**result == wire.size());
         CHECK(actual == expected);
+    }
+
+    TEST_CASE_TEMPLATE("a typed array view decodes through a ring that holds its whole item", Windows, std::false_type, std::true_type) {
+        const std::vector<std::uint32_t> expected{1, 123456789};
+        std::vector<std::byte>           wire;
+        REQUIRE(make_encoder<codec::typed_array>(wire)(rfc8746::as_typed_array(expected)));
+        REQUIRE(wire.size() == 11);
+
+        // Starting at 105 puts the wrap inside the first element. Nothing commits
+        // before the view is done, so nothing gets reclaimed either.
+        resumable_test::ring_source<false, 11, Windows::value> source{105};
+        source.reports_capacity = true;
+
+        auto                                                            decoder = make_resumable_decoder<codec::typed_array>(source);
+        rfc8746::typed_array_view_for<std::uint32_t, decltype(decoder)> view;
+        auto                                                            operation = decoder(view);
+        for (const auto &byte : wire) {
+            REQUIRE_FALSE(operation.done());
+            CHECK(operation.committed_bytes() == 0);
+            source.reclaim(source.committed_position().offset());
+            REQUIRE(source.append(std::span{&byte, 1}) == 1);
+            operation.resume();
+        }
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == wire.size());
+        CHECK(std::ranges::equal(view.values(), expected));
     }
 }

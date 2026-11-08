@@ -198,6 +198,58 @@ void check_destination_splits(const std::vector<std::uint32_t> &expected, const 
     }
 }
 
+template <rfc8746::typed_array_byte_order Order, typename Decoder>
+using view_for = std::conditional_t<Order == rfc8746::typed_array_byte_order::big, rfc8746::typed_array_view_be_for<std::uint32_t, Decoder>,
+                                    rfc8746::typed_array_view_for<std::uint32_t, Decoder>>;
+
+// Decodes a view at every split, through a source and through bound storage.
+// A view commits nothing until its whole item is there, then outlives its operation.
+template <rfc8746::typed_array_byte_order Order, typename MakeValue>
+void check_view_splits(const std::vector<std::uint32_t> &expected, MakeValue make_value) {
+    const auto bytes = typed_array_bytes(rfc8746::typed_array<std::uint32_t, Order>{expected});
+    const auto input = std::span<const std::byte>{bytes};
+    for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+        CAPTURE(cut);
+        input_chunks                       chunks;
+        auto                               source  = make_input_source(chunks);
+        auto                               decoder = make_resumable_decoder<codec::typed_array>(source);
+        view_for<Order, decltype(decoder)> view;
+        {
+            auto operation = decoder(make_value(view));
+            chunks.emplace_back(input.first(cut));
+            operation.resume();
+            if (!operation.done()) {
+                CHECK(operation.committed_bytes() == 0);
+                chunks.emplace_back(input.subspan(cut));
+                operation.close_input();
+            }
+
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == bytes.size());
+            CHECK(std::ranges::empty(operation.remaining_input()));
+        }
+        CHECK(std::ranges::equal(view.values(), expected));
+
+        // The view keeps working when bound storage reallocates, during the operation or after it
+        std::vector<std::byte>           storage(input.begin(), input.begin() + static_cast<std::ptrdiff_t>(cut));
+        auto                             bound = make_resumable_decoder<codec::typed_array>(storage);
+        view_for<Order, decltype(bound)> bound_view;
+        {
+            auto operation = bound(make_value(bound_view));
+            if (!operation.done()) {
+                CHECK(operation.committed_bytes() == 0);
+            }
+            storage.insert(storage.end(), input.begin() + static_cast<std::ptrdiff_t>(cut), input.end());
+            REQUIRE(operation.close_input() == resume_state::finished);
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == bytes.size());
+        }
+        storage.reserve(storage.capacity() * 2);
+        CHECK(std::ranges::equal(bound_view.values(), expected));
+    }
+}
+
 // An explicit codec hook remains the selected customization before this codec.
 template <typename Self> struct typed_array_override : codec::base<Self> {
     using codec::base<Self>::decode;
@@ -293,6 +345,25 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         check_typed_array_encode_splits(expected, as_bounded_size(expected, 3, 3));
         check_typed_array_encode_splits(expected, as_bounded_size<0, 3>(rfc8746::as_typed_array_be(values)));
         check_typed_array_encode_splits(expected, as_bounded_size(rfc8746::as_typed_array_be(linked), 3, 8));
+    }
+
+    TEST_CASE("typed array views decode at every split in both byte orders") {
+        using order = rfc8746::typed_array_byte_order;
+        const std::vector<std::uint32_t> expected{1, 0x12345678, 0xffffffff};
+
+        // Passes the view itself, not a copy
+        const auto plain = [](auto &view) -> auto & { return view; };
+        check_view_splits<order::little>(expected, plain);
+        check_view_splits<order::big>(expected, plain);
+        check_view_splits<order::little>({}, plain);
+    }
+
+    TEST_CASE("bounded typed array views decode at every split") {
+        using order = rfc8746::typed_array_byte_order;
+        const std::vector<std::uint32_t> expected{1, 0x12345678, 0xffffffff};
+
+        check_view_splits<order::little>(expected, [](auto &view) { return as_bounded_size<3, 3>(view); });
+        check_view_splits<order::big>(expected, [](auto &view) { return as_bounded_size(view, 0, 3); });
     }
 
     TEST_CASE("owning typed arrays preserve integer and floating representations at every transport split") {
