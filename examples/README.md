@@ -10,10 +10,10 @@ Example 25 builds a complete signed token with external AAD and receiver validat
 example 26 requires signatures from two independent keys.
 Example 27 chooses application layouts; examples 28–29 keep payload bytes borrowed
 through signing, token encoding, decoding and verification.
-Examples 40–46 introduce resumable operations, from bound containers to coroutine
-consumers, custom hooks and a bounded ring buffer. The two consumer examples share
-a minimal coroutine frame owner in `resumable_consumer.h`. The ring example is
-standalone and uses standard-library storage.
+Examples 40–47 introduce resumable operations, from bound containers to coroutine
+consumers, custom hooks, a bounded ring buffer and typed arrays. The two consumer
+examples share a minimal coroutine frame owner in `resumable_consumer.h`. The ring
+example is standalone and uses standard-library storage.
 
 ## Learning order
 
@@ -66,6 +66,7 @@ standalone and uses standard-library storage.
 | [44_resumable_generator.cpp](44_resumable_generator.cpp) | Consume a sequence of top-level items | Copy each yielded value before requesting the next; tell the end of the sequence from another item. |
 | [45_resumable_custom_hook.cpp](45_resumable_custom_hook.cpp) | Customize resumable encoding and decoding | ADL hooks retain progress while choosing an application-specific wire layout. |
 | [46_resumable_ring.cpp](46_resumable_ring.cpp) | Reuse bounded storage through a custom source and output buffer | Absolute positions survive wraparound; reclaim only committed bytes after releasing external borrows; a sink hashes a byte string larger than the ring. |
+| [47_resumable_typed_array.cpp](47_resumable_typed_array.cpp) | Resume typed arrays | Decode into reused, bounded storage as bytes arrive, one whole element at a time; a bound fails on the header, before the payload. |
 
 ## CDDL
 

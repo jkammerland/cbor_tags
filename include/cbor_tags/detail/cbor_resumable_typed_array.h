@@ -16,12 +16,17 @@
 #include <ranges>
 #include <span>
 #include <type_traits>
+#include <utility>
 
 namespace cbor::tags::detail {
 
 // Retry only the small tagged header through the one-shot codec machinery.
-template <std::uint64_t Tag, std::size_t ElementSize> struct resumable_typed_array_header {
+// Lengths get checked here too, so a rejected array commits nothing.
+template <std::uint64_t Tag, std::size_t ElementSize, typename Destination = void> struct resumable_typed_array_header {
     std::uint64_t byte_count{};
+    std::uint64_t min_count{};
+    std::uint64_t max_count{std::numeric_limits<std::uint64_t>::max()};
+    Destination  *destination{};
 
     template <typename Decoder> expected<void, status_code> decode(Decoder &decoder) {
         const auto [major, info] = decoder.read_initial_byte();
@@ -30,18 +35,31 @@ template <std::uint64_t Tag, std::size_t ElementSize> struct resumable_typed_arr
             if (argument_status != status_code::success) {
                 return argument_status;
             }
-            if (byte_count > std::numeric_limits<std::size_t>::max()) {
+            if (byte_count > std::numeric_limits<std::size_t>::max() || !within_bounds()) {
                 return status_code::size_limit_exceeded;
             }
             if (byte_count % ElementSize != 0U) {
                 return status_code::unexpected_group_size;
             }
-            return status_code::success;
+            if constexpr (std::is_void_v<Destination>) {
+                return status_code::success;
+            } else {
+                return typed_array_destination_size_status(*destination, byte_count / ElementSize);
+            }
         });
         if (status != status_code::success) {
             return unexpected<status_code>{status};
         }
         return {};
+    }
+
+    // Compares bytes like one-shot decoding, so an odd length past a bound reports the bound
+    [[nodiscard]] constexpr bool within_bounds() const noexcept {
+        constexpr auto max_elements = std::numeric_limits<std::uint64_t>::max() / ElementSize;
+        if (min_count > max_elements || byte_count < min_count * ElementSize) {
+            return false;
+        }
+        return max_count > max_elements || byte_count <= max_count * ElementSize;
     }
 
     template <typename Encoder> expected<void, status_code> encode(Encoder &encoder) const {
@@ -51,23 +69,112 @@ template <std::uint64_t Tag, std::size_t ElementSize> struct resumable_typed_arr
     }
 };
 
-template <std::uint64_t Tag, bool NativeOrder, typename Context, typename Array, typename Convert>
-resumable_task<status_code> resumable_decode_typed_array(Context &context, Array &array, Convert convert) {
-    using value_type            = typename Array::value_type;
+// Clears growable destinations. Returns where insert_after or a fixed
+// non-contiguous range writes next, the others don't need a position.
+template <typename R> auto typed_array_writer_start(R &range, std::size_t count) {
+    if constexpr (TypedArrayAppendableRange<R>) {
+        range.clear();
+        if constexpr (requires { range.reserve(count); }) {
+            range.reserve(count);
+        }
+    }
+
+    if constexpr (TypedArrayBackAppendableRange<R> || (!TypedArrayAppendableRange<R> && std::ranges::contiguous_range<R>)) {
+        return nullptr;
+    } else if constexpr (TypedArrayAfterAppendableRange<R>) {
+        return range.before_begin();
+    } else {
+        return std::ranges::begin(range);
+    }
+}
+
+// Puts finished elements into the destination. Growable ones are cleared and
+// appended to, fixed ones are overwritten from the front.
+template <typename R> class typed_array_writer {
+  public:
+    using value_type = std::ranges::range_value_t<R>;
+
+    typed_array_writer(R &range, std::size_t count) : range_(range), cursor_(typed_array_writer_start(range, count)) {}
+
+    [[nodiscard]] std::size_t size() const noexcept { return written_; }
+
+    // bytes holds count whole elements
+    template <bool NativeOrder, typename Convert> void append(std::span<const std::byte> bytes, std::size_t count, Convert &convert) {
+        constexpr bool copy = NativeOrder && std::is_trivially_copyable_v<value_type>;
+        constexpr bool grow =
+            resizes && (copy ? std::is_default_constructible_v<value_type>
+                             : std::is_nothrow_default_constructible_v<value_type> && std::is_nothrow_move_assignable_v<value_type>);
+        if constexpr (grow) {
+            // Grow once per window instead of once per element
+            range_.resize(written_ + count);
+            fill<copy>(std::ranges::data(range_) + written_, bytes, count, convert);
+        } else if constexpr (fixed_contiguous) {
+            fill<copy>(std::ranges::data(range_) + written_, bytes, count, convert);
+        } else {
+            for (std::size_t index = 0; index != count; ++index) {
+                push(convert(bytes.subspan(index * sizeof(value_type), sizeof(value_type))));
+            }
+            return;
+        }
+        written_ += count;
+    }
+
+    void push(value_type value) {
+        if constexpr (TypedArrayBackAppendableRange<R>) {
+            range_.push_back(std::move(value));
+        } else if constexpr (TypedArrayAfterAppendableRange<R>) {
+            cursor_ = range_.insert_after(cursor_, std::move(value));
+        } else if constexpr (fixed_contiguous) {
+            std::ranges::data(range_)[written_] = std::move(value);
+        } else {
+            *cursor_ = std::move(value);
+            ++cursor_;
+        }
+        ++written_;
+    }
+
+  private:
+    static constexpr bool appendable       = TypedArrayAppendableRange<R>;
+    static constexpr bool fixed_contiguous = !appendable && std::ranges::contiguous_range<R>;
+    static constexpr bool resizes = appendable && std::ranges::contiguous_range<R> && requires(R &range) { range.resize(std::size_t{}); };
+
+    template <bool Copy, typename Convert>
+    static void fill(value_type *destination, std::span<const std::byte> bytes, std::size_t count, Convert &convert) {
+        if constexpr (Copy) {
+            std::memcpy(destination, bytes.data(), count * sizeof(value_type));
+        } else {
+            for (std::size_t index = 0; index != count; ++index) {
+                destination[index] = convert(bytes.subspan(index * sizeof(value_type), sizeof(value_type)));
+            }
+        }
+    }
+
+    R                                                                     &range_;
+    decltype(typed_array_writer_start(std::declval<R &>(), std::size_t{})) cursor_;
+    std::size_t                                                            written_{};
+};
+
+// Destination ranges are checked against the count first, like one-shot
+// decoding. Owning arrays aren't.
+template <std::uint64_t Tag, bool NativeOrder, bool CheckDestination, typename Context, typename R, typename Convert>
+resumable_task<status_code> resumable_decode_typed_array(Context &context, R &range, std::uint64_t min_count, std::uint64_t max_count,
+                                                         Convert convert) {
+    using value_type            = std::ranges::range_value_t<R>;
     constexpr auto element_size = sizeof(value_type);
     static_assert(element_size <= 16U);
 
-    resumable_typed_array_header<Tag, element_size> header;
-    const auto                                      header_status = co_await context.one_shot(header);
+    resumable_typed_array_header<Tag, element_size, std::conditional_t<CheckDestination, R, void>> header{0, min_count, max_count};
+    if constexpr (CheckDestination) {
+        header.destination = &range;
+    }
+    const auto header_status = co_await context.one_shot(header);
     if (header_status != status_code::success) {
         co_return header_status;
     }
 
     // Admission and allocation bounds belong to the caller of the resumable API.
-    const auto element_count = static_cast<std::size_t>(header.byte_count / element_size);
-    auto      &values        = array.values();
-    values.clear();
-    values.reserve(element_count);
+    const auto            element_count = static_cast<std::size_t>(header.byte_count / element_size);
+    typed_array_writer<R> values{range, element_count};
 
     auto                               &reader = context.one_shot().reader_;
     std::array<std::byte, element_size> boundary{};
@@ -87,24 +194,7 @@ resumable_task<status_code> resumable_decode_typed_array(Context &context, Array
             if (boundary_size == 0U && available->size() >= element_size) {
                 const auto count = std::min(element_count - values.size(), available->size() / element_size);
                 const auto bytes = count * element_size;
-                if constexpr (NativeOrder) {
-                    const auto start = values.size();
-                    values.resize(start + count);
-                    std::memcpy(values.data() + start, available->data(), bytes);
-                } else if constexpr (std::is_nothrow_default_constructible_v<value_type> && std::is_nothrow_move_assignable_v<value_type>) {
-                    // Capacity was admitted above; fill this complete window
-                    // without repeating vector append bookkeeping per element.
-                    const auto start = values.size();
-                    values.resize(start + count);
-                    auto *destination = values.data() + start;
-                    for (std::size_t index = 0; index != count; ++index) {
-                        destination[index] = convert(available->subspan(index * element_size, element_size));
-                    }
-                } else {
-                    for (std::size_t offset = 0; offset != bytes; offset += element_size) {
-                        values.push_back(convert(available->subspan(offset, element_size)));
-                    }
-                }
+                values.template append<NativeOrder>(available->first(bytes), count, convert);
                 resumable_source_access::consume_window(context.source(), reader.position_, bytes);
                 reader.current_offset_ += bytes;
                 context.commit();
@@ -122,7 +212,7 @@ resumable_task<status_code> resumable_decode_typed_array(Context &context, Array
 
         // A split element stays private until all of its representation is present.
         if (boundary_size == element_size) {
-            values.push_back(convert(std::span<const std::byte>{boundary}));
+            values.push(convert(std::span<const std::byte>{boundary}));
             boundary_size = 0;
             context.commit();
         }
@@ -215,8 +305,8 @@ resumable_task<status_code> resumable_encode_typed_array(Context &context, Range
 
 namespace cbor::tags {
 
-template <std::uint64_t Tag, std::size_t ElementSize>
-struct resumable_retry_traits<detail::resumable_typed_array_header<Tag, ElementSize>> {
+template <std::uint64_t Tag, std::size_t ElementSize, typename Destination>
+struct resumable_retry_traits<detail::resumable_typed_array_header<Tag, ElementSize, Destination>> {
     static constexpr bool encode = true;
     static constexpr bool decode = true;
 };
