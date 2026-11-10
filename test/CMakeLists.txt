@@ -45,6 +45,11 @@ if(TARGET cbor_tags_cwt_openssl)
   target_compile_definitions(tests PRIVATE CBOR_TAGS_TEST_HAS_CWT_OPENSSL=1)
 endif()
 
+# Some test files go over MSVC's default limit of sections per object file
+if(MSVC)
+  target_compile_options(tests PRIVATE /bigobj)
+endif()
+
 # Enable ASAN for linux and macos
 option(CBOR_TAGS_ENABLE_ASAN "Enable ASAN in tests, DEFAULT=OFF" OFF)
 if(CBOR_TAGS_ENABLE_ASAN)
