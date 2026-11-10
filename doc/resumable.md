@@ -5,6 +5,55 @@ its availability before calling argument-free `resume()`. Operation creation
 runs eagerly; `resume()` reports `need_input`, `need_output`, or terminal `done`.
 Use `result()` to distinguish success from a terminal error.
 
+## Custom codecs and supported combinations
+
+Ordinary member, ADL, and mixin customizations need a resumable hook or an
+explicit [retry declaration](#ordinary-retry-declarations). A factory does not
+infer retry safety from the destination type or from a codec being supplied by
+the library.
+
+For a record containing two strings, retain progress in a hook:
+
+```cpp
+#include <cbor_tags/cbor_resumable.h>
+#include <string>
+
+namespace ct = cbor::tags;
+
+struct record {
+    std::string first;
+    std::string second;
+
+    template <class Decoder>
+    auto decode(Decoder &decoder) {
+        return decoder(ct::wrap_as_array{first, second});
+    }
+
+    template <class Decoder>
+    ct::resumable<ct::status_code> resumable_decode(Decoder &decoder) {
+        co_return co_await decoder(ct::wrap_as_array{first, second});
+    }
+};
+```
+
+When decoding `["a", "b"]`, a suspension after `first` completes retains that
+field's progress; the completed result is
+`first == "a"` and `second == "b"` for every input split. Repeating the ordinary
+`decode` body after that suspension could append `"a"` twice. The hook avoids
+repeating completed work without copying or replacing the destination.
+
+| Combination | Contract |
+| --- | --- |
+| Core values, containers, and reflected records | Structural progress resumes at completed headers, fields, and elements. |
+| Member, ADL, or mixin resumable hooks | The hook retains progress and owns its effects. Hooks take precedence over ordinary customizations. |
+| Ordinary customizations | Require a declaration for each applicable customization and direction. |
+| `codec::typed_array` | Owning array decoding and owning/borrowed-range encoding have native hooks. Other wrapper forms require a hook or retry declaration. |
+| `codec::shared_ptr` | Rejected by resumable factories, including encoding. Graph scope updates require a state-preserving resumable implementation. Ordinary factories support this codec. |
+
+Changing transport chunk boundaries must preserve the values of every
+supported combination. Include every input/output split in custom-codec tests;
+for graph codecs, also check pointer identity.
+
 ## Decode incoming chunks
 
 ```cpp
@@ -311,10 +360,8 @@ ADL, member, and codec-mixin hooks return exactly `resumable<status_code>`;
 precedence over ordinary codecs; see the
 [custom hook example](../examples/45_resumable_custom_hook.cpp).
 
-Ordinary codecs retry an incomplete item by restoring its cursor, without
-restoring destinations, codec members, callbacks, or external effects. Publish
-changes only after the ordinary item succeeds, or retain progress in a hook.
-Variant alternatives can be retried only before committing bytes.
+Ordinary retries require an explicit declaration, described below. Variant
+alternatives can be retried only before committing bytes.
 
 Install mixins with `make_resumable_encoder<Codec...>` or
 `make_resumable_decoder<Codec...>`, and select options with
@@ -329,7 +376,46 @@ application limits, with allocation failure reported as `out_of_memory`.
 With `codec::typed_array`, owning RFC 8746 arrays resume into numeric storage,
 and encoding accepts owning arrays or borrowed ranges. Headers and complete
 elements commit independently; the definite byte-string payload may cross
-transport chunks, while borrowed views retain ordinary input-lifetime rules.
+transport chunks. Other wrappers need an applicable hook or retry declaration;
+borrowed views retain ordinary input-lifetime rules.
+
+### Ordinary retry declarations
+
+`resumable_retry_traits<T, Codec = void>` defaults both `encode` and `decode`
+to `false`. Specialize it before instantiating an operation. Omit `Codec` for
+member or ADL customizations; for a mixin, specialize on its actual ordinary
+`Codec<Transcoder>` instantiation:
+
+```cpp
+// transactional_record's decoder must publish changes only after success.
+template <>
+struct cbor::tags::resumable_retry_traits<transactional_record> {
+    static constexpr bool encode = false;
+    static constexpr bool decode = true;
+};
+
+// Authorize only this value/codec pair; other mixins remain undeclared.
+template <class Transcoder>
+struct cbor::tags::resumable_retry_traits<my_value, my_codec<Transcoder>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+```
+
+A declaration covers the **whole ordinary call**, including nested codecs,
+allocators, callbacks, codec members, and external effects. An incomplete call
+restores its cursor but does not restore any of that state. Publish changes
+only on success, or ensure repeating them is harmless under the application's
+contract. The library does not prove the declaration. A declaration for a value
+does not authorize an installed mixin override; each applicable customization
+must declare its direction, including header/tag dispatch inside optionals and
+variants. Tag-observer mixins also need a declaration for ordinary retry units:
+a complete tag can be observed before the rest of a tagged header suspends.
+Calling `context.ordinary(value)` from a hook uses the same declaration checks.
+
+The entire ordinary retry unit must fit retained storage. Prefer hooks for
+large values and for stateful codecs. A retry declaration cannot enable
+`codec::shared_ptr` in a resumable factory.
 
 ## Implement a reclaiming source
 

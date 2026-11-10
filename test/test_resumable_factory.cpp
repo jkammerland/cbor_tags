@@ -32,6 +32,13 @@ struct ordinary_text {
 };
 } // namespace
 
+namespace cbor::tags {
+template <> struct resumable_retry_traits<ordinary_text> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = false;
+};
+} // namespace cbor::tags
+
 TEST_SUITE("roundtrip/resumable_factory") {
     TEST_CASE("named decoder accepts empty batches and vector descriptor growth") {
         const std::vector<std::string> expected{"first", std::string(256, 'x'), "last"};
