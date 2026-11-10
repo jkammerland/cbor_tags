@@ -8,6 +8,7 @@
 #include <cbor_tags/cbor_segments.h>
 #include <cbor_tags/cbor_traversal.h>
 #include <cbor_tags/codec.h>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -132,6 +133,47 @@ template <typename Self> struct committed_rejecting_bool_codec : codec::base<Sel
         ++bool_hook_calls::count;
         const auto status = co_await static_cast<Self &>(*this).one_shot(value);
         co_return status == status_code::success ? status_code::no_match_for_tag_simple_on_buffer : status;
+    }
+};
+
+struct double_hook_calls {
+    static inline int count{};
+};
+
+template <typename Self> struct finite_double_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    resumable_task<status_code> resumable_decode(double &value) {
+        ++double_hook_calls::count;
+        const auto status = co_await static_cast<Self &>(*this).one_shot(value);
+        if (status == status_code::success && !std::isfinite(value))
+            co_return status_code::error;
+        co_return status;
+    }
+};
+
+struct one_shot_record {
+    std::string      name;
+    std::vector<int> values;
+};
+
+struct container_hook_calls {
+    static inline int count{};
+};
+
+template <typename Self> struct one_shot_container_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    resumable_task<status_code> resumable_encode(const std::vector<int> &value) {
+        ++container_hook_calls::count;
+        co_return co_await static_cast<Self &>(*this).one_shot(value);
+    }
+
+    resumable_task<status_code> resumable_encode(const one_shot_record &value) {
+        ++container_hook_calls::count;
+        co_return co_await static_cast<Self &>(*this).one_shot(value);
     }
 };
 
@@ -932,6 +974,70 @@ TEST_SUITE("cbor_wire/resumable") {
         check(std::variant<bool, simple>{false});
         check(std::variant<std::variant<bool, int>, simple>{std::variant<bool, int>{false}});
         check(std::variant<std::optional<bool>, simple>{std::optional<bool>{false}});
+    }
+
+    TEST_CASE("an encoder hook's one_shot writes containers again until they fit") {
+        auto encode_bytewise = [](const auto &sent) {
+            std::vector<std::byte> expected;
+            REQUIRE(make_encoder(expected)(sent));
+            REQUIRE(expected.size() > 2);
+
+            std::vector<std::byte> bytes(expected.size());
+            output_chunks          storage;
+            auto                   sink      = make_output_buffer(storage);
+            const auto             calls     = container_hook_calls::count;
+            auto                   operation = make_resumable_encoder<one_shot_container_codec>(sink)(sent);
+            for (auto &byte : bytes) {
+                REQUIRE_FALSE(operation.done());
+                storage.emplace_back(std::span{&byte, 1});
+                operation.resume();
+            }
+
+            // Every retry dropped what the last one wrote, so nothing is written twice
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == expected.size());
+            CHECK(container_hook_calls::count == calls + 1);
+            CHECK(bytes == expected);
+        };
+
+        encode_bytewise(std::vector<int>{1, -24, 65536, 7, -1000});
+        encode_bytewise(one_shot_record{"a record", {1, -24, 65536}});
+    }
+
+    TEST_CASE("a hook's one_shot starts the value over until all of it arrives") {
+        auto decode_bytewise = [](double sent, double &actual) {
+            std::vector<std::byte> wire;
+            REQUIRE(make_encoder(wire)(sent));
+            REQUIRE(wire.size() > 2);
+
+            input_chunks storage;
+            auto         source    = make_input_source(storage);
+            const auto   calls     = double_hook_calls::count;
+            auto         operation = make_resumable_decoder<finite_double_codec>(source)(actual);
+            for (std::size_t i = 0; i < wire.size(); ++i) {
+                REQUIRE_FALSE(operation.done());
+                storage.emplace_back(std::span<const std::byte>{wire}.subspan(i, 1));
+                operation.resume();
+            }
+
+            // The hook ran once, one_shot did the retries
+            REQUIRE(operation.done());
+            CHECK(double_hook_calls::count == calls + 1);
+            return operation.result();
+        };
+
+        for (const double sent : {1.5, -2.25e300}) {
+            double     actual{};
+            const auto result = decode_bytewise(sent, actual);
+            REQUIRE(result);
+            CHECK(actual == sent);
+        }
+
+        double     actual{};
+        const auto result = decode_bytewise(std::numeric_limits<double>::infinity(), actual);
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == status_code::error);
     }
 
     TEST_CASE("explicit variant rejection permits catchall only before committed progress") {

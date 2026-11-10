@@ -562,12 +562,15 @@ mixin is `static_cast<Self &>(*this)`:
   above.
 - `co_await decoder.one_shot(value)` decodes `value` with the one-shot decoder
   and skips resumable hooks. It commits nothing until all of `value` has
-  arrived, and starts over whenever more input arrives. Use it for values read
-  in one piece, such as numbers, views, or a type's one-shot customization.
-  Decode containers and structs with `decoder(value)`.
+  arrived, and starts over whenever more input arrives. It takes values read in
+  one piece, such as numbers, tags, views, or a type's one-shot customization.
+  Strings, containers, optionals, variants, tuples and structs don't compile
+  with it, since starting them over would add their elements again. Decode
+  those with `decoder(value)`.
 
 Encoders work the same way with `encoder(values...)` and
-`encoder.one_shot(value)`.
+`encoder.one_shot(value)`. Since a retry drops what the last try wrote,
+`encoder.one_shot(value)` takes strings, containers and structs too.
 
 A hook that calls `decoder(value)` on the type it handles calls itself again.
 `one_shot(value)` uses the one-shot codec for that type instead:

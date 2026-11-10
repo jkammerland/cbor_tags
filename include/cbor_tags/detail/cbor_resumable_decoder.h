@@ -120,6 +120,13 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     // A complete normal call is the sole retry boundary, including its nested calls.
     template <typename T> resumable_task<status_code> one_shot(T &value) {
+        // A retry decodes the value again on top of what the last try left, so
+        // a vector would get its elements twice. Tags are fine, the decoder
+        // reads a tagged struct's tag with this too
+        using U = std::remove_cvref_t<T>;
+        static_assert(read_in_one_piece<U>() || is_static_tag_t<U>::value || is_dynamic_tag_t<U>,
+                      "one_shot(value) only takes values the decoder reads in one piece, decode strings, containers, "
+                      "optionals, variants, tuples and structs with decoder(value)");
         require_retry<T>();
         return attempt_one_shot(value);
     }
@@ -441,15 +448,31 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                HasResumableDecodeFreeFunction<self_type, T> || HasResumableTranscodeFreeFunction<self_type, T>;
     }
 
+    // item() decodes these with one one-shot call and everything else piece by
+    // piece. Same order as item(), explicit one-shot customizations come first
+    template <typename U> static consteval bool read_in_one_piece() {
+        if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::direct>())
+            return true;
+        else if constexpr (IsAnyBoundedSizeWrapper<U> && !IsSink<U>) {
+            using V = std::remove_cvref_t<decltype(std::declval<U &>().value())>;
+            return IsAnyHeader<V> || IsConstView<V>;
+        } else if constexpr (IsSink<U> || IsIndefiniteWrapper<U> || resumable_wrap_array<U> ||
+                             (CBOR_TAGS_HAS_NAMED_REFLECTION && IsNamedMapWrapper<U>))
+            return false;
+        else
+            return IsAnyHeader<U> || (IsTag<U> && !IsAggregate<U> && !IsTaggedTuple<U>) ||
+                   !((IsString<U> && !IsConstView<U>) || IsRangeOfCborValues<U> || IsOptional<U> || IsVariant<U> || IsTaggedTuple<U> ||
+                     IsUntaggedTuple<U> || IsAggregate<U>);
+    }
+
     template <typename T> resumable_task<status_code> item(T &value) {
         using U = std::remove_cvref_t<T>;
         if constexpr (has_explicit_hook<U>())
             return customization(value);
         else if constexpr (has_mixin<U>())
             return mixin(value);
-        else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::direct>())
-            // Explicit one-shot customizations precede every structural category.
-            return one_shot(value); // NOLINT(bugprone-branch-clone)
+        else if constexpr (read_in_one_piece<U>())
+            return one_shot(value);
         else if constexpr (IsStringSink<U>)
             return string_sink(value);
         else if constexpr (IsArraySink<U>)
@@ -457,11 +480,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else if constexpr (IsMapSink<U>)
             return map_sink(value);
         else if constexpr (IsAnyBoundedSizeWrapper<U>) {
-            using V = std::remove_cvref_t<decltype(value.value())>;
-            static_assert(!IsSink<V>, "sinks take no size bounds, return a status_code from the callback instead");
-            if constexpr (IsAnyHeader<V> || IsConstView<V>)
-                return one_shot(value);
-            else if constexpr (IsBoundedSizeWrapper<U>)
+            static_assert(!IsSink<std::remove_cvref_t<decltype(value.value())>>,
+                          "sinks take no size bounds, return a status_code from the callback instead");
+            if constexpr (IsBoundedSizeWrapper<U>)
                 return bounded_container(value.value(), U::min_size, U::max_size);
             else
                 return bounded_container(value.value(), value.min_size(), value.max_size());
@@ -474,8 +495,6 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else if constexpr (IsNamedMapWrapper<U>)
             return named_map(value.value_);
 #endif
-        else if constexpr (IsAnyHeader<U> || (IsTag<U> && !IsAggregate<U> && !IsTaggedTuple<U>))
-            return one_shot(value);
         else if constexpr (IsString<U> && !IsConstView<U>)
             return container(value);
         else if constexpr (IsRangeOfCborValues<U>) {
@@ -487,10 +506,8 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return variant(value);
         else if constexpr (IsTaggedTuple<U> || IsUntaggedTuple<U>)
             return tuple(value);
-        else if constexpr (IsAggregate<U>)
-            return aggregate(value);
         else
-            return one_shot(value);
+            return aggregate(value);
     }
 
     template <typename T> resumable_task<status_code> customization(T &value) {
