@@ -376,7 +376,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
             CHECK(notifications == 1);
             CHECK(source.acquired);
             int rejected{};
-            CHECK_THROWS_AS(decoder(rejected), std::logic_error);
+            CHECK_THROWS_AS((void)decoder(rejected), std::logic_error);
         }
 
         CHECK_FALSE(source.acquired);

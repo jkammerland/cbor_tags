@@ -498,7 +498,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         REQUIRE_FALSE(operation.done());
         const auto before = calls;
 
-        CHECK_THROWS_AS(encoder(value), std::logic_error);
+        CHECK_THROWS_AS((void)encoder(value), std::logic_error);
         CHECK(calls == before);
         CHECK(operation.committed_bytes() == 0);
     }

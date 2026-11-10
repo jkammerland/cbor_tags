@@ -96,7 +96,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
 
             // Completion alone does not release the shared cursor.
             std::string other = "untouched";
-            CHECK_THROWS_AS(decoder(other), std::logic_error);
+            CHECK_THROWS_AS((void)decoder(other), std::logic_error);
             CHECK(other == "untouched");
         }
 
@@ -121,7 +121,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
             auto operation = encoder(first);
             REQUIRE(operation.done());
             REQUIRE(operation.result());
-            CHECK_THROWS_AS(encoder(second), std::logic_error);
+            CHECK_THROWS_AS((void)encoder(second), std::logic_error);
             return operation.committed_bytes();
         }();
 
@@ -220,7 +220,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
         auto         operation = decoder(actual);
         chunks.emplace_back(std::span<const std::byte>{bytes}.first(bytes.size() - 1));
         REQUIRE(operation.resume() == resume_state::need_input);
-        CHECK_THROWS_AS(decoder(actual), std::logic_error);
+        CHECK_THROWS_AS((void)decoder(actual), std::logic_error);
         CHECK(actual == expected.substr(0, expected.size() - 1));
 
         operation.cancel();
