@@ -19,7 +19,8 @@
 
 using namespace cbor::tags;
 
-namespace {
+// Boost.PFR can't read member names of types in an anonymous namespace on MSVC
+namespace resumable_named_map_test {
 
 using input_chunks = std::list<std::span<const std::byte>>;
 
@@ -123,7 +124,9 @@ template <typename T> std::vector<std::byte> encode_named(const T &value) {
     return wire;
 }
 
-} // namespace
+} // namespace resumable_named_map_test
+
+using namespace resumable_named_map_test;
 
 TEST_SUITE("cbor_wire/resumable") {
 
