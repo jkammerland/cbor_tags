@@ -12,6 +12,10 @@
 
 namespace cbor::tags {
 
+namespace detail {
+struct resumable_task_access;
+}
+
 // Small one-shot items return inline. Only a suspended computation owns a frame.
 template <typename T> class [[nodiscard]] resumable_task {
   public:
@@ -52,9 +56,8 @@ template <typename T> class [[nodiscard]] resumable_task {
             handle_.destroy();
     }
 
-    bool        done() const noexcept { return ready_.has_value() || (handle_ && handle_.done()); }
-    handle_type handle() const noexcept { return handle_; }
-    T           result() {
+    bool done() const noexcept { return ready_.has_value() || (handle_ && handle_.done()); }
+    T    result() {
         if (!done())
             throw std::logic_error("resumable_task result is not ready");
         if (ready_)
@@ -77,6 +80,8 @@ template <typename T> class [[nodiscard]] resumable_task {
     awaiter operator co_await() && noexcept { return {std::move(*this)}; }
 
   private:
+    // Only the driver resumes the frame. Hooks co_await the task
+    friend struct detail::resumable_task_access;
     explicit resumable_task(handle_type handle) noexcept : handle_(handle) {}
     std::optional<T> ready_;
     handle_type      handle_{};
@@ -85,6 +90,10 @@ template <typename T> class [[nodiscard]] resumable_task {
 enum class resume_state { need_input, need_output, done };
 
 namespace detail {
+struct resumable_task_access {
+    template <typename T> static auto handle(const resumable_task<T> &task) noexcept { return task.handle_; }
+};
+
 template <typename Context>
 concept HasResumableSuspendHook = requires(Context &context) {
     { context.suspend() } -> std::same_as<void>;
@@ -133,7 +142,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
         template <typename... Args>
         operation_state(typename Context::source_type &source, Args &&...args) : context(source, control), start(context.offset()) {
             work         = context(std::forward<Args>(args)...);
-            control.leaf = work.handle();
+            control.leaf = resumable_task_access::handle(work);
         }
     };
     std::unique_ptr<operation_state> state_;

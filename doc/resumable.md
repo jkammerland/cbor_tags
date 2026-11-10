@@ -206,6 +206,8 @@ decoder, values, operation, and waiter in that order so reverse destruction
 releases borrowers first. An encoder or decoder bound directly to storage owns
 its adapter, is immovable, and starts operations only as an lvalue; destroy each
 operation before starting another on the same storage, even after completion.
+`decltype(decoder)::operation` names the operation type, for example to keep the
+current one in a `std::optional`; `reset()` it before starting the next.
 
 Successive operations retain the committed stream position and buffered tail.
 A failed or cancelled operation keeps what it committed, which can end inside an

@@ -20,11 +20,11 @@ struct resumable_view_types<Context> {
     using encoded_map_view   = typename Context::encoded_map_view;
 };
 
+// Each factory makes one operation type, e.g. decltype(decoder)::operation
 template <typename Context> struct resumable_factory : resumable_view_types<Context> {
+    using operation = resume_operation<Context>;
     typename Context::source_type              &source;
-    template <typename... T> [[nodiscard]] auto operator()(T &&...values) const {
-        return resume_operation<Context>{source, std::forward<T>(values)...};
-    }
+    template <typename... T> [[nodiscard]] auto operator()(T &&...values) const { return operation{source, std::forward<T>(values)...}; }
 };
 
 // The adapter's cursors refer back to it. Keep it at the factory's address and
@@ -33,16 +33,15 @@ template <typename Context> class storage_resumable_factory : public resumable_v
     typename Context::source_type source_;
 
   public:
+    using operation = resume_operation<Context>;
     template <typename Storage> explicit storage_resumable_factory(Storage &storage) : source_(storage) {}
     storage_resumable_factory(const storage_resumable_factory &)            = delete;
     storage_resumable_factory &operator=(const storage_resumable_factory &) = delete;
     storage_resumable_factory(storage_resumable_factory &&)                 = delete;
     storage_resumable_factory &operator=(storage_resumable_factory &&)      = delete;
 
-    template <typename... T> [[nodiscard]] auto operator()(T &&...values) & {
-        return resume_operation<Context>{source_, std::forward<T>(values)...};
-    }
-    template <typename... T> auto operator()(T &&...) && = delete;
+    template <typename... T> [[nodiscard]] auto operator()(T &&...values) & { return operation{source_, std::forward<T>(values)...}; }
+    template <typename... T> auto               operator()(T &&...) && = delete;
 };
 } // namespace detail
 

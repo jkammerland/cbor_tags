@@ -50,6 +50,26 @@ using source_encoder = decltype(make_resumable_encoder(std::declval<output_buffe
 static_assert(std::is_invocable_v<source_decoder &&, int &>);
 static_assert(std::is_invocable_v<source_encoder &&, const int &>);
 
+// Every encoder and decoder names the one operation type it makes, whatever the values
+template <typename Factory, typename... T> using operation_for = decltype(std::declval<Factory &>()(std::declval<T>()...));
+static_assert(std::is_same_v<source_decoder::operation, decode_operation>);
+static_assert(std::is_same_v<source_encoder::operation, encode_operation>);
+static_assert(std::is_same_v<source_decoder::operation, operation_for<source_decoder, std::vector<int> &, std::uint8_t &>>);
+static_assert(std::is_same_v<source_encoder::operation, operation_for<source_encoder, const std::vector<int> &>>);
+static_assert(std::is_same_v<storage_decoder::operation, operation_for<storage_decoder, int &>>);
+static_assert(std::is_same_v<storage_decoder::operation, operation_for<storage_decoder, std::vector<int> &>>);
+static_assert(std::is_same_v<storage_encoder::operation, operation_for<storage_encoder, const int &>>);
+static_assert(std::is_same_v<storage_encoder::operation, operation_for<storage_encoder, const std::vector<int> &>>);
+
+// Hooks co_await a task; only the driver resumes its frame
+template <typename Task>
+concept exposes_handle = requires(const Task &task) { task.handle(); };
+struct public_handle {
+    void handle() const;
+};
+static_assert(exposes_handle<public_handle>);
+static_assert(!exposes_handle<resumable_task<status_code>>);
+
 template <typename Storage>
 concept accepts_encoder_storage = requires(Storage &&storage) { make_resumable_encoder(std::forward<Storage>(storage)); };
 template <typename Storage>

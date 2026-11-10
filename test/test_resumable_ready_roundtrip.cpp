@@ -134,7 +134,7 @@ TEST_SUITE("roundtrip/resumable") {
             detail::resumable_encode_context<decltype(sink), default_options> context{sink, control};
             auto                                                              result = context.payload(value);
             REQUIRE(result.done());
-            CHECK_FALSE(result.handle());
+            CHECK_FALSE(detail::resumable_task_access::handle(result));
             CHECK(result.result() == status_code::success);
             CHECK(context.offset() == bytes.size());
             CHECK(output == bytes);
@@ -157,7 +157,7 @@ TEST_SUITE("roundtrip/resumable") {
         detail::resumable_encode_context<decltype(sink), default_options> context{sink, control};
         auto                                                              result = context.payload(range);
         REQUIRE_FALSE(result.done());
-        result.handle().resume();
+        detail::resumable_task_access::handle(result).resume();
         REQUIRE(control.leaf);
         std::exchange(control.leaf, {}).resume();
         CHECK(reads == 1U);
