@@ -176,7 +176,6 @@ template <template <typename> typename Codec> void check_integer_map_override(st
 
             // Construction must suspend cleanly while the header has no output.
             REQUIRE_FALSE(encoder.done());
-            CHECK(encoder.state() == resume_state::need_output);
             CHECK_THROWS_AS(static_cast<void>(encoder.result()), std::logic_error);
 
             if (bytewise) {

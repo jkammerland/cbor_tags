@@ -218,7 +218,6 @@ template <typename Context> class [[nodiscard]] resume_operation {
             waiter.resume();
     }
     bool                               done() const noexcept { return state_ && state_->finished; }
-    resume_state                       state() const noexcept { return done() ? resume_state::finished : Context::waiting_state; }
     expected<std::size_t, status_code> result() const {
         // incomplete would look like truncated input, so a pending result is a caller bug
         const auto &s = checked_state();
