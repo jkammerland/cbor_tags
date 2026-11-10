@@ -192,7 +192,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         chunks.emplace_back(std::span<const std::byte>{bytes}.subspan(2));
         const auto state = moved->resume();
 
-        CHECK(state == resume_state::finished);
+        CHECK(state == resume_state::done);
         CHECK_FALSE(moved);
         REQUIRE(consumer.done());
         CHECK_NOTHROW(consumer.rethrow());
@@ -226,7 +226,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         int  actual{};
         auto operation = decoder(actual);
         chunks.emplace_back(bytes);
-        REQUIRE(operation.resume() == resume_state::finished);
+        REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
         CHECK(actual == expected);
     }
@@ -260,7 +260,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
             int  actual{};
             auto next = decoder(actual);
             chunks.emplace_back(bytes);
-            REQUIRE(next.resume() == resume_state::finished);
+            REQUIRE(next.resume() == resume_state::done);
             REQUIRE(next.result());
             CHECK(actual == 65536);
         }
@@ -288,7 +288,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
             CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
 
             input.push_back(std::byte{0x07});
-            REQUIRE(operation.resume() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(value == 7);
         }
@@ -325,7 +325,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
 
         // The moved-to operation still owns the decode
         input.push_back(std::byte{0x07});
-        REQUIRE(moved.resume() == resume_state::finished);
+        REQUIRE(moved.resume() == resume_state::done);
         REQUIRE(moved.result());
         CHECK(value == 7);
     }
@@ -372,7 +372,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
 
             // Completion is terminal, but acquisition lasts until destruction.
             CHECK_NOTHROW(operation.cancel());
-            CHECK(operation.resume() == resume_state::finished);
+            CHECK(operation.resume() == resume_state::done);
             CHECK(notifications == 1);
             CHECK(source.acquired);
             int rejected{};

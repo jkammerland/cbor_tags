@@ -65,7 +65,7 @@ int main() {
 
     input.insert(input.end(), produced.begin() + 2, produced.end());
     const auto final_input_state = decoding.resume();
-    assert(final_input_state == ct::resume_state::finished);
+    assert(final_input_state == ct::resume_state::done);
 
     // The hook resumes inside its fields, then reconstructs the application layout.
     const auto decoded = decoding.result();

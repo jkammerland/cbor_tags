@@ -82,7 +82,7 @@ template <typename T> class [[nodiscard]] resumable_task {
     handle_type      handle_{};
 };
 
-enum class resume_state { need_input, need_output, finished };
+enum class resume_state { need_input, need_output, done };
 
 namespace detail {
 template <typename Context>
@@ -141,7 +141,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
     // Publish completion before waking user code. The waiter may destroy this operation.
     static resume_state drive(operation_state &s) {
         if (s.finished || s.control.driving)
-            return s.finished ? resume_state::finished : Context::waiting_state;
+            return s.finished ? resume_state::done : Context::waiting_state;
         s.control.driving = true;
         if (auto handle = std::exchange(s.control.leaf, {}))
             handle.resume();
@@ -161,7 +161,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
         }
         s.control.driving   = false;
         auto       waiter   = s.finished ? std::exchange(s.control.waiter, {}) : std::coroutine_handle<>{};
-        const auto progress = s.finished ? resume_state::finished : Context::waiting_state;
+        const auto progress = s.finished ? resume_state::done : Context::waiting_state;
         if (waiter)
             waiter.resume();
         return progress;
@@ -196,7 +196,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
     resume_state resume() {
         auto &s = checked_state();
         if (s.finished)
-            return resume_state::finished;
+            return resume_state::done;
         if (s.control.driving)
             throw std::logic_error("cannot resume a running codec");
 

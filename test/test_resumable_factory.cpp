@@ -159,7 +159,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
         CHECK(operation.resume() == resume_state::need_output);
         CHECK(chunks.size() == 2);
         chunks.emplace_back(second);
-        REQUIRE(operation.resume() == resume_state::finished);
+        REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
         auto        joined   = std::views::join(chunks);
         auto        produced = std::ranges::subrange(joined.begin(), std::ranges::next(joined.begin(), operation.committed_bytes()));

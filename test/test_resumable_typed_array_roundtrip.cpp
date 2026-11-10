@@ -241,7 +241,7 @@ void check_view_splits(const std::vector<std::uint32_t> &expected, MakeValue mak
                 CHECK(operation.committed_bytes() == 0);
             }
             storage.insert(storage.end(), input.begin() + static_cast<std::ptrdiff_t>(cut), input.end());
-            REQUIRE(operation.resume() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(*operation.result() == bytes.size());
         }
@@ -286,7 +286,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
 
                 input.insert(input.end(), bytes.begin() + static_cast<std::ptrdiff_t>(cut), bytes.end());
                 const auto state = operation.resume();
-                REQUIRE(state == resume_state::finished);
+                REQUIRE(state == resume_state::done);
                 REQUIRE(operation.result());
                 CHECK(*operation.result() == bytes.size());
                 REQUIRE(actual.values().size() == expected.values().size());

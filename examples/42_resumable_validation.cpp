@@ -34,7 +34,7 @@ int main() {
 
         input.insert(input.end(), bytes.begin() + 3, bytes.end());
         const auto final_state = operation.resume();
-        assert(final_state == ct::resume_state::finished);
+        assert(final_state == ct::resume_state::done);
         std::cout << "input bytes: " << input.size() << '\n';
 
         // Success checks CBOR structure and UTF-8, not the application CDDL schema.

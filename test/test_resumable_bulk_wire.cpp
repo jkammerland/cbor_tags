@@ -272,7 +272,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         CHECK(source.position().offset() == 0);
 
         chunks.emplace_back(std::span{output}.subspan(1));
-        REQUIRE(operation.resume() == ct::resume_state::finished);
+        REQUIRE(operation.resume() == ct::resume_state::done);
         REQUIRE(operation.result());
         CHECK(operation.committed_bytes() == output.size());
         CHECK(output[0] == std::byte{0x58});
@@ -333,7 +333,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         CHECK(storage == std::vector<std::byte>{std::byte{0x45}, std::byte{1}, std::byte{2}});
 
         source.allowance = 3;
-        REQUIRE(operation.resume() == ct::resume_state::finished);
+        REQUIRE(operation.resume() == ct::resume_state::done);
         REQUIRE(operation.result());
         CHECK(operation.committed_bytes() == 6);
         CHECK(source.writes_after_exhaustion == 0);
@@ -379,7 +379,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             chunks.emplace_back();
             chunks.emplace_back(wire.begin() + cut, wire.end());
             source.refresh();
-            REQUIRE(operation.resume() == ct::resume_state::finished);
+            REQUIRE(operation.resume() == ct::resume_state::done);
             REQUIRE(operation.result());
             CHECK(actual == expected);
             CHECK(operation.committed_bytes() == wire.size() - 1);
@@ -409,7 +409,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             chunks.emplace_back();
             chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(grown), wire.end());
             source.refresh();
-            REQUIRE(operation.resume() == ct::resume_state::finished);
+            REQUIRE(operation.resume() == ct::resume_state::done);
             REQUIRE(operation.result());
             CHECK(std::ranges::equal(actual, expected));
             CHECK(operation.committed_bytes() == 603);
@@ -446,7 +446,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         chunks.emplace_back();
         chunks.emplace_back(wire.begin() + 290, wire.end());
         source.refresh();
-        REQUIRE(operation.resume() == ct::resume_state::finished);
+        REQUIRE(operation.resume() == ct::resume_state::done);
         REQUIRE(operation.result());
         CHECK(operation.committed_bytes() == 603);
         CHECK(std::ranges::equal(actual, expected));
@@ -499,7 +499,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         chunks.push_back({{wire.begin() + 211, wire.end()}, &counts});
         source.refresh();
         counts.throw_at = counts.dereferences + 44;
-        REQUIRE(operation.resume() == ct::resume_state::finished);
+        REQUIRE(operation.resume() == ct::resume_state::done);
         REQUIRE_FALSE(operation.result());
         CHECK(operation.result().error() == ct::status_code::out_of_memory);
         REQUIRE(actual.size() >= 208);
@@ -530,7 +530,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
 
             chunks.emplace_back();
             chunks.emplace_back(expected.size() - cut, std::byte{0xcc});
-            REQUIRE(operation.resume() == ct::resume_state::finished);
+            REQUIRE(operation.resume() == ct::resume_state::done);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == expected.size());
             std::vector<std::byte> actual;
@@ -564,7 +564,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             chunks.emplace_back();
             chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
             source.refresh();
-            REQUIRE(operation.resume() == ct::resume_state::finished);
+            REQUIRE(operation.resume() == ct::resume_state::done);
             REQUIRE(operation.result());
             CHECK(*operation.result() == 9);
             CHECK(value == expected);
@@ -591,7 +591,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
 
             chunks.emplace_back();
             chunks.emplace_back(expected.size() - cut, std::byte{0xcc});
-            REQUIRE(operation.resume() == ct::resume_state::finished);
+            REQUIRE(operation.resume() == ct::resume_state::done);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == expected.size());
 

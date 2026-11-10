@@ -399,7 +399,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         chunks.emplace_back(std::span{encoded}.first(2));
         CHECK(operation.resume() == resume_state::need_input);
         chunks.emplace_back(std::span{encoded}.subspan(2, 1));
-        CHECK(operation.resume() == resume_state::finished);
+        CHECK(operation.resume() == resume_state::done);
         REQUIRE_FALSE(operation.result());
         CHECK(operation.result().error() == status_code::contiguous_view_on_non_contiguous_data);
         CHECK(source.committed_position().offset() == 0);

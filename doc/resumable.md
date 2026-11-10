@@ -6,9 +6,10 @@ resumable operation suspends instead and continues where it stopped.
 
 Include `<cbor_tags/cbor_resumable.h>`, bind caller-owned storage once, then add
 more input or output space and call argument-free `resume()`. Operation creation
-runs eagerly; `resume()` reports `need_input`, `need_output`, or `finished`.
-Once an operation is finished, use `result()` to distinguish success from a
-terminal error. Calling `result()` earlier throws `std::logic_error`.
+runs eagerly; `resume()` reports `need_input`, `need_output`, or `done`, and
+`done()` checks for the last without resuming. A done operation has a result:
+`result()` tells success from a terminal error. Calling `result()` earlier
+throws `std::logic_error`.
 
 ## Custom codecs and supported combinations
 
@@ -93,7 +94,7 @@ int main() {
 
     input.push_back(std::span<const std::byte>{wire}.subspan(2));
     const auto completed = operation.resume();
-    assert(completed == ct::resume_state::finished);
+    assert(completed == ct::resume_state::done);
     const auto result = operation.result();
     assert(result);
     assert(*result == wire.size());
@@ -174,7 +175,7 @@ int main() {
 
     output.push_back(std::span{storage}.subspan(4));
     const auto completed = operation.resume();
-    assert(completed == ct::resume_state::finished);
+    assert(completed == ct::resume_state::done);
     const auto result = operation.result();
     assert(result);
 
@@ -532,7 +533,7 @@ int main() {
     auto decoding = decoder(received);
     input.insert(input.end(), wire.begin(), wire.end());
     const auto completed = decoding.resume();
-    assert(completed == ct::resume_state::finished);
+    assert(completed == ct::resume_state::done);
     assert(decoding.result());
     assert(received.name == sent.name);
     assert(received.values == sent.values);
@@ -645,7 +646,7 @@ int main() {
 
     input.insert(input.end(), wire.begin(), wire.end());
     const auto completed = operation.resume();
-    assert(completed == ct::resume_state::finished);
+    assert(completed == ct::resume_state::done);
     assert(operation.result());
     assert(received == 1000);
 }
