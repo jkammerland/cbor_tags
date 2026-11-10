@@ -64,6 +64,19 @@ template <typename Self> struct stateful_observer : codec::base<Self> {
     void observe_encoded_cbor_tag(std::uint64_t) { ++calls; }
 };
 
+// Takes over one view type from codec::typed_array. The library's declaration
+// for codec::typed_array doesn't cover it.
+template <typename Self> struct view_override : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+    std::size_t calls{};
+
+    template <typename ByteRange> status_code decode(rfc8746::typed_array_view<std::uint16_t, ByteRange> &, major_type, std::byte) {
+        ++calls;
+        return status_code::success;
+    }
+};
+
 // A value-only declaration cannot authorize a mixin, and an encode declaration
 // cannot authorize that codec's decoding direction.
 namespace cbor::tags {
@@ -103,6 +116,10 @@ int main() {
     rfc8746::typed_array<std::uint16_t> value;
     auto                                factory   = make_resumable_decoder<stateful_observer, codec::typed_array>(bytes);
     auto                                operation = factory(value);
+#elif defined(CBOR_RETRY_VIEW_OVERRIDE)
+    auto factory = make_resumable_decoder<view_override, codec::typed_array>(bytes);
+    rfc8746::typed_array_view_for<std::uint16_t, decltype(factory)> value;
+    auto                                                            operation = factory(value);
 #elif defined(CBOR_RETRY_OBSERVER_ENCODE)
     rfc8746::typed_array<std::uint16_t> value{1};
     auto                                factory   = make_resumable_encoder<stateful_observer, codec::typed_array>(bytes);

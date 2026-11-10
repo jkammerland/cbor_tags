@@ -66,7 +66,7 @@ example is standalone and uses standard-library storage.
 | [44_resumable_generator.cpp](44_resumable_generator.cpp) | Consume a sequence of top-level items | Copy each yielded value before requesting the next; tell the end of the sequence from another item. |
 | [45_resumable_custom_hook.cpp](45_resumable_custom_hook.cpp) | Customize resumable encoding and decoding | ADL hooks retain progress while choosing an application-specific wire layout. |
 | [46_resumable_ring.cpp](46_resumable_ring.cpp) | Reuse bounded storage through a custom source and output buffer | Absolute positions survive wraparound; reclaim only committed bytes after releasing external borrows; a sink hashes a byte string larger than the ring. |
-| [47_resumable_typed_array.cpp](47_resumable_typed_array.cpp) | Resume typed arrays | Decode into reused, bounded storage as bytes arrive, one whole element at a time; a bound fails on the header, before the payload. |
+| [47_resumable_typed_array.cpp](47_resumable_typed_array.cpp) | Resume typed arrays | Decode into reused, bounded storage as bytes arrive, one whole element at a time; a bound fails on the header, before the payload; a view waits for the whole array, then outlives its operation. |
 
 ## CDDL
 

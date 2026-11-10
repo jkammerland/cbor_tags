@@ -1180,7 +1180,7 @@ function(add_resumable_retry_failure CASE DIAGNOSTIC)
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endfunction()
 
-foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG PLAIN OBSERVER_DECODE)
+foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG PLAIN OBSERVER_DECODE VIEW_OVERRIDE)
   add_resumable_retry_failure(${CASE} "one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_${CASE})
 endforeach()
 add_resumable_retry_failure(MEMBER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
