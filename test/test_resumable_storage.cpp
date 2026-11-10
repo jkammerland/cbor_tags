@@ -1,17 +1,23 @@
 #include "resumable_ring_fixture.h"
 
+#include <algorithm>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_resumable.h>
 #include <cbor_tags/cbor_resumable_source.h>
 #include <cbor_tags/codec/typed_array.h>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
+#include <limits>
 #include <list>
+#include <map>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace cbor::tags;
@@ -52,6 +58,121 @@ struct counted_customization {
         return encoder(65536);
     }
 };
+
+using ring_result = expected<std::size_t, status_code>;
+
+// Admits up to feed bytes per resume after reclaiming what's committed. Every
+// resume of a run that can finish admits a byte, so running out of resumes
+// means it stalled; that returns nullopt.
+template <std::size_t Capacity, bool Windows, template <typename> typename... Codecs, typename T>
+std::optional<ring_result> decode_through_ring(std::span<const std::byte> wire, std::size_t feed, T &value, bool reports_capacity) {
+    resumable_test::ring_source<false, Capacity, Windows> source;
+    source.reports_capacity = reports_capacity;
+    auto operation          = make_resumable_decoder<Codecs...>(source)(value);
+    for (std::size_t resumes = 0, supplied = 0; !operation.done(); ++resumes) {
+        if (resumes > wire.size() + 1) {
+            operation.cancel();
+            return std::nullopt;
+        }
+        source.reclaim(source.committed_position().offset());
+        supplied += source.append(wire.subspan(supplied, std::min(feed, wire.size() - supplied)));
+        operation.resume();
+    }
+    return operation.result();
+}
+
+// Publishes and reclaims everything committed before each resume. A unit that
+// fits the ring finishes within two resumes, so the budget is two per byte.
+template <std::size_t Capacity, bool Windows, template <typename> typename... Codecs, typename T>
+std::optional<ring_result> encode_through_ring(const T &value, std::size_t wire_size, std::vector<std::byte> &published,
+                                               bool reports_capacity) {
+    resumable_test::ring_source<true, Capacity, Windows> sink;
+    sink.reports_capacity = reports_capacity;
+    auto operation        = make_resumable_encoder<Codecs...>(sink)(value);
+    for (std::size_t resumes = 0;; ++resumes) {
+        const auto committed = sink.committed_position().offset();
+        for (auto at = sink.begin(); at.offset() != committed; ++at)
+            published.push_back(*at);
+        sink.reclaim(committed);
+        if (operation.done())
+            return operation.result();
+        if (resumes > 2 * wire_size + 1) {
+            operation.cancel();
+            return std::nullopt;
+        }
+        operation.resume();
+    }
+}
+
+// Typed arrays have no ==, so compare what they hold
+template <typename T> bool same_value(const T &left, const T &right) {
+    if constexpr (requires { left.values(); })
+        return std::ranges::equal(left.values(), right.values());
+    else
+        return left == right;
+}
+
+// Reports must end exactly the runs that stall without them, and change nothing else
+template <std::size_t Capacity, bool Windows, template <typename> typename... Codecs, typename T>
+void check_capacity_reports(const T &value, std::size_t largest_unit) {
+    std::vector<std::byte> wire;
+    REQUIRE(make_encoder<Codecs...>(wire)(value));
+    CAPTURE(Capacity);
+    CAPTURE(Windows);
+    CAPTURE(wire.size());
+
+    // Runs finish exactly when the ring holds the value's largest whole unit
+    const bool fits = Capacity >= largest_unit;
+
+    // A byte at a time, and as much as fits so units also arrive whole across the wrap
+    for (const auto feed : {std::size_t{1}, wire.size()}) {
+        CAPTURE(feed);
+        T          waited{};
+        T          reported{};
+        const auto without = decode_through_ring<Capacity, Windows, Codecs...>(wire, feed, waited, false);
+        const auto with    = decode_through_ring<Capacity, Windows, Codecs...>(wire, feed, reported, true);
+        REQUIRE(with.has_value());
+        CHECK(without.has_value() == fits);
+        if (!without) {
+            REQUIRE_FALSE(*with);
+            CHECK(with->error() == status_code::capacity_exceeded);
+        } else {
+            REQUIRE(*without);
+            CHECK(same_value(waited, value));
+            CHECK(*with == *without);
+            CHECK(same_value(reported, waited));
+        }
+    }
+
+    std::vector<std::byte> waited_bytes;
+    std::vector<std::byte> reported_bytes;
+    const auto             encode_without = encode_through_ring<Capacity, Windows, Codecs...>(value, wire.size(), waited_bytes, false);
+    const auto             encode_with    = encode_through_ring<Capacity, Windows, Codecs...>(value, wire.size(), reported_bytes, true);
+    REQUIRE(encode_with.has_value());
+    CHECK(encode_without.has_value() == fits);
+    if (!encode_without) {
+        REQUIRE_FALSE(*encode_with);
+        CHECK(encode_with->error() == status_code::capacity_exceeded);
+    } else {
+        REQUIRE(*encode_without);
+        CHECK(waited_bytes == wire);
+        CHECK(*encode_with == *encode_without);
+        CHECK(reported_bytes == wire);
+    }
+    // A failed item never reaches the published bytes
+    CHECK(reported_bytes.size() <= wire.size());
+    CHECK(std::ranges::equal(reported_bytes, std::span{wire}.first(reported_bytes.size())));
+}
+
+// Rings of 1 to 12 bytes cover heads of every size, fitting or not
+template <template <typename> typename... Codecs, typename T, std::size_t... Index>
+void sweep_capacity_reports(const T &value, std::size_t largest_unit, std::index_sequence<Index...>) {
+    (check_capacity_reports<Index + 1, false, Codecs...>(value, largest_unit), ...);
+    (check_capacity_reports<Index + 1, true, Codecs...>(value, largest_unit), ...);
+}
+template <template <typename> typename... Codecs, typename T> void sweep_capacity_reports(const T &value, std::size_t largest_unit) {
+    sweep_capacity_reports<Codecs...>(value, largest_unit, std::make_index_sequence<12>{});
+}
 } // namespace
 
 namespace cbor::tags {
@@ -102,7 +223,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             chunks.back().push_back(wire[cut]);
             chunks.emplace_back();
             chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(cut + 1), wire.end());
-            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.resume() == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(actual == expected);
             CHECK(operation.committed_bytes() == wire.size());
@@ -126,7 +247,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
                 chunks.reserve(3);
 
             chunks.emplace_back(capacity);
-            auto source    = make_output_source(chunks);
+            auto source    = make_output_buffer(chunks);
             auto encoder   = make_resumable_encoder(source);
             auto operation = encoder(expected);
             REQUIRE_FALSE(operation.done());
@@ -143,7 +264,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             chunks.back().push_back(std::byte{});
             chunks.emplace_back();
             chunks.emplace_back(encoded.size() - capacity - 1);
-            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.resume() == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == encoded.size());
             CHECK(source.committed_position().offset() == encoded.size());
@@ -176,7 +297,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             CHECK(actual == 0);
 
             input.insert(input.end(), wire.begin() + 3, wire.end());
-            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.resume() == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(actual == expected);
             CHECK(operation.committed_bytes() == wire.size());
@@ -210,11 +331,11 @@ TEST_SUITE("roundtrip/resumable_storage") {
                 input.reserve(input.capacity() + wire.size());
             }
             input.insert(input.end(), wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
-            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.resume() == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == wire.size());
             CHECK(actual == expected);
-            CHECK(operation.resume() == resume_state::done);
+            CHECK(operation.resume() == resume_state::finished);
         }
     }
 
@@ -251,7 +372,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
 
             input.reserve(input.capacity() + wire.size());
             input.insert(input.end(), wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
-            REQUIRE(operation.finish() == resume_state::done);
+            REQUIRE(operation.close_input() == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == wire.size());
         }
@@ -272,7 +393,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
 
         tail.reserve(tail.capacity() + wire.size());
         tail.insert(tail.end(), wire.begin() + 7, wire.end());
-        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.resume() == resume_state::finished);
         REQUIRE(operation.result());
         CHECK(actual == expected);
         CHECK(operation.committed_bytes() == wire.size());
@@ -298,7 +419,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         auto &tail = chunks.back();
         tail.reserve(tail.capacity() + wire.size());
         tail.insert(tail.end(), wire.begin() + 7, wire.end());
-        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.resume() == resume_state::finished);
         REQUIRE(operation.result());
         CHECK(actual == expected);
         CHECK(operation.committed_bytes() == wire.size());
@@ -322,7 +443,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             chunks.reserve(chunks.capacity() + 2);
             REQUIRE(chunks.data() != previous_data);
             chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
-            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE(operation.resume() == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(actual == expected);
             CHECK(operation.committed_bytes() == wire.size());
@@ -339,7 +460,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(operation.committed_bytes() == 0);
 
         tail.resize(16);
-        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.resume() == resume_state::finished);
         REQUIRE(operation.result());
         auto committed = std::span<const std::byte>{tail}.first(operation.committed_bytes());
         int  actual{};
@@ -363,7 +484,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             if (cancel) {
                 operation.cancel();
             } else {
-                operation.finish();
+                operation.close_input();
             }
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
@@ -396,7 +517,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         REQUIRE(first.result());
         CHECK(items.value() == 42);
 
-        CHECK(items.finish() == resume_state::done);
+        CHECK(items.close_input() == resume_state::finished);
         auto &end = items.next();
         REQUIRE(end.done());
         REQUIRE(end.result());
@@ -407,13 +528,14 @@ TEST_SUITE("roundtrip/resumable_storage") {
 }
 
 TEST_SUITE("roundtrip/resumable_storage") {
-    TEST_CASE("public sized source reclaims a nonzero prefix during decoding") {
+    TEST_CASE_TEMPLATE("public sized source reclaims a nonzero prefix during decoding", Ring, resumable_test::ring_source<false, 11>,
+                       resumable_test::ring_source<false, 11, true>) {
         const std::vector<std::string> expected{"first", std::string(96, 'r'), "last"};
         std::vector<std::byte>         wire;
         REQUIRE(make_encoder(wire)(expected));
-        resumable_test::ring_source<false, 11> source;
-        std::vector<std::string>               actual;
-        auto                                   operation = make_resumable_decoder(source)(actual);
+        Ring                     source;
+        std::vector<std::string> actual;
+        auto                     operation = make_resumable_decoder(source)(actual);
 
         for (std::size_t supplied = 0; supplied != wire.size();) {
             const auto count =
@@ -433,13 +555,14 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(source.size() == 0);
     }
 
-    TEST_CASE("public sized source preserves a partial typed element across reclamation") {
+    TEST_CASE_TEMPLATE("public sized source preserves a partial typed element across reclamation", Ring,
+                       resumable_test::ring_source<false, 11>, resumable_test::ring_source<false, 11, true>) {
         const rfc8746::typed_array<std::uint32_t> expected{std::vector<std::uint32_t>{1, 24, 65536, 123456789}};
         std::vector<std::byte>                    wire;
         REQUIRE(make_encoder<codec::typed_array>(wire)(expected));
-        resumable_test::ring_source<false, 11> source;
-        rfc8746::typed_array<std::uint32_t>    actual;
-        auto                                   operation = make_resumable_decoder<codec::typed_array>(source)(actual);
+        Ring                                source;
+        rfc8746::typed_array<std::uint32_t> actual;
+        auto                                operation = make_resumable_decoder<codec::typed_array>(source)(actual);
 
         for (const auto &byte : wire) {
             REQUIRE(source.append(std::span{&byte, 1}) == 1);
@@ -453,12 +576,13 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(actual.values() == expected.values());
     }
 
-    TEST_CASE("public output source publishes each byte once through partial drains") {
-        const std::vector<std::string>        expected{"first", std::string(96, 'w'), "last"};
-        resumable_test::ring_source<true, 11> sink;
-        auto                                  operation = make_resumable_encoder(sink)(expected);
-        std::vector<std::byte>                delivered;
-        auto                                  published = sink.begin().offset();
+    TEST_CASE_TEMPLATE("public output buffer publishes each byte once through partial drains", Ring, resumable_test::ring_source<true, 11>,
+                       resumable_test::ring_source<true, 11, true>) {
+        const std::vector<std::string> expected{"first", std::string(96, 'w'), "last"};
+        Ring                           sink;
+        auto                           operation = make_resumable_encoder(sink)(expected);
+        std::vector<std::byte>         delivered;
+        auto                           published = sink.begin().offset();
 
         // A partial drain leaves an unsent committed tail while encoding can continue.
         while (!operation.done() || published != sink.committed_position().offset()) {
@@ -483,9 +607,10 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(decoder.tell() == delivered.end());
     }
 
-    TEST_CASE("public output source retains a partially written typed element") {
+    TEST_CASE_TEMPLATE("public output buffer retains a partially written typed element", Ring, resumable_test::ring_source<true, 7>,
+                       resumable_test::ring_source<true, 7, true>) {
         const rfc8746::typed_array<std::uint32_t> expected{std::vector<std::uint32_t>{1, 24, 65536, 123456789}};
-        resumable_test::ring_source<true, 7>      sink;
+        Ring                                      sink;
         auto                                      operation = make_resumable_encoder<codec::typed_array>(sink)(expected);
         std::vector<std::byte>                    delivered;
         auto                                      published = sink.begin().offset();
@@ -529,5 +654,48 @@ TEST_SUITE("roundtrip/resumable_storage") {
         REQUIRE_FALSE(operation.result());
         CHECK(operation.result().error() == status_code::cancelled);
         CHECK(sink.position() == sink.committed_position());
+    }
+
+    TEST_CASE("a source that reports capacity fails an item it can never hold") {
+        SUBCASE("output") {
+            const ordinary_item                   expected{std::string(96, 'x')};
+            resumable_test::ring_source<true, 11> sink;
+            sink.reports_capacity = true;
+            auto operation        = make_resumable_encoder(sink)(expected);
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::capacity_exceeded);
+            CHECK(operation.committed_bytes() == 0);
+            CHECK(sink.position() == sink.committed_position()); // nothing tentative is left
+        }
+
+        SUBCASE("input") {
+            // A view needs its whole item in the ring at once
+            std::vector<std::byte> wire;
+            REQUIRE(make_encoder(wire)(std::string(20, 'v')));
+            resumable_test::ring_source<false, 11> source;
+            source.reports_capacity                = true;
+            auto                           decoder = make_resumable_decoder(source);
+            decltype(decoder)::tstr_view_t view;
+            auto                           operation = decoder(view);
+            REQUIRE(source.append(wire) == 11);
+            operation.resume();
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::capacity_exceeded);
+            CHECK(operation.committed_bytes() == 0);
+        }
+    }
+
+    TEST_CASE("capacity reports end exactly the runs that would stall") {
+        // The second argument is the largest unit taken whole: a head with its
+        // argument, or a typed array's 2-byte tag and 1-byte string head, then 4-byte elements
+        sweep_capacity_reports(std::numeric_limits<std::uint64_t>::max(), 9);
+        sweep_capacity_reports(-1.5e300, 9);
+        sweep_capacity_reports(std::string(300, 's'), 3);
+        sweep_capacity_reports(std::vector<std::uint32_t>{1, 24, 65536, 123456789, 0}, 5);
+        sweep_capacity_reports(std::map<std::string, std::int64_t>{{"a", -1}, {std::string(30, 'k'), 1LL << 40}}, 9);
+        sweep_capacity_reports<codec::typed_array>(rfc8746::typed_array<std::uint32_t>{std::vector<std::uint32_t>{1, 24, 65536, 123456789}},
+                                                   4);
     }
 }

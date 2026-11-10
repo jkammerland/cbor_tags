@@ -11,7 +11,7 @@ example 26 requires signatures from two independent keys.
 Example 27 chooses application layouts; examples 28–29 keep payload bytes borrowed
 through signing, token encoding, decoding and verification.
 Examples 40–46 introduce resumable operations, from bound containers to coroutine
-consumers, custom hooks and a public ring source. The two consumer examples share
+consumers, custom hooks and a bounded ring buffer. The two consumer examples share
 a minimal coroutine frame owner in `resumable_consumer.h`. The ring example is
 standalone and uses standard-library storage.
 
@@ -58,13 +58,14 @@ standalone and uses standard-library storage.
 | [37_experimental_cwt_confirmation.cpp](37_experimental_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
 | [38_experimental_cwt_key_thumbprint.cpp](38_experimental_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
 | [39_experimental_cwt_confirmation_token.cpp](39_experimental_cwt_confirmation_token.cpp) | Verify token and presenter possession | Authenticate the issuer assertion, then verify the presenter's challenge signature. |
+| [40_a_resumable.cpp](40_a_resumable.cpp) | Continue a truncated record | A failed one-shot decode is terminal; a resumable decode keeps its progress and finishes once the missing bytes are appended. |
 | [40_resumable.cpp](40_resumable.cpp) | Decode items as input grows | Append bytes to a deque, resume, and inspect the completed values. |
 | [41_resumable_encoding.cpp](41_resumable_encoding.cpp) | Encode into a growable container | Let a deque grow and inspect its committed encoded prefix. |
-| [42_resumable_validation.cpp](42_resumable_validation.cpp) | Validate without constructing values | Validate CBOR structure and UTF-8 across chunks until explicit EOF. |
+| [42_resumable_validation.cpp](42_resumable_validation.cpp) | Validate without constructing values | Validate CBOR structure and UTF-8 across chunks until the input is closed. |
 | [43_resumable_coroutine.cpp](43_resumable_coroutine.cpp) | Await an operation from a coroutine | A serialized codec resume completes the waiting consumer inline. |
-| [44_resumable_generator.cpp](44_resumable_generator.cpp) | Consume a sequence of top-level items | Copy each yielded value before requesting the next; distinguish clean EOF from an item. |
+| [44_resumable_generator.cpp](44_resumable_generator.cpp) | Consume a sequence of top-level items | Copy each yielded value before requesting the next; tell the end of the sequence from another item. |
 | [45_resumable_custom_hook.cpp](45_resumable_custom_hook.cpp) | Customize resumable encoding and decoding | ADL hooks retain progress while choosing an application-specific wire layout. |
-| [46_resumable_ring.cpp](46_resumable_ring.cpp) | Reuse bounded storage through a public source | Absolute positions survive wraparound; reclaim only committed bytes after releasing external borrows. |
+| [46_resumable_ring.cpp](46_resumable_ring.cpp) | Reuse bounded storage through a custom source and output buffer | Absolute positions survive wraparound; reclaim only committed bytes after releasing external borrows; a sink hashes a byte string larger than the ring. |
 
 ## CDDL
 

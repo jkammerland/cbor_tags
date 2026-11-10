@@ -4,9 +4,9 @@
 
 namespace cbor::tags {
 
-// A declaration covers the complete ordinary call, including nested calls and
+// A declaration covers the complete one-shot call, including nested calls and
 // external effects. Codec is void for member/ADL customizations; mixins use the
-// actual ordinary Codec<Transcoder> specialization selected by the factory.
+// actual one-shot Codec<Transcoder> specialization selected by the factory.
 template <typename T, typename Codec = void> struct resumable_retry_traits {
     static constexpr bool encode = false;
     static constexpr bool decode = false;
@@ -34,11 +34,11 @@ concept RetryEncodeObserver = requires(Codec &codec) { codec.observe_encoded_cbo
 
 // Probe each installed mixin separately. A value's declaration must never
 // authorize an unrelated codec override, including overrides of built-in types.
-template <typename Ordinary, typename T, typename Codec, payload_decode_context Context>
+template <typename OneShot, typename T, typename Codec, payload_decode_context Context>
 consteval bool resumable_codec_decode_retry_allowed() {
     constexpr bool custom = [] {
-        if constexpr (std::is_base_of_v<codec::decoder_base<Ordinary>, Codec>) {
-            return codec_payload_mixin_customization<Ordinary>::template accepts_codec<T, Context, Codec>() ||
+        if constexpr (std::is_base_of_v<codec::decoder_base<OneShot>, Codec>) {
+            return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Context, Codec>() ||
                    (Context == payload_decode_context::direct && RetryDecodeRvalue<Codec, T>);
         } else if constexpr (Context == payload_decode_context::tag) {
             return RetryDecodeTag<Codec, T>;
@@ -51,21 +51,21 @@ consteval bool resumable_codec_decode_retry_allowed() {
     return (!custom && !RetryDecodeObserver<Codec>) || resumable_retry_traits<std::remove_cvref_t<T>, Codec>::decode;
 }
 
-template <typename Ordinary, typename T, payload_decode_context Context, typename... Codecs>
+template <typename OneShot, typename T, payload_decode_context Context, typename... Codecs>
 consteval bool resumable_decode_retry_allowed() {
-    return (!IsClassWithDecodingOverload<Ordinary, T> || resumable_retry_traits<std::remove_cvref_t<T>>::decode) &&
-           (resumable_codec_decode_retry_allowed<Ordinary, T, Codecs, Context>() && ...);
+    return (!IsClassWithDecodingOverload<OneShot, T> || resumable_retry_traits<std::remove_cvref_t<T>>::decode) &&
+           (resumable_codec_decode_retry_allowed<OneShot, T, Codecs, Context>() && ...);
 }
 
-template <typename Ordinary, typename T, typename Codec> consteval bool resumable_codec_encode_retry_allowed() {
+template <typename OneShot, typename T, typename Codec> consteval bool resumable_codec_encode_retry_allowed() {
     constexpr bool custom = [] {
-        if constexpr (std::is_base_of_v<codec::encoder_base<Ordinary>, Codec>) {
-            using probe = payload_encoder_overload_probe<Ordinary, Codec>;
+        if constexpr (std::is_base_of_v<codec::encoder_base<OneShot>, Codec>) {
+            using probe = payload_encoder_overload_probe<OneShot, Codec>;
             if constexpr (RetryEncodeRvalue<probe, T>) {
-                return codec_payload_mixin_customization<Ordinary>::template accepts_codec<T, Codec>() ||
+                return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Codec>() ||
                        !std::same_as<decltype(std::declval<probe &>().encode(std::declval<T &&>())), core_payload_overload>;
             } else {
-                return codec_payload_mixin_customization<Ordinary>::template accepts_codec<T, Codec>();
+                return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Codec>();
             }
         } else {
             return RetryEncodeDirect<Codec, T>;
@@ -74,9 +74,9 @@ template <typename Ordinary, typename T, typename Codec> consteval bool resumabl
     return (!custom && !RetryEncodeObserver<Codec>) || resumable_retry_traits<std::remove_cvref_t<T>, Codec>::encode;
 }
 
-template <typename Ordinary, typename T, typename... Codecs> consteval bool resumable_encode_retry_allowed() {
-    return (!IsClassWithEncodingOverload<Ordinary, T> || resumable_retry_traits<std::remove_cvref_t<T>>::encode) &&
-           (resumable_codec_encode_retry_allowed<Ordinary, T, Codecs>() && ...);
+template <typename OneShot, typename T, typename... Codecs> consteval bool resumable_encode_retry_allowed() {
+    return (!IsClassWithEncodingOverload<OneShot, T> || resumable_retry_traits<std::remove_cvref_t<T>>::encode) &&
+           (resumable_codec_encode_retry_allowed<OneShot, T, Codecs>() && ...);
 }
 
 } // namespace detail

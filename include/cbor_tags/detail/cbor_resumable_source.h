@@ -50,7 +50,7 @@ struct resumable_source_access {
         if constexpr (HasOutputWindow<Source>)
             source.consume_window(count);
         else if (count != 0)
-            throw std::logic_error("CBOR output source has no writable window");
+            throw std::logic_error("CBOR output buffer has no writable window");
     }
     template <typename Source, typename Position>
     static std::optional<std::span<const std::byte>> borrow_window(const Source &source, Position &position) {
@@ -667,7 +667,7 @@ template <ResumableChunkStorage Storage> class chunk_source {
         }
     }
 
-    bool eof() const { return closed_; }
+    bool closed() const { return closed_; }
     bool owns(const iterator &position) const { return position.source_ == this; }
 
     // Cleanup only restores known progress positions; an unsized end sentinel
@@ -903,7 +903,7 @@ template <detail::ResumableStorage Storage> class input_source {
     void acquire() { chunks_.acquire(); }
     void release() noexcept { chunks_.release(); }
     void close() { chunks_.close(); }
-    bool eof() const { return chunks_.eof(); }
+    bool closed() const { return chunks_.closed(); }
 
     void commit(const iterator &position) {
         assert(chunks_.owns(position) && position.offset() >= committed_.offset());
@@ -923,7 +923,7 @@ template <detail::ResumableStorage Storage> class input_source {
 
 template <detail::ResumableStorage Storage> auto make_input_source(Storage &storage) { return input_source<Storage>(storage); }
 
-template <detail::ResumableOutputStorage Storage> class output_source {
+template <detail::ResumableOutputStorage Storage> class output_buffer {
     using chunks_type              = detail::chunk_source<detail::source_chunks<Storage>>;
     static constexpr bool growable = detail::GrowableOutputStorage<Storage>;
 
@@ -933,7 +933,7 @@ template <detail::ResumableOutputStorage Storage> class output_source {
     using iterator      = typename chunks_type::iterator;
     using position_type = iterator;
 
-    explicit output_source(Storage &storage)
+    explicit output_buffer(Storage &storage)
         : storage_(&storage), views_(storage), chunks_(views_.get()), working_([&] {
               if constexpr (growable)
                   return chunks_.position_at_end();
@@ -941,13 +941,13 @@ template <detail::ResumableOutputStorage Storage> class output_source {
                   return chunks_.begin();
           }()),
           committed_(working_) {}
-    output_source(const output_source &)            = delete;
-    output_source &operator=(const output_source &) = delete;
-    output_source(output_source &&)                 = delete;
-    output_source &operator=(output_source &&)      = delete;
+    output_buffer(const output_buffer &)            = delete;
+    output_buffer &operator=(const output_buffer &) = delete;
+    output_buffer(output_buffer &&)                 = delete;
+    output_buffer &operator=(output_buffer &&)      = delete;
 
     void refresh() { chunks_.refresh(); }
-    bool eof() const { return chunks_.eof(); }
+    bool closed() const { return chunks_.closed(); }
     void close() { chunks_.close(); }
     void acquire() { chunks_.acquire(); }
     void release() noexcept { chunks_.release(); }
@@ -1010,7 +1010,7 @@ template <detail::ResumableOutputStorage Storage> class output_source {
             }
         }
         if constexpr (growable) {
-            if (!bytes.empty() && !eof()) {
+            if (!bytes.empty() && !closed()) {
                 if (bytes.size() > std::numeric_limits<std::size_t>::max() - working_.offset())
                     throw std::length_error("CBOR output byte offset overflow");
                 using byte_type = std::ranges::range_value_t<Storage>;
@@ -1036,15 +1036,15 @@ template <detail::ResumableOutputStorage Storage> class output_source {
     iterator                        committed_;
 };
 
-template <detail::ResumableOutputStorage Storage> auto make_output_source(Storage &storage) { return output_source<Storage>(storage); }
+template <detail::ResumableOutputStorage Storage> auto make_output_buffer(Storage &storage) { return output_buffer<Storage>(storage); }
 
 namespace detail {
 
-// Ordinary encoders use this library-owned bridge for every public adapter.
+// One-shot encoders use this library-owned bridge for every public adapter.
 // A consumer only implements the source protocol and reports partial writes.
-template <ResumableOutputSource Source> struct is_segment_output_buffer<Source> : std::true_type {};
+template <ResumableOutputBuffer Source> struct is_segment_output_buffer<Source> : std::true_type {};
 
-template <ResumableOutputSource Source> struct appender<Source, false> {
+template <ResumableOutputBuffer Source> struct appender<Source, false> {
     void reserve_for_append(Source &, std::uint64_t) const {}
     void operator()(Source &source, std::byte value) { (*this)(source, std::span<const std::byte>{&value, 1}); }
     void operator()(Source &source, std::span<const std::byte> values) {

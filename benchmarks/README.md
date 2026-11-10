@@ -201,24 +201,25 @@ cmake --build build/resumable-bench \
 ctest --test-dir build/resumable-bench -R 'resumable_(ordinary_throughput|throughput|latency|allocation|storage)' --output-on-failure
 ```
 
-The default uses explicit input/output sources. Configure with
-`-DCBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY=ON` to measure the named encoder and
-decoder factories that own their adapters. This changes only adapter setup;
-fixtures, feed loops and correctness checks remain identical. Validation continues
-to use an explicit source. For a baseline/candidate comparison, compile the same
-final harness against both header revisions with the same value for this option,
-the same compiler, and identical build flags. A comparison across different
-factory settings also changes the measured API setup and cannot isolate a source
-adapter change. The separate storage target always uses the named factories.
+The default uses an explicit source and output buffer. Configure with
+`-DCBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY=ON` to measure resumable encoders
+and decoders bound directly to storage, which own their adapters. This changes
+only adapter setup; fixtures, feed loops and correctness checks remain
+identical. Validation continues to use an explicit source. For a
+baseline/candidate comparison, compile the same final harness against both
+header revisions with the same value for this option, the same compiler, and
+identical build flags. A comparison across different
+settings of this option also changes the measured API setup and cannot isolate
+an adapter change. The separate storage target always binds storage directly.
 
-`bench_resumable_throughput_one_shot` runs only the ordinary rows. Both throughput
-drivers automatically build and load the same private ordinary-runner shared
-library, keeping its timed code independent of the resumable runner. Module
-loading and runner dispatch occur outside timing. Run these targets from the
-build tree; the private library is not included in the `cbor_tags` install.
-Windows builds using the MSVC ABI require a shared runtime.
+`bench_resumable_throughput_one_shot` runs only the one-shot rows. Both
+throughput drivers automatically build and load the same private one-shot
+runner shared library, keeping its timed code independent of the resumable
+runner. Module loading and runner dispatch occur outside timing. Run these
+targets from the build tree; the private library is not included in the
+`cbor_tags` install. Windows builds using the MSVC ABI require a shared runtime.
 
-`bench_resumable_throughput` compares ordinary encode/decode with resumable
+`bench_resumable_throughput` compares one-shot encode/decode with resumable
 encode/decode supplied as a complete buffer or in 1460, 4096, and 65536 byte
 chunks. Separate validation rows compare `validate_item` with the resumable
 validator, without creating decoded values. Deterministic fixtures include
@@ -258,7 +259,7 @@ Decode rows create fresh destinations, including allocation and destruction of
 the previous destination. `--storage reserved|both` adds `decode-reserved` rows
 for containers with `reserve()`: capacity is supplied before timing, while
 clearing previous elements remains timed. For unordered maps this reserves
-buckets; node allocations remain. Ordered maps have no reserved row. Ordinary
+buckets; node allocations remain. Ordered maps have no reserved row. One-shot
 owning typed-array decode replaces its vector and discards the offered capacity,
 while resumable decode reuses it. Its reserved rows therefore compare the API
 with offered capacity, not equal allocation behavior; cold rows are the primary
@@ -268,7 +269,7 @@ are outside timing. `--self-test` checks all paths using small fixtures without
 running throughput measurements. `--direction` selects decode, encode,
 validation, or all rows; `--transport` selects full, 1460, 4096, 65536, or all.
 Indefinite strings are decode/validate workloads: their CBOR chunks are assembled
-outside timing through the ordinary encoder. `--cbor-chunk` defaults to 256;
+outside timing through the one-shot encoder. `--cbor-chunk` defaults to 256;
 selftests also check one-byte and 17/4096-byte CBOR chunks against every
 transport mode. PMR allocation rows count only destination requests and their
 total requested bytes, excluding source descriptors and coroutine frames.
@@ -294,7 +295,7 @@ width-varying unsigned scalar arrays. Its ten `--case` values are:
 | `list-deque` | `list<deque<byte>>` |
 | `vector-list` | `vector<list<byte>>` |
 | `list-list` | `list<list<byte>>` |
-| `ring` | Custom source implementing the public resumable protocol |
+| `ring` | Custom source and output buffer implementing the public resumable protocol |
 
 Input spans view const bytes. Nested storage uses 1460-byte packets. `complete`
 admits all storage before creating the operation; `staged1460` admits storage
@@ -305,9 +306,10 @@ storage. The ring control has a 1460-byte capacity, starts at a nonzero absolute
 offset, wraps, and reclaims only committed bytes. It has bounded admission rows
 only and bypasses the built-in storage adapters.
 
-Every row includes factory and operation construction, storage reset, admission,
-completion checks, and calls to `resume()` when needed. Value destination reservation, fixed output
-backing, and supported outer-container reservation happen outside timing.
+Every row includes encoder or decoder and operation construction, storage reset,
+admission, completion checks, and calls to `resume()` when needed. Value
+destination reservation, fixed output backing, and supported outer-container
+reservation happen outside timing.
 `timed_storage_scope` identifies owning-packet copying/allocation, descriptor
 allocation, deque allocation, and ring publication copying. These scopes differ
 between storage types; use matched rows across header revisions to assess a code
@@ -361,15 +363,15 @@ they are needed for an ongoing investigation.
 ### Comparing revisions
 
 Build the same benchmark sources against both header revisions. Use
-`bench_resumable_throughput_one_shot` for ordinary rows, or
-`bench_resumable_throughput` for the combined ordinary/resumable matrix. The
-private ordinary runner is shared by both drivers in each build. For a build
-containing only ordinary benchmarks, configure
+`bench_resumable_throughput_one_shot` for one-shot rows, or
+`bench_resumable_throughput` for the combined one-shot/resumable matrix. The
+private one-shot runner is shared by both drivers in each build. For a build
+containing only one-shot benchmarks, configure
 `-DCBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=ON` and run `bench_resumable_throughput`.
 Compare matching rows with the same compiler and flags, alternating whole
-executable runs. Run comparisons sequentially on otherwise idle hardware; an
-ordinary/resumable comparison within one revision does not establish whether
-ordinary decoding regressed from the baseline.
+executable runs. Run comparisons sequentially on otherwise idle hardware; a
+one-shot/resumable comparison within one revision does not establish whether
+one-shot decoding regressed from the baseline.
 
 For paired comparisons, build the same harness against both header revisions
 with identical flags. Run three baseline/candidate pairs sequentially, reversing
@@ -385,7 +387,7 @@ taskset -c 2 <executable> --workload tstr-indef --cbor-chunk 65536 \
 ```
 
 Repeat for the relevant workloads and CBOR child sizes. Add `--mode one-shot`
-for the ordinary-only controls. Record compiler and build flags, CPU affinity,
+for the one-shot-only controls. Record compiler and build flags, CPU affinity,
 frequency scaling, governor, and actual encoded sizes. Report each mode's
 median and range, and compute speedup for each pair before summarizing those
 ratios; a ratio of independently computed medians is a different statistic.
@@ -400,7 +402,7 @@ Run fixture and allocation selftests and retain the timed content checks.
 
 `bench_resumable_latency` measures real elapsed completion time while an
 independent producer admits chunks on absolute `steady_clock` deadlines. It
-compares buffering until the final arrival followed by ordinary decode with
+compares buffering until the final arrival followed by one-shot decode with
 incremental resumable decode. This is an in-process arrival benchmark over
 prebuilt input, without network transfer or ingress-copy costs. The producer
 continues admitting bytes independently when the decoder falls behind; the

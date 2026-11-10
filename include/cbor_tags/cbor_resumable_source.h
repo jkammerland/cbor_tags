@@ -32,7 +32,7 @@ concept ResumableSource = ResumableSizeType<Source> && requires(Source &source, 
     typename Source::position_type;
     requires ResumablePosition<typename Source::position_type>;
     { constant.committed_position() } noexcept -> std::same_as<typename Source::position_type>;
-    { constant.eof() } -> std::same_as<bool>;
+    { constant.closed() } -> std::same_as<bool>;
     { source.refresh() } -> std::same_as<void>;
     { source.close() } -> std::same_as<void>;
     { source.acquire() } -> std::same_as<void>;
@@ -54,10 +54,10 @@ concept ResumableInputSource =
     };
 
 // write() advances the working position by its returned count. A short write
-// means temporary exhaustion; ordinary codec adaptation is library-owned.
+// means temporary exhaustion; one-shot codec adaptation is library-owned.
 // Optional borrow_window()/consume_window(n) expose writable constructed bytes.
 template <typename Source>
-concept ResumableOutputSource =
+concept ResumableOutputBuffer =
     ResumableSource<Source> && std::ranges::forward_range<const Source> &&
     requires(Source &source, const Source &constant, typename Source::position_type position, std::span<const std::byte> bytes) {
         typename Source::value_type;

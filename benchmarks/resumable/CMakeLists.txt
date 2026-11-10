@@ -1,11 +1,11 @@
-option(CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY "Build resumable comparison harnesses using only the ordinary API" OFF)
+option(CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY "Build resumable comparison harnesses using only the one-shot API" OFF)
 option(CBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY "Measure named factories owning chunk adapters" OFF)
 if(CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY AND CBOR_TAGS_BENCHMARK_USE_STORAGE_FACTORY)
   message(FATAL_ERROR "Storage factory benchmarks require resumable operations")
 endif()
 find_package(Threads REQUIRED)
 
-# A private shared runner keeps ordinary timed code independent of resumable
+# A private shared runner keeps one-shot timed code independent of resumable
 # instantiations and their cold sections. Dispatch and loading happen outside timing.
 # Its C++ containers cross the module boundary, so Windows builds need one CRT.
 if(MSVC)
@@ -62,7 +62,7 @@ if(NOT CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY)
   target_sources(bench_resumable_throughput PRIVATE throughput_resumable.cpp)
   target_link_libraries(bench_resumable_throughput PRIVATE nanobench)
 
-  # Both drivers load exactly the same compiled ordinary runner in this build.
+  # Both drivers load exactly the same compiled one-shot runner in this build.
   add_executable(bench_resumable_throughput_one_shot throughput.cpp)
   target_compile_definitions(bench_resumable_throughput_one_shot PRIVATE CBOR_TAGS_BENCHMARK_ONE_SHOT_ONLY=1)
   target_link_libraries(bench_resumable_throughput_one_shot PRIVATE cbor_tags cbor_throughput_ordinary)

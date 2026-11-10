@@ -102,13 +102,13 @@ template <typename Array, typename EncodeValue> void check_typed_array_encode_sp
         CAPTURE(cut);
         std::vector<std::byte> bytes(size);
         output_chunks          chunks;
-        auto                   sink      = make_output_source(chunks);
+        auto                   sink      = make_output_buffer(chunks);
         auto                   operation = make_resumable_encoder<codec::typed_array>(sink)(value);
         chunks.emplace_back(std::span{bytes}.first(cut));
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(std::span{bytes}.subspan(cut));
-            operation.finish();
+            operation.close_output();
         }
 
         REQUIRE(operation.done());
@@ -136,7 +136,7 @@ template <typename Array> void check_typed_array_splits(const Array &expected) {
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(input.subspan(cut));
-            operation.finish();
+            operation.close_input();
         }
 
         REQUIRE(operation.done());
@@ -158,7 +158,7 @@ template <typename Self> struct typed_array_override : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    resumable<status_code> resumable_decode(rfc8746::typed_array<std::uint32_t> &array) {
+    resumable_task<status_code> resumable_decode(rfc8746::typed_array<std::uint32_t> &array) {
         std::uint32_t value{};
         const auto    status = co_await static_cast<Self &>(*this)(value);
         if (status == status_code::success) {
@@ -167,7 +167,7 @@ template <typename Self> struct typed_array_override : codec::base<Self> {
         co_return status;
     }
 
-    resumable<status_code> resumable_encode(const rfc8746::typed_array<std::uint32_t> &array) {
+    resumable_task<status_code> resumable_encode(const rfc8746::typed_array<std::uint32_t> &array) {
         co_return co_await static_cast<Self &>(*this)(array.values().front());
     }
 };
@@ -189,8 +189,8 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
             auto                                                operation = decoder(actual);
 
             input.insert(input.end(), bytes.begin() + static_cast<std::ptrdiff_t>(cut), bytes.end());
-            const auto state = operation.finish();
-            REQUIRE(state == resume_state::done);
+            const auto state = operation.close_input();
+            REQUIRE(state == resume_state::finished);
             REQUIRE(operation.result());
             CHECK(*operation.result() == bytes.size());
             REQUIRE(actual.values().size() == expected.values().size());
@@ -251,7 +251,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         auto check_output = [&](auto make_operation) {
             std::vector<std::byte> output(size);
             output_chunks          chunks;
-            auto                   sink      = make_output_source(chunks);
+            auto                   sink      = make_output_buffer(chunks);
             auto                   operation = make_operation(sink);
             REQUIRE_FALSE(operation.done());
             for (auto &byte : output) {
@@ -299,7 +299,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         using output_chunk = std::ranges::subrange<std::list<std::byte>::iterator>;
         static_assert(!std::ranges::sized_range<output_chunk>);
         std::list<output_chunk> output_storage;
-        auto                    sink    = make_output_source(output_storage);
+        auto                    sink    = make_output_buffer(output_storage);
         auto                    encoder = make_resumable_encoder<codec::typed_array>(sink)(expected);
         for (auto iterator = output.begin(); iterator != output.end(); ++iterator) {
             output_storage.emplace_back(output_chunk{iterator, std::next(iterator)});
@@ -376,7 +376,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
 
         std::vector<std::byte> output(reference.size());
         output_chunks          output_storage;
-        auto                   sink    = make_output_source(output_storage);
+        auto                   sink    = make_output_buffer(output_storage);
         auto                   encoder = make_resumable_encoder<codec::typed_array>(sink)(expected);
         for (auto &byte : output) {
             output_storage.emplace_back(std::span{&byte, 1});
@@ -396,10 +396,10 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
 
         std::vector<std::byte> output(reference.size());
         output_chunks          output_storage;
-        auto                   sink    = make_output_source(output_storage);
+        auto                   sink    = make_output_buffer(output_storage);
         auto                   encoder = make_resumable_encoder<typed_array_override, codec::typed_array>(sink)(expected);
         output_storage.emplace_back(std::span{output});
-        encoder.finish();
+        encoder.close_output();
         REQUIRE(encoder.result());
         CHECK(*encoder.result() == reference.size());
 
@@ -408,7 +408,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         rfc8746::typed_array<std::uint32_t> actual;
         auto                                decoder = make_resumable_decoder<typed_array_override, codec::typed_array>(source)(actual);
         input_storage.emplace_back(std::span<const std::byte>{output});
-        decoder.finish();
+        decoder.close_input();
         REQUIRE(decoder.result());
         CHECK(*decoder.result() == reference.size());
         check_typed_array_values(actual, expected);

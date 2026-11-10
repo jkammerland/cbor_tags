@@ -64,7 +64,7 @@ TEST_SUITE("roundtrip/resumable_packets") {
             input.emplace_back(*owners.back());
             supplied += count;
             const auto state = operation.resume();
-            CHECK(state == (supplied == wire.size() ? ct::resume_state::done : ct::resume_state::need_input));
+            CHECK(state == (supplied == wire.size() ? ct::resume_state::finished : ct::resume_state::need_input));
 
             if (!operation.done()) {
                 const auto committed = operation.committed_bytes();

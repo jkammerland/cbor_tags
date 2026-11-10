@@ -669,6 +669,23 @@ TEST_SUITE("Views errors") {
         CHECK_EQ(result.error(), status_code::contiguous_view_on_non_contiguous_data);
     }
 
+    // Doesn't matter if the payload is all there, the view can't point into a deque anyway
+    TEST_CASE_TEMPLATE("decode contiguous view on truncated non-contiguous data [bstr]", T, std::span<const std::byte>,
+                       test_util::basic_string_view<std::byte>) {
+        const auto data = std::deque<std::byte>{std::byte{0x43}, std::byte{0x61}}; // h'616263', 1 of 3 payload bytes
+
+        auto view  = T{};
+        auto check = [&](auto &&target) {
+            auto result = make_decoder(data)(target);
+            REQUIRE_FALSE(result);
+            CHECK_EQ(result.error(), status_code::contiguous_view_on_non_contiguous_data);
+        };
+        check(view);
+        check(as_bounded_size<1, 4>(view));
+        check(as_bounded_size(view, 1, 4));
+        CHECK(view.empty());
+    }
+
     TEST_CASE_TEMPLATE("decode contiguous view on non-contiguous data [tstr]", T, std::string_view) {
         auto        data = std::deque<std::byte>{};
         auto        enc  = make_encoder(data);

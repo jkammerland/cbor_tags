@@ -1074,7 +1074,7 @@ template <typename Self> struct typed_array : base<Self> {
     using base<Self>::encode;
 
     template <typename T, rfc8746::typed_array_byte_order ByteOrder>
-    resumable<status_code> resumable_decode(rfc8746::typed_array<T, ByteOrder> &array) {
+    resumable_task<status_code> resumable_decode(rfc8746::typed_array<T, ByteOrder> &array) {
         using value_type = std::remove_cv_t<T>;
         return tags::detail::resumable_decode_typed_array<rfc8746::typed_array_traits<value_type, ByteOrder>::tag,
                                                           rfc8746::detail::native_matches_byte_order<ByteOrder>>(
@@ -1083,19 +1083,19 @@ template <typename Self> struct typed_array : base<Self> {
     }
 
     template <typename T, rfc8746::typed_array_byte_order ByteOrder>
-    resumable<status_code> resumable_encode(const rfc8746::typed_array<T, ByteOrder> &array) {
+    resumable_task<status_code> resumable_encode(const rfc8746::typed_array<T, ByteOrder> &array) {
         return resumable_encode_values<ByteOrder>(array.values());
     }
 
     template <typename T, rfc8746::typed_array_byte_order ByteOrder>
-    resumable<status_code> resumable_encode(const rfc8746::typed_array_ref<T, ByteOrder> &array) {
+    resumable_task<status_code> resumable_encode(const rfc8746::typed_array_ref<T, ByteOrder> &array) {
         // Keep the descriptor in the coroutine while payload transfer is suspended.
         auto values = array.values();
         co_return co_await resumable_encode_values<ByteOrder>(values);
     }
 
     template <typename R, rfc8746::typed_array_byte_order ByteOrder>
-    resumable<status_code> resumable_encode(const rfc8746::detail::typed_array_range_ref<R, ByteOrder> &array) {
+    resumable_task<status_code> resumable_encode(const rfc8746::detail::typed_array_range_ref<R, ByteOrder> &array) {
         return resumable_encode_values<ByteOrder>(array.values());
     }
 
@@ -1445,7 +1445,8 @@ template <typename Self> struct typed_array : base<Self> {
     }
 
   private:
-    template <rfc8746::typed_array_byte_order ByteOrder, typename Range> resumable<status_code> resumable_encode_values(Range &values) {
+    template <rfc8746::typed_array_byte_order ByteOrder, typename Range>
+    resumable_task<status_code> resumable_encode_values(Range &values) {
         using value_type = std::ranges::range_value_t<Range>;
         return tags::detail::resumable_encode_typed_array<rfc8746::typed_array_traits<value_type, ByteOrder>::tag>(
             static_cast<Self &>(*this), values, [](std::span<std::byte> output, std::span<const value_type> input) {

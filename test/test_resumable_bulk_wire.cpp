@@ -70,7 +70,7 @@ class named_helper_source {
     void          commit(position_type position) { committed_ = position.index; }
     auto          remaining(position_type position) const { return std::ranges::subrange(position, end()); }
     void          refresh() {}
-    bool          eof() const { return closed_; }
+    bool          closed() const { return closed_; }
     void          close() { closed_ = true; }
     void          acquire() {
         if (active_)
@@ -90,15 +90,15 @@ class named_helper_source {
 static_assert(ct::ResumableInputSource<named_helper_source>);
 
 // A transport may accept a prefix even when its backing container can grow.
-class bounded_write_source : public ct::output_source<std::vector<std::byte>> {
+class bounded_write_source : public ct::output_buffer<std::vector<std::byte>> {
   public:
-    using output_source::output_source;
+    using output_buffer::output_buffer;
 
     std::optional<std::span<std::byte>> borrow_window() { return std::nullopt; }
     std::size_t                         write(std::span<const std::byte> bytes) {
         if (allowance == 0)
             ++writes_after_exhaustion;
-        const auto count = output_source::write(bytes.first(std::min(bytes.size(), allowance)));
+        const auto count = output_buffer::write(bytes.first(std::min(bytes.size(), allowance)));
         allowance -= count;
         return count;
     }
@@ -107,16 +107,16 @@ class bounded_write_source : public ct::output_source<std::vector<std::byte>> {
     std::size_t writes_after_exhaustion{};
 };
 
-static_assert(ct::ResumableOutputSource<bounded_write_source>);
+static_assert(ct::ResumableOutputBuffer<bounded_write_source>);
 
 // Optional windows do not replace a custom source's write contract.
 class custom_empty_window_source {
-    ct::output_source<std::vector<std::byte>> source_;
+    ct::output_buffer<std::vector<std::byte>> source_;
 
   public:
     using value_type    = std::byte;
     using size_type     = std::size_t;
-    using position_type = ct::output_source<std::vector<std::byte>>::position_type;
+    using position_type = ct::output_buffer<std::vector<std::byte>>::position_type;
 
     explicit custom_empty_window_source(std::vector<std::byte> &storage) : source_(storage) {}
     auto begin() const { return source_.begin(); }
@@ -128,7 +128,7 @@ class custom_empty_window_source {
     void commit() { source_.commit(); }
     void restore(position_type position) noexcept { source_.restore(position); }
     void refresh() { source_.refresh(); }
-    bool eof() const { return source_.eof(); }
+    bool closed() const { return source_.closed(); }
     void close() { source_.close(); }
     void acquire() { source_.acquire(); }
     void release() noexcept { source_.release(); }
@@ -142,21 +142,21 @@ class custom_empty_window_source {
     std::size_t writes{};
 };
 
-class derived_empty_window_source : public ct::output_source<std::vector<std::byte>> {
+class derived_empty_window_source : public ct::output_buffer<std::vector<std::byte>> {
   public:
-    using output_source::output_source;
+    using output_buffer::output_buffer;
 
     std::optional<std::span<std::byte>> borrow_window() { return std::span<std::byte>{}; }
     std::size_t                         write(std::span<const std::byte> bytes) {
         ++writes;
-        return output_source::write(bytes);
+        return output_buffer::write(bytes);
     }
 
     std::size_t writes{};
 };
 
-static_assert(ct::ResumableOutputSource<custom_empty_window_source>);
-static_assert(ct::ResumableOutputSource<derived_empty_window_source>);
+static_assert(ct::ResumableOutputBuffer<custom_empty_window_source>);
+static_assert(ct::ResumableOutputBuffer<derived_empty_window_source>);
 
 // Count native traversal separately from the adapter's offsets and boundaries.
 struct node_read_counts {
@@ -259,11 +259,11 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         std::array<std::byte, 26> output;
         output.fill(std::byte{0xcc});
         std::deque<std::span<std::byte>> chunks;
-        auto                             source    = ct::make_output_source(chunks);
+        auto                             source    = ct::make_output_buffer(chunks);
         auto                             encoder   = ct::make_resumable_encoder(source);
         auto                             operation = encoder(value);
 
-        REQUIRE(operation.progress() == ct::resume_state::need_output);
+        REQUIRE(operation.state() == ct::resume_state::need_output);
         CHECK(operation.committed_bytes() == 0);
         CHECK(source.position().offset() == 0);
         chunks.emplace_back();
@@ -277,7 +277,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         CHECK(source.position().offset() == 0);
 
         chunks.emplace_back(std::span{output}.subspan(1));
-        REQUIRE(operation.resume() == ct::resume_state::done);
+        REQUIRE(operation.resume() == ct::resume_state::finished);
         REQUIRE(operation.result());
         CHECK(operation.committed_bytes() == output.size());
         CHECK(output[0] == std::byte{0x58});
@@ -316,7 +316,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         for (const bool close_before_start : {false, true}) {
             CAPTURE(close_before_start);
             std::deque<std::span<std::byte>> chunks;
-            auto                             source = ct::make_output_source(chunks);
+            auto                             source = ct::make_output_buffer(chunks);
             if (close_before_start)
                 source.close();
             auto             encoder = ct::make_resumable_encoder(source);
@@ -324,8 +324,8 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             auto             operation = encoder(value);
 
             if (!close_before_start) {
-                REQUIRE(operation.progress() == ct::resume_state::need_output);
-                REQUIRE(operation.finish() == ct::resume_state::done);
+                REQUIRE(operation.state() == ct::resume_state::need_output);
+                REQUIRE(operation.close_output() == ct::resume_state::finished);
             }
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
@@ -343,13 +343,13 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         source.allowance = 3;
         auto operation   = encoder(value);
 
-        REQUIRE(operation.progress() == ct::resume_state::need_output);
+        REQUIRE(operation.state() == ct::resume_state::need_output);
         CHECK(operation.committed_bytes() == 3);
         CHECK(source.writes_after_exhaustion == 0);
         CHECK(storage == std::vector<std::byte>{std::byte{0x45}, std::byte{1}, std::byte{2}});
 
         source.allowance = 3;
-        REQUIRE(operation.resume() == ct::resume_state::done);
+        REQUIRE(operation.resume() == ct::resume_state::finished);
         REQUIRE(operation.result());
         CHECK(operation.committed_bytes() == 6);
         CHECK(source.writes_after_exhaustion == 0);
@@ -395,7 +395,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             chunks.emplace_back();
             chunks.emplace_back(wire.begin() + cut, wire.end());
             source.refresh();
-            REQUIRE(operation.resume() == ct::resume_state::done);
+            REQUIRE(operation.resume() == ct::resume_state::finished);
             REQUIRE(operation.result());
             CHECK(actual == expected);
             CHECK(operation.committed_bytes() == wire.size() - 1);
@@ -416,7 +416,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             auto                 decoder = ct::make_resumable_decoder(source);
             std::list<std::byte> actual;
             auto                 operation = decoder(actual);
-            REQUIRE(operation.progress() == ct::resume_state::need_input);
+            REQUIRE(operation.state() == ct::resume_state::need_input);
             CHECK(operation.committed_bytes() == (cut < 3 ? 0 : cut));
 
             const auto grown = cut + 31;
@@ -425,7 +425,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             chunks.emplace_back();
             chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(grown), wire.end());
             source.refresh();
-            REQUIRE(operation.resume() == ct::resume_state::done);
+            REQUIRE(operation.resume() == ct::resume_state::finished);
             REQUIRE(operation.result());
             CHECK(std::ranges::equal(actual, expected));
             CHECK(operation.committed_bytes() == 603);
@@ -445,7 +445,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         auto                 decoder = ct::make_resumable_decoder(source);
         std::list<std::byte> actual;
         auto                 operation = decoder(actual);
-        REQUIRE(operation.progress() == ct::resume_state::need_input);
+        REQUIRE(operation.state() == ct::resume_state::need_input);
         REQUIRE(operation.committed_bytes() == 259);
 
         // Move the exhausted list to a new descriptor address without copying
@@ -462,7 +462,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         chunks.emplace_back();
         chunks.emplace_back(wire.begin() + 290, wire.end());
         source.refresh();
-        REQUIRE(operation.resume() == ct::resume_state::done);
+        REQUIRE(operation.resume() == ct::resume_state::finished);
         REQUIRE(operation.result());
         CHECK(operation.committed_bytes() == 603);
         CHECK(std::ranges::equal(actual, expected));
@@ -506,7 +506,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         auto                          decoder = ct::make_resumable_decoder(source);
         std::list<std::byte>          actual;
         auto                          operation = decoder(actual);
-        REQUIRE(operation.progress() == ct::resume_state::need_input);
+        REQUIRE(operation.state() == ct::resume_state::need_input);
         REQUIRE(operation.committed_bytes() == 211);
         REQUIRE(std::ranges::equal(actual, std::span{expected}.first(208)));
 
@@ -515,7 +515,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         chunks.push_back({{wire.begin() + 211, wire.end()}, &counts});
         source.refresh();
         counts.throw_at = counts.dereferences + 44;
-        REQUIRE(operation.resume() == ct::resume_state::done);
+        REQUIRE(operation.resume() == ct::resume_state::finished);
         REQUIRE_FALSE(operation.result());
         CHECK(operation.result().error() == ct::status_code::out_of_memory);
         REQUIRE(actual.size() >= 208);
@@ -541,12 +541,12 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             std::deque<std::deque<std::byte>> chunks{std::deque<std::byte>(cut, std::byte{0xcc})};
             auto                              encoder   = ct::make_resumable_encoder(chunks);
             auto                              operation = encoder(value);
-            REQUIRE(operation.progress() == ct::resume_state::need_output);
+            REQUIRE(operation.state() == ct::resume_state::need_output);
             CHECK(operation.committed_bytes() == (cut < 3 ? 0 : cut));
 
             chunks.emplace_back();
             chunks.emplace_back(expected.size() - cut, std::byte{0xcc});
-            REQUIRE(operation.resume() == ct::resume_state::done);
+            REQUIRE(operation.resume() == ct::resume_state::finished);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == expected.size());
             std::vector<std::byte> actual;
@@ -571,7 +571,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             auto          operation = decoder(value);
 
             if (cut < 9) {
-                REQUIRE(operation.progress() == ct::resume_state::need_input);
+                REQUIRE(operation.state() == ct::resume_state::need_input);
                 CHECK(value == 0);
             }
 
@@ -580,7 +580,7 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
             chunks.emplace_back();
             chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
             source.refresh();
-            REQUIRE(operation.resume() == ct::resume_state::done);
+            REQUIRE(operation.resume() == ct::resume_state::finished);
             REQUIRE(operation.result());
             CHECK(*operation.result() == 9);
             CHECK(value == expected);
@@ -599,15 +599,15 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         for (std::size_t cut = 0; cut != expected.size(); ++cut) {
             CAPTURE(cut);
             std::deque<std::deque<std::byte>> chunks{std::deque<std::byte>(cut, std::byte{0xcc})};
-            auto                              source    = ct::make_output_source(chunks);
+            auto                              source    = ct::make_output_buffer(chunks);
             auto                              encoder   = ct::make_resumable_encoder(source);
             auto                              operation = encoder(value);
-            REQUIRE(operation.progress() == ct::resume_state::need_output);
+            REQUIRE(operation.state() == ct::resume_state::need_output);
             CHECK(operation.committed_bytes() == 0);
 
             chunks.emplace_back();
             chunks.emplace_back(expected.size() - cut, std::byte{0xcc});
-            REQUIRE(operation.resume() == ct::resume_state::done);
+            REQUIRE(operation.resume() == ct::resume_state::finished);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == expected.size());
 

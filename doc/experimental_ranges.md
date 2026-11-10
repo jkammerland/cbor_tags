@@ -248,8 +248,9 @@ still describe a bounded explicit range wrapper independently of whether that
 particular C++ range type is encodable.
 
 Range wrappers are encode/CDDL helpers. They are not decode targets; decode into
-an owning container, a string, or one of the borrowed decode view types described
-below.
+an owning container, a string, one of the borrowed decode view types described
+below, or a [sink](resumable.md#stream-decoded-data-to-callbacks) that passes
+string pieces, array elements, or map entries to a callback.
 
 ## Range Wrapper Lifetimes
 
@@ -332,6 +333,9 @@ auto dec = make_decoder(data);
 decltype(dec)::tstr_view_t text;
 dec(text);
 ```
+
+Resumable decoders provide the same aliases; see
+[borrow decoded strings and items](resumable.md#borrow-decoded-strings-and-items).
 
 ## Encoded Item Views
 
@@ -558,6 +562,10 @@ enc(as_bstr_range(bytes));
 
 Use borrowed decode views when the input buffer already exists and you want a
 view into it instead of a copied string or byte vector.
+
+Use [sinks](resumable.md#stream-decoded-data-to-callbacks) when a decoded
+string, array, or map should go to a callback piece by piece instead of being
+stored.
 
 Use encoded item views when the payload is already CBOR and you want to forward
 it without decoding it.

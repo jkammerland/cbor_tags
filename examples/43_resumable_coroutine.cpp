@@ -51,7 +51,7 @@ int main() {
     // This call resumes consume() and prints the decoded message before returning.
     input.insert(input.end(), bytes.begin() + 2, bytes.end());
     const auto final_state = operation.resume();
-    assert(final_state == ct::resume_state::done);
+    assert(final_state == ct::resume_state::finished);
     assert(consumer.done());
     assert(consumer.succeeded()); // Checks the example coroutine's returned bool.
     assert(received == sent);

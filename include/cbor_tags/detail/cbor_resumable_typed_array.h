@@ -19,7 +19,7 @@
 
 namespace cbor::tags::detail {
 
-// Retry only the small tagged header through the ordinary codec machinery.
+// Retry only the small tagged header through the one-shot codec machinery.
 template <std::uint64_t Tag, std::size_t ElementSize> struct resumable_typed_array_header {
     std::uint64_t byte_count{};
 
@@ -52,13 +52,13 @@ template <std::uint64_t Tag, std::size_t ElementSize> struct resumable_typed_arr
 };
 
 template <std::uint64_t Tag, bool NativeOrder, typename Context, typename Array, typename Convert>
-resumable<status_code> resumable_decode_typed_array(Context &context, Array &array, Convert convert) {
+resumable_task<status_code> resumable_decode_typed_array(Context &context, Array &array, Convert convert) {
     using value_type            = typename Array::value_type;
     constexpr auto element_size = sizeof(value_type);
     static_assert(element_size <= 16U);
 
     resumable_typed_array_header<Tag, element_size> header;
-    const auto                                      header_status = co_await context.ordinary(header);
+    const auto                                      header_status = co_await context.one_shot(header);
     if (header_status != status_code::success) {
         co_return header_status;
     }
@@ -69,13 +69,13 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
     values.clear();
     values.reserve(element_count);
 
-    auto                               &reader = context.ordinary().reader_;
+    auto                               &reader = context.one_shot().reader_;
     std::array<std::byte, element_size> boundary{};
     std::size_t                         boundary_size{};
     while (values.size() != element_count) {
         const auto available = resumable_source_access::borrow_window(context.source(), reader.position_);
         if (available ? available->empty() : context.empty()) {
-            if (context.eof()) {
+            if (context.closed()) {
                 co_return status_code::incomplete;
             }
             co_await context.wait();
@@ -132,7 +132,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, Array &arr
 
 // Output bytes may span several windows, but an element is published atomically.
 template <typename Context>
-resumable<status_code> resumable_encode_typed_array_boundary(Context &context, std::span<const std::byte> bytes) {
+resumable_task<status_code> resumable_encode_typed_array_boundary(Context &context, std::span<const std::byte> bytes) {
     while (!bytes.empty()) {
         const auto available = resumable_source_access::borrow_window(context.source());
         if (available && !available->empty()) {
@@ -149,7 +149,7 @@ resumable<status_code> resumable_encode_typed_array_boundary(Context &context, s
                 continue;
             }
         }
-        if (context.eof()) {
+        if (context.closed()) {
             context.rollback();
             co_return status_code::incomplete;
         }
@@ -160,7 +160,7 @@ resumable<status_code> resumable_encode_typed_array_boundary(Context &context, s
 }
 
 template <std::uint64_t Tag, typename Context, typename Range, typename Fill>
-resumable<status_code> resumable_encode_typed_array(Context &context, Range &values, Fill fill) {
+resumable_task<status_code> resumable_encode_typed_array(Context &context, Range &values, Fill fill) {
     using value_type            = std::ranges::range_value_t<Range>;
     constexpr auto element_size = sizeof(value_type);
     static_assert(element_size <= 16U);
@@ -170,7 +170,7 @@ resumable<status_code> resumable_encode_typed_array(Context &context, Range &val
         co_return status_code::size_limit_exceeded;
     }
     resumable_typed_array_header<Tag, element_size> header{count * element_size};
-    const auto                                      header_status = co_await context.ordinary(header);
+    const auto                                      header_status = co_await context.one_shot(header);
     if (header_status != status_code::success) {
         co_return header_status;
     }

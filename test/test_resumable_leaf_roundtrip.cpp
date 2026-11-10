@@ -32,7 +32,7 @@ template <typename Value, typename Wrapped> void check_leaf_splits(const Value &
         decoder.resume();
         if (!decoder.done()) {
             storage.emplace_back(std::span<const std::byte>{wire}.subspan(cut));
-            decoder.finish();
+            decoder.close_input();
         }
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
@@ -41,7 +41,7 @@ template <typename Value, typename Wrapped> void check_leaf_splits(const Value &
 
         std::vector<std::byte> encoded(wire.size());
         output_chunks          output;
-        auto                   sink    = make_output_source(output);
+        auto                   sink    = make_output_buffer(output);
         auto                   encoder = make_resumable_encoder(sink)(wrapped);
         output.emplace_back(std::span{encoded}.first(cut));
         encoder.resume();
@@ -121,11 +121,11 @@ template <typename Self> struct explicit_float_codec : codec::base<Self> {
 
     template <typename T>
         requires std::same_as<std::remove_cv_t<T>, float>
-    resumable<status_code> resumable_encode(T &value) {
+    resumable_task<status_code> resumable_encode(T &value) {
         ++leaf_calls::encoded;
         co_return co_await static_cast<Self &>(*this)(static_cast<std::uint64_t>(value) + 1000);
     }
-    resumable<status_code> resumable_decode(float &value) {
+    resumable_task<status_code> resumable_decode(float &value) {
         ++leaf_calls::decoded;
         std::uint64_t encoded{};
         const auto    status = co_await static_cast<Self &>(*this)(encoded);
@@ -172,7 +172,7 @@ void check_float_override(const Value &expected, const WireValue &shifted, std::
             leaf_calls::encoded = 0;
             std::vector<std::byte> encoded(explicit_codec ? wire.size() : ordinary_wire.size());
             output_chunks          output;
-            auto                   sink        = make_output_source(output);
+            auto                   sink        = make_output_buffer(output);
             auto                   run_encoder = [&](auto &value) {
                 auto encoder = make_resumable_encoder<Codec>(sink)(value);
                 if (bytewise) {
@@ -228,7 +228,7 @@ template <typename Self> struct bool_codec : codec::base<Self> {
 
     template <typename T>
         requires std::same_as<std::remove_cv_t<T>, bool>
-    resumable<status_code> resumable_encode(T &value) {
+    resumable_task<status_code> resumable_encode(T &value) {
         ++leaf_calls::encoded;
         co_return co_await static_cast<Self &>(*this)(value ? std::uint64_t{1001} : std::uint64_t{1000});
     }
@@ -292,7 +292,7 @@ TEST_SUITE("roundtrip/resumable") {
 
         std::vector<std::byte> encoded(wire.size());
         output_chunks          output;
-        auto                   sink    = make_output_source(output);
+        auto                   sink    = make_output_buffer(output);
         auto                   wrapped = as_indefinite{expected};
         auto                   encoder = make_resumable_encoder(sink)(wrapped);
         for (auto &byte : encoded) {
@@ -335,7 +335,7 @@ TEST_SUITE("roundtrip/resumable") {
             leaf_calls::encoded = 0;
             std::vector<std::byte> encoded(wire.size());
             output_chunks          output;
-            auto                   sink    = make_output_source(output);
+            auto                   sink    = make_output_buffer(output);
             auto                   wrapped = as_indefinite{expected};
             auto                   encoder = make_resumable_encoder<bool_codec>(sink)(wrapped);
             if (bytewise) {
@@ -389,14 +389,14 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<double>    actual;
         auto                   decoder = make_resumable_decoder(source)(actual);
         storage.emplace_back(input_chunk{input.cbegin(), input.cend()});
-        decoder.finish();
+        decoder.close_input();
         REQUIRE(decoder.result());
         CHECK(actual == expected);
 
         std::list<std::byte> output(wire.size());
         using output_chunk = std::ranges::subrange<std::list<std::byte>::iterator>;
         std::list<output_chunk> output_storage;
-        auto                    sink    = make_output_source(output_storage);
+        auto                    sink    = make_output_buffer(output_storage);
         auto                    wrapped = as_indefinite{expected};
         auto                    encoder = make_resumable_encoder(sink)(wrapped);
         output_storage.emplace_back(output_chunk{output.begin(), output.end()});

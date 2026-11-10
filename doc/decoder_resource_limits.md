@@ -11,6 +11,10 @@ return cbor::tags::make_decoder(input)(value);
 ```
 
 For streaming or resumable parsing, enforce the same policy against the cumulative bytes received.
+That alone doesn't bound memory with the [resumable decoder](resumable.md): it can reserve the length a
+string, array, or map header announces before the payload arrives, so a 5-byte header can reserve
+1 GiB. Bound untrusted strings and containers with `as_bounded_size<0, limit>(value)`, which fails
+with `status_code::size_limit_exceeded` before reserving, or use a bounded allocator.
 
 ## Decoder Contract
 

@@ -29,7 +29,7 @@ int main() {
 
     output.push_back(std::span{storage}.subspan(4));
     const auto final_state = operation.resume();
-    assert(final_state == ct::resume_state::done);
+    assert(final_state == ct::resume_state::finished);
 
     // Progress counts committed bytes, independently of the storage's capacity.
     const auto result = operation.result();
@@ -45,8 +45,8 @@ int main() {
     assert(received == sent);
     assert(decoder.tell() == committed.end());
 
-    // Keep the descriptors and storage alive. Publishing does not authorize
-    // pop_front(); reclaiming capacity needs a custom source (example 46).
+    // Keep the chunks and storage alive. Publishing does not authorize
+    // pop_front(); reclaiming capacity needs a custom output buffer (example 46).
 
     std::cout << "received: " << received << '\n';
     std::cout << "encoded bytes: " << operation.committed_bytes() << '\n';

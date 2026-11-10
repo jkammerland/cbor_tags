@@ -49,10 +49,10 @@ int main() {
     const auto last_chunk = bytes.subspan(2);
     input.push_back(last_chunk);
     const auto final_state = operation.resume();
-    assert(final_state == ct::resume_state::done);
+    assert(final_state == ct::resume_state::finished);
     std::cout << "remaining input: " << example::to_hex(last_chunk) << '\n';
 
-    // Typed decoding finishes when all requested values are available, without EOF.
+    // Typed decoding finishes when all requested values are available, without closing the input.
     const auto result = operation.result();
     assert(result);
     assert(*result == buffer.size());
@@ -61,7 +61,7 @@ int main() {
     assert(received_sequence == sequence);
     assert(operation.remaining_input().empty());
 
-    // Keep descriptors and their owner until destruction. Reclaiming consumed
+    // Keep the chunks and their owner until destruction. Reclaiming consumed
     // chunks during an operation requires a custom source, as in example 46.
     return 0;
 }

@@ -55,7 +55,7 @@ template <typename Bytes, typename Storage> void check_noncontiguous_validation(
 
     const std::array final{chunk{last, last}, chunk{last, bytes.cend()}};
     storage.insert(storage.end(), final.begin(), final.end());
-    operation.finish();
+    operation.close_input();
     REQUIRE(operation.done());
     REQUIRE(operation.result());
     CHECK(*operation.result() == 35U);
@@ -96,7 +96,7 @@ TEST_SUITE("cbor_wire/resumable") {
 
             storage.emplace_back(input.subspan(cut));
 
-            operation.finish();
+            operation.close_input();
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK(*operation.result() == 59U);
@@ -109,7 +109,7 @@ TEST_SUITE("cbor_wire/resumable") {
             auto              truncated_source = make_input_source(truncated_storage);
             auto              truncated        = make_resumable_validator(truncated_source);
             truncated_storage.emplace_back(input.first(cut));
-            truncated.finish();
+            truncated.close_input();
             REQUIRE(truncated.done());
             REQUIRE_FALSE(truncated.result());
             CHECK(truncated.result().error() == status_code::incomplete);
@@ -223,7 +223,7 @@ TEST_SUITE("cbor_wire/resumable") {
 
             storage.emplace_back(input.subspan(cut));
 
-            operation.finish();
+            operation.close_input();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::invalid_utf8_sequence);
@@ -301,7 +301,7 @@ TEST_SUITE("cbor_wire/resumable") {
                 source.refresh();
                 {
                     cbor::tags::test::detail::allocation_failure_guard guard;
-                    operation.finish();
+                    operation.close_input();
                 }
 
                 REQUIRE(operation.done());
@@ -362,7 +362,7 @@ TEST_SUITE("cbor_wire/resumable") {
             source.refresh();
             {
                 cbor::tags::test::detail::allocation_failure_guard guard;
-                operation.finish();
+                operation.close_input();
             }
 
             REQUIRE(operation.done());
@@ -434,14 +434,14 @@ TEST_SUITE("cbor_wire/resumable") {
         const auto        scalar = to_bytes("1b0102030405060708");
         validation_chunks storage;
         auto              source    = make_input_source(storage);
-        auto              operation = make_resumable_validator(source, until_end_of_input);
+        auto              operation = make_resumable_validator(source, until_closed);
         storage.emplace_back(scalar);
         operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(source.committed_position().offset() == scalar.size());
         CHECK(to_hex(operation.remaining_input()).empty());
 
-        operation.finish();
+        operation.close_input();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
         CHECK(*operation.result() == scalar.size());
@@ -454,7 +454,7 @@ TEST_SUITE("cbor_wire/resumable") {
         const std::span<const std::byte> input{bytes};
         validation_chunks                storage;
         auto                             source    = make_input_source(storage);
-        auto                             operation = make_resumable_validator(source, until_end_of_input);
+        auto                             operation = make_resumable_validator(source, until_closed);
 
         storage.emplace_back(input.first(10));
 
@@ -471,7 +471,7 @@ TEST_SUITE("cbor_wire/resumable") {
         CHECK(to_hex(operation.remaining_input()).empty());
 
         SUBCASE("clean eof completes the admitted sequence") {
-            operation.finish();
+            operation.close_input();
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK(*operation.result() == 17U);
@@ -481,7 +481,7 @@ TEST_SUITE("cbor_wire/resumable") {
         SUBCASE("truncated next token remains unread at eof") {
             const auto truncated = to_bytes("1a0001");
             storage.emplace_back(truncated);
-            operation.finish();
+            operation.close_input();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::incomplete);

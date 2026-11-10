@@ -88,6 +88,6 @@ class packet_pool_source : public ring_source<Output, PacketSize * PacketCount> 
 };
 
 static_assert(cbor::tags::ResumableInputSource<packet_pool_source<false, 11, 3>>);
-static_assert(cbor::tags::ResumableOutputSource<packet_pool_source<true, 11, 3>>);
+static_assert(cbor::tags::ResumableOutputBuffer<packet_pool_source<true, 11, 3>>);
 
 } // namespace resumable_test

@@ -73,7 +73,7 @@ template <typename T> void check_ready_and_missing(const T &expected) {
 
         std::vector<std::byte> output(wire.size());
         output_chunks          chunks{std::span{output}.first(cut)};
-        auto                   sink = make_output_source(chunks);
+        auto                   sink = make_output_buffer(chunks);
         // The temporary belongs to arguments(Tuple values), including any
         // nested temporary tuples forwarded through metadata-only entrypoints.
         auto encoder = make_resumable_encoder(sink)(T{expected});
@@ -129,7 +129,7 @@ TEST_SUITE("roundtrip/resumable") {
         const auto                   check = [&](auto &value) {
             std::vector<std::byte>                                            output(bytes.size());
             output_chunks                                                     storage{std::span{output}};
-            auto                                                              sink = make_output_source(storage);
+            auto                                                              sink = make_output_buffer(storage);
             detail::resume_control                                            control;
             detail::resumable_encode_context<decltype(sink), default_options> context{sink, control};
             auto                                                              result = context.payload(value);
@@ -152,7 +152,7 @@ TEST_SUITE("roundtrip/resumable") {
         static_assert(!std::ranges::forward_range<decltype(range)>);
         std::vector<std::byte>                                            output(bytes.size());
         output_chunks                                                     storage;
-        auto                                                              sink = make_output_source(storage);
+        auto                                                              sink = make_output_buffer(storage);
         detail::resume_control                                            control;
         detail::resumable_encode_context<decltype(sink), default_options> context{sink, control};
         auto                                                              result = context.payload(range);
@@ -180,7 +180,7 @@ TEST_SUITE("roundtrip/resumable") {
         {
             auto operation = make_resumable_decoder(source)(optional);
             REQUIRE_FALSE(operation.done());
-            operation.finish();
+            operation.close_input();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::incomplete);

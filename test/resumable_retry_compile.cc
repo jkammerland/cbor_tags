@@ -81,7 +81,7 @@ int main() {
     std::vector<std::byte> bytes;
 #if defined(CBOR_RETRY_SHARED)
     auto source = make_input_source(bytes);
-    auto sink   = make_output_source(bytes);
+    auto sink   = make_output_buffer(bytes);
 #if defined(CBOR_RETRY_SOURCE)
 #define CBOR_RETRY_INPUT  source
 #define CBOR_RETRY_OUTPUT sink

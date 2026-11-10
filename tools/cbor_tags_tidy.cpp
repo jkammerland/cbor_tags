@@ -27,16 +27,16 @@
     (void)ct::walk_item(range_dec, [](const auto &, const auto &) { return ct::status_code::success; }, {.strict_validation = true});
 }
 
-// Instantiate the separate coroutine adapters without changing ordinary codec modes.
+// Instantiate the separate coroutine adapters without changing one-shot codec modes.
 [[maybe_unused]] void cbor_tags_resumable_tidy_anchor() {
     namespace ct = cbor::tags;
     std::list<std::span<const std::byte>> input;
     auto                                  source = ct::make_input_source(input);
     std::string                           text;
     auto                                  decode = ct::make_resumable_decoder(source)(text);
-    decode.finish();
+    decode.close_input();
     std::list<std::span<std::byte>> output;
-    auto                            sink   = ct::make_output_source(output);
+    auto                            sink   = ct::make_output_buffer(output);
     auto                            encode = ct::make_resumable_encoder(sink)(text);
     encode.cancel();
 }

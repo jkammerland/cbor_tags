@@ -144,7 +144,7 @@ class throwing_position_input {
     position_type committed_position() const noexcept { return {storage_, throw_assignment, committed_}; }
     void          commit(position_type position) { committed_ = position.offset(); }
     auto          remaining(position_type position) const { return std::ranges::subrange(position, end()); }
-    bool          eof() const { return closed_; }
+    bool          closed() const { return closed_; }
     void          close() { closed_ = true; }
     void          refresh() {}
 
@@ -166,7 +166,7 @@ class throwing_position_input {
 
 static_assert(ResumableInputSource<throwing_position_input>);
 
-template <typename Context> resumable<status_code> resumable_decode(Context &context, hook_lifetime &value) {
+template <typename Context> resumable_task<status_code> resumable_decode(Context &context, hook_lifetime &value) {
     struct frame_guard {
         int *destroyed;
         ~frame_guard() { ++*destroyed; }
@@ -198,7 +198,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         chunks.emplace_back(std::span<const std::byte>{bytes}.subspan(2));
         const auto state = moved->resume();
 
-        CHECK(state == resume_state::done);
+        CHECK(state == resume_state::finished);
         CHECK_FALSE(moved);
         REQUIRE(consumer.done());
         CHECK_NOTHROW(consumer.rethrow());
@@ -232,9 +232,109 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         int  actual{};
         auto operation = decoder(actual);
         chunks.emplace_back(bytes);
-        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.resume() == resume_state::finished);
         REQUIRE(operation.result());
         CHECK(actual == expected);
+    }
+
+    TEST_CASE("destroying a pending operation wakes its waiter with cancelled") {
+        // The waiter outlives the operation here. It used to wait forever, and
+        // destroying it afterwards touched the freed operation state.
+        auto check_cancelled = [](const raw_consumer &consumer, const std::optional<operation_result> &result) {
+            REQUIRE(consumer.done());
+            CHECK_NOTHROW(consumer.rethrow());
+            REQUIRE(result);
+            REQUIRE_FALSE(*result);
+            CHECK(result->error() == status_code::cancelled);
+        };
+
+        SUBCASE("decode") {
+            input_chunks chunks;
+            auto         decoder = make_resumable_decoder(chunks);
+            std::string  pending;
+            auto         operation = std::optional{decoder(pending)};
+
+            std::optional<operation_result> result;
+            auto                            consumer = await_result(*operation, result, [] {});
+            REQUIRE_FALSE(consumer.done());
+            operation.reset();
+            check_cancelled(consumer, result);
+
+            // The source is free for the next operation
+            std::vector<std::byte> bytes;
+            REQUIRE(make_encoder(bytes)(65536));
+            int  actual{};
+            auto next = decoder(actual);
+            chunks.emplace_back(bytes);
+            REQUIRE(next.resume() == resume_state::finished);
+            REQUIRE(next.result());
+            CHECK(actual == 65536);
+        }
+        SUBCASE("encode") {
+            output_chunks     output;
+            auto              encoder   = make_resumable_encoder(output);
+            const std::string value     = "no room for this";
+            auto              operation = std::optional{encoder(value)};
+
+            std::optional<operation_result> result;
+            auto                            consumer = await_result(*operation, result, [] {});
+            REQUIRE_FALSE(consumer.done());
+            operation.reset();
+            check_cancelled(consumer, result);
+        }
+    }
+
+    TEST_CASE("result before an operation finishes throws instead of reporting incomplete") {
+        SUBCASE("decode") {
+            std::vector<std::byte> input;
+            auto                   decoder   = make_resumable_decoder(input);
+            int                    value     = 0;
+            auto                   operation = decoder(value);
+            REQUIRE_FALSE(operation.done());
+            CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
+
+            input.push_back(std::byte{0x07});
+            REQUIRE(operation.resume() == resume_state::finished);
+            REQUIRE(operation.result());
+            CHECK(value == 7);
+        }
+        SUBCASE("encode") {
+            output_chunks output;
+            auto          encoder   = make_resumable_encoder(output);
+            auto          operation = encoder(std::string{"pending"});
+            REQUIRE_FALSE(operation.done());
+            CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
+        }
+    }
+
+    TEST_CASE("moved-from operations throw instead of dereferencing nothing") {
+        std::vector<std::byte> input;
+        auto                   decoder   = make_resumable_decoder(input);
+        int                    value     = 0;
+        auto                   operation = decoder(value);
+        auto                   moved     = std::move(operation);
+
+        // NOLINTBEGIN(bugprone-use-after-move)
+        CHECK_FALSE(operation.done());
+        CHECK(operation.committed_bytes() == 0);
+        CHECK_THROWS_AS(operation.resume(), std::logic_error);
+        CHECK_THROWS_AS(operation.close_input(), std::logic_error);
+        CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
+        CHECK_THROWS_AS(static_cast<void>(operation.remaining_input()), std::logic_error);
+        CHECK_NOTHROW(operation.cancel()); // nothing to cancel, like a finished one
+
+        std::optional<operation_result> result;
+        auto                            consumer = await_result(operation, result, [] {});
+        REQUIRE(consumer.done());
+        CHECK_THROWS_AS(consumer.rethrow(), std::logic_error);
+        CHECK_FALSE(result);
+        // NOLINTEND(bugprone-use-after-move)
+
+        // The moved-to operation still owns the decode
+        input.push_back(std::byte{0x07});
+        REQUIRE(moved.resume() == resume_state::finished);
+        REQUIRE(moved.result());
+        CHECK(value == 7);
     }
 
     TEST_CASE("input cancellation keeps committed progress without assigning a retired reader position") {
@@ -279,7 +379,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
 
             // Completion is terminal, but acquisition lasts until destruction.
             CHECK_NOTHROW(operation.cancel());
-            CHECK(operation.resume() == resume_state::done);
+            CHECK(operation.resume() == resume_state::finished);
             CHECK(notifications == 1);
             CHECK(source.acquired);
             int rejected{};
@@ -305,7 +405,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         status_code status = status_code::error;
         {
             cbor::tags::test::detail::allocation_failure_guard guard;
-            resumable<status_code>                             result{status_code::success};
+            resumable_task<status_code>                        result{status_code::success};
             auto                                               awaiter = std::move(result).operator co_await();
             ready                                                      = awaiter.await_ready();
             status                                                     = awaiter.await_resume();
@@ -390,7 +490,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         REQUIRE(make_encoder(reference)(expected));
         std::vector<std::byte>          bytes(reference.size());
         output_chunks                   storage;
-        auto                            sink      = make_output_source(storage);
+        auto                            sink      = make_output_buffer(storage);
         auto                            operation = std::optional{make_resumable_encoder(sink)(expected)};
         std::optional<operation_result> result;
         auto                            consumer = await_result(*operation, result, [&] { operation.reset(); });
@@ -529,7 +629,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
 
         SUBCASE("whole batch") {
             storage.emplace_back(bytes);
-            generator.finish();
+            generator.close_input();
         }
         SUBCASE("one byte at a time") {
             for (std::size_t index = 0; index < bytes.size(); ++index) {
@@ -537,7 +637,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
                 generator.resume();
             }
             CHECK_FALSE(consumer.done());
-            generator.finish();
+            generator.close_input();
         }
 
         REQUIRE(consumer.done());

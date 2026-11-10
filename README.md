@@ -1281,9 +1281,11 @@ Leave the variable unset (default) to keep passing runs quiet while still captur
 Bind caller-owned storage once, append input or provide output capacity while
 the codec is suspended, then call `resume()` without arguments. See
 [resumable encoding and decoding](doc/resumable.md) for the storage contract,
-coroutine consumers, generators, validation and public custom sources. The
-[standalone ring example](examples/46_resumable_ring.cpp) demonstrates encoding
-and decoding with bounded storage, wraparound and committed-prefix reclamation.
+coroutine consumers, generators, validation, and custom sources and output
+buffers. The [standalone ring example](examples/46_resumable_ring.cpp)
+demonstrates encoding and decoding with bounded storage, wraparound and
+committed-prefix reclamation, and passes a byte string larger than the ring
+through a sink.
 
 ## 📄 License
 
