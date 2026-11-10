@@ -94,21 +94,15 @@ namespace cbor::tags {
 template <ResumableInputSource Source>
 [[nodiscard]] auto make_resumable_validator(Source &source, std::size_t count = 1, validation_options options = {}) {
     return detail::resume_operation<detail::resumable_validation_context<Source>>{
-        source, detail::validation_request{.count = count, .until_eof = false, .options = options}};
-}
-template <ResumableInputSource Source>
-[[nodiscard]] auto make_resumable_validator(Source &source, until_closed_t, validation_options options = {}) {
-    return detail::resume_operation<detail::resumable_validation_context<Source>>{
-        source, detail::validation_request{.count = 0, .until_eof = true, .options = options}};
+        source, detail::validation_request{.count = count, .options = options}};
 }
 
 template <typename T, ResumableInputSource Source, typename Options = default_options, template <typename> typename... Codecs>
 class resumable_generator {
-    using context_type   = detail::resumable_generator_context<Source, T, Options, Codecs...>;
+    using context_type   = detail::resumable_decode_context<Source, Options, Codecs...>;
     using operation_type = detail::resume_operation<context_type>;
     Source                       &source_;
     T                             value_{};
-    bool                          ended_{};
     std::optional<operation_type> operation_;
 
   public:
@@ -120,7 +114,7 @@ class resumable_generator {
             throw std::logic_error("generator next is still pending");
         operation_.reset();
         value_ = T{};
-        operation_.emplace(source_, value_, ended_);
+        operation_.emplace(source_, value_);
         return *operation_;
     }
     resume_state resume() {
@@ -128,14 +122,13 @@ class resumable_generator {
             throw std::logic_error("call generator.next() before resuming");
         return operation_->resume();
     }
-    resume_state close_input() {
-        if (!operation_)
-            throw std::logic_error("call generator.next() before closing its input");
-        return operation_->close_input();
+    // Stops waiting for the next value, e.g. when the transport ends
+    void cancel() {
+        if (operation_)
+            operation_->cancel();
     }
     T       &value() noexcept { return value_; }
     const T &value() const noexcept { return value_; }
-    bool     done() const noexcept { return ended_; }
 };
 
 template <typename T, template <typename> typename... Codecs, ResumableInputSource Source> auto make_resumable_generator(Source &source) {

@@ -75,9 +75,6 @@ raw_consumer collect_values(Generator &generator, std::vector<int> &values, std:
         }
 
         consumed += *result;
-        if (generator.done()) {
-            co_return;
-        }
         values.push_back(generator.value());
     }
 }
@@ -144,8 +141,6 @@ class throwing_position_input {
     position_type committed_position() const noexcept { return {storage_, throw_assignment, committed_}; }
     void          commit(position_type position) { committed_ = position.offset(); }
     auto          remaining(position_type position) const { return std::ranges::subrange(position, end()); }
-    bool          closed() const { return closed_; }
-    void          close() { closed_ = true; }
     void          refresh() {}
 
     void acquire() {
@@ -161,7 +156,6 @@ class throwing_position_input {
   private:
     std::vector<std::byte> &storage_;
     std::size_t             committed_{};
-    bool                    closed_{};
 };
 
 static_assert(ResumableInputSource<throwing_position_input>);
@@ -318,7 +312,6 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         CHECK_FALSE(operation.done());
         CHECK(operation.committed_bytes() == 0);
         CHECK_THROWS_AS(operation.resume(), std::logic_error);
-        CHECK_THROWS_AS(operation.close_input(), std::logic_error);
         CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
         CHECK_THROWS_AS(static_cast<void>(operation.remaining_input()), std::logic_error);
         CHECK_NOTHROW(operation.cancel()); // nothing to cancel, like a finished one
@@ -629,22 +622,25 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
 
         SUBCASE("whole batch") {
             storage.emplace_back(bytes);
-            generator.close_input();
+            generator.resume();
         }
         SUBCASE("one byte at a time") {
             for (std::size_t index = 0; index < bytes.size(); ++index) {
                 storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
                 generator.resume();
             }
-            CHECK_FALSE(consumer.done());
-            generator.close_input();
         }
 
-        REQUIRE(consumer.done());
-        CHECK_NOTHROW(consumer.rethrow());
+        // Every item arrived and the consumer waits on the next one
+        REQUIRE_FALSE(consumer.done());
         CHECK_FALSE(failure);
-        CHECK(generator.done());
         CHECK(actual == expected);
         CHECK(consumed == bytes.size());
+
+        // No more will come, so stop waiting
+        generator.cancel();
+        REQUIRE(consumer.done());
+        CHECK_NOTHROW(consumer.rethrow());
+        CHECK(failure == status_code::cancelled);
     }
 }

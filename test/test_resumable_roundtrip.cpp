@@ -313,7 +313,7 @@ template <typename T> void check_every_decode_split(const T &expected) {
         operation.resume();
         if (!operation.done()) {
             storage.emplace_back(input.subspan(cut));
-            operation.close_input();
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -591,7 +591,7 @@ TEST_SUITE("roundtrip/resumable") {
             auto              operation = make_resumable_decoder(source)(actual);
             if (!operation.done()) {
                 chunks.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
             REQUIRE(operation.result());
             CHECK(actual.number == expected.number);
@@ -861,7 +861,7 @@ TEST_SUITE("roundtrip/resumable") {
                 }
                 if (!operation.done()) {
                     storage.emplace_back(input.subspan(second));
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.done());
@@ -911,7 +911,7 @@ TEST_SUITE("roundtrip/resumable") {
             operation.resume();
             if (!operation.done()) {
                 storage.emplace_back(input.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
 
             REQUIRE(operation.result());
@@ -947,7 +947,7 @@ TEST_SUITE("roundtrip/resumable") {
                 operation.resume();
                 if (!operation.done()) {
                     storage.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.result());
@@ -983,7 +983,7 @@ TEST_SUITE("roundtrip/resumable") {
                 operation.resume();
                 if (!operation.done()) {
                     storage.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.result());
@@ -1037,7 +1037,7 @@ TEST_SUITE("roundtrip/resumable") {
         resumable_message actual;
         auto              operation = make_resumable_decoder(source)(actual);
         storage.insert(storage.end(), chunks.begin(), chunks.end());
-        operation.close_input();
+        operation.resume();
 
         REQUIRE(operation.done());
         REQUIRE(operation.result());
@@ -1071,7 +1071,7 @@ TEST_SUITE("roundtrip/resumable") {
         CHECK(actual.completed.empty());
         CHECK(operation.committed_bytes() == 0);
         storage.emplace_back(std::span<const std::byte>{bytes}.last(1));
-        operation.close_input();
+        operation.resume();
 
         REQUIRE(operation.result());
         CHECK(*operation.result() == bytes.size());
@@ -1095,7 +1095,7 @@ TEST_SUITE("roundtrip/resumable") {
         auto              operation = make_resumable_decoder(source)(actual);
         const auto        attempts  = actual.attempts;
         storage.insert(storage.end(), chunks.begin(), chunks.end());
-        operation.close_input();
+        operation.resume();
 
         REQUIRE(operation.result());
         CHECK(actual.attempts == attempts + 1);
@@ -1205,7 +1205,7 @@ TEST_SUITE("roundtrip/resumable") {
                 decoder.resume();
                 if (!decoder.done()) {
                     inputs.emplace_back(std::span<const std::byte>{reference}.subspan(cut));
-                    decoder.close_input();
+                    decoder.resume();
                 }
 
                 REQUIRE(decoder.result());
@@ -1259,7 +1259,7 @@ TEST_SUITE("roundtrip/resumable") {
             decoder.resume();
             if (!decoder.done()) {
                 inputs.emplace_back(std::span<const std::byte>{reference}.subspan(cut));
-                decoder.close_input();
+                decoder.resume();
             }
 
             REQUIRE(decoder.result());
@@ -1442,11 +1442,10 @@ TEST_SUITE("roundtrip/resumable") {
         auto         generator = make_resumable_generator<int>(source);
         auto        &first     = generator.next();
         storage.emplace_back(bytes);
-        generator.close_input();
+        generator.resume();
 
         REQUIRE(first.done());
         REQUIRE(first.result());
-        CHECK_FALSE(generator.done());
         CHECK(generator.value() == expected[0]);
         CHECK(generator.value() == expected[0]);
         std::size_t consumed = *first.result();
@@ -1455,16 +1454,15 @@ TEST_SUITE("roundtrip/resumable") {
             auto &next = generator.next();
             REQUIRE(next.done());
             REQUIRE(next.result());
-            CHECK_FALSE(generator.done());
             CHECK(generator.value() == expected[index]);
             consumed += *next.result();
         }
 
-        auto &eof = generator.next();
-        REQUIRE(eof.done());
-        REQUIRE(eof.result());
-        CHECK(*eof.result() == 0U);
-        CHECK(generator.done());
+        // Nothing left, so the next item waits without having touched a byte
+        auto &after = generator.next();
+        REQUIRE_FALSE(after.done());
+        CHECK(after.committed_bytes() == 0U);
+        CHECK(std::ranges::empty(after.remaining_input()));
         CHECK(consumed == bytes.size());
     }
 }

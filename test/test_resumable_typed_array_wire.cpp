@@ -48,7 +48,7 @@ void check_bad_typed_array_header(std::initializer_list<std::byte> bytes, status
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(input.subspan(cut));
-            operation.close_input();
+            operation.resume();
         }
         REQUIRE(operation.done());
         REQUIRE_FALSE(operation.result());
@@ -100,7 +100,7 @@ void check_rejected_destination(std::span<const std::byte> bytes, const Storage 
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(bytes.subspan(cut));
-            operation.close_input();
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -131,7 +131,7 @@ template <typename MakeValue> void check_rejected_view(std::span<const std::byte
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(bytes.subspan(cut));
-            operation.close_input();
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -169,7 +169,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             decoder.resume();
             if (!decoder.done()) {
                 chunks.emplace_back(std::span{bytes}.subspan(cut));
-                decoder.close_input();
+                decoder.resume();
             }
             REQUIRE(decoder.result());
             REQUIRE(actual.values().size() == 2);
@@ -184,7 +184,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             encoder.resume();
             if (!encoder.done()) {
                 output_storage.emplace_back(std::span{output}.subspan(cut));
-                encoder.close_output();
+                encoder.resume();
             }
             REQUIRE(encoder.result());
             CHECK(output == bytes);
@@ -212,7 +212,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             decoder.resume();
             if (!decoder.done()) {
                 chunks.emplace_back(std::span{encoded}.subspan(cut));
-                decoder.close_input();
+                decoder.resume();
             }
             REQUIRE(decoder.done());
             REQUIRE_FALSE(decoder.result());
@@ -241,10 +241,8 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             array_type   actual{99};
             auto         operation = make_resumable_decoder<codec::typed_array>(source)(actual);
             chunks.emplace_back(std::span{encoded}.first(cut));
-            operation.close_input();
-            REQUIRE(operation.done());
-            REQUIRE_FALSE(operation.result());
-            CHECK(operation.result().error() == status_code::incomplete);
+            operation.resume();
+            REQUIRE_FALSE(operation.done());
 
             if (cut < 3) {
                 CHECK(actual.values() == std::vector<std::uint16_t>{99});
@@ -444,7 +442,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         {
             auto operation = make_resumable_decoder<codec::typed_array>(source)(actual);
             chunks.emplace_back(std::span<const std::byte>{bytes});
-            operation.close_input();
+            operation.resume();
             REQUIRE(operation.result());
             CHECK(*operation.result() == encoded.size());
             CHECK(actual.values() == std::vector<std::uint16_t>{0x1234, 0xabcd});
@@ -459,7 +457,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         CHECK(value == 42);
     }
 
-    TEST_CASE("encoding preserves exact wire bytes and commits only complete elements at eof") {
+    TEST_CASE("encoding preserves exact wire bytes and commits only complete elements while waiting") {
         const array_type expected{0x1234, 0xabcd};
         for (std::size_t size = 0; size <= encoded.size(); ++size) {
             CAPTURE(size);
@@ -468,15 +466,14 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             auto                   sink      = make_output_buffer(chunks);
             auto                   operation = make_resumable_encoder<codec::typed_array>(sink)(expected);
             chunks.emplace_back(std::span{bytes});
-            operation.close_output();
-            REQUIRE(operation.done());
+            operation.resume();
             if (size == encoded.size()) {
+                REQUIRE(operation.done());
                 REQUIRE(operation.result());
                 CHECK(*operation.result() == encoded.size());
                 CHECK(std::ranges::equal(bytes, encoded));
             } else {
-                REQUIRE_FALSE(operation.result());
-                CHECK(operation.result().error() == status_code::incomplete);
+                REQUIRE_FALSE(operation.done());
                 const auto committed = size < 3 ? 0 : 3 + ((size - 3) / 2) * 2;
                 CHECK(sink.committed_position().offset() == committed);
                 CHECK(static_cast<std::ptrdiff_t>(operation.committed_bytes()) == static_cast<std::ptrdiff_t>(committed));

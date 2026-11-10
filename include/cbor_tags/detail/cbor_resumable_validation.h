@@ -76,7 +76,6 @@ template <bool Map = false> struct resumable_scalar_batch {
 
 struct validation_request {
     std::size_t        count{1};
-    bool               until_eof{};
     validation_options options{};
 };
 
@@ -100,13 +99,10 @@ template <typename Source> class resumable_validation_context : public resumable
 
     resumable_task<status_code> operator()(validation_request request) {
         const window_guard       guard{*this};
-        resumable_scalar_batch<> batch{.remaining = request.count, .indefinite = request.until_eof};
+        resumable_scalar_batch<> batch{.remaining = request.count};
         while (!batch.finished()) {
-            while (this->empty()) {
-                if (this->closed())
-                    co_return request.until_eof ? status_code::success : status_code::incomplete;
+            while (this->empty())
                 co_await this->wait();
-            }
 
             auto status = read_scalars(batch);
             if (status != status_code::success)
@@ -262,8 +258,6 @@ template <typename Source> class resumable_validation_context : public resumable
             if (window_.empty()) {
                 refresh_window();
                 if (window_.empty() && base::empty()) {
-                    if (this->closed())
-                        co_return status_code::incomplete;
                     co_await this->wait();
                     continue;
                 }
@@ -319,25 +313,6 @@ template <typename Source> class resumable_validation_context : public resumable
             batch.complete_item();
         }
         co_return status_code::success;
-    }
-};
-
-// A sequence consumer requests one value at a time. No value is prefetched.
-template <typename Source, typename T, typename Options, template <typename> typename... Codecs>
-class resumable_generator_context : public resumable_decode_context<Source, Options, Codecs...> {
-    using base = resumable_decode_context<Source, Options, Codecs...>;
-
-  public:
-    using base::base;
-    resumable_task<status_code> operator()(T &value, bool &ended) {
-        while (this->empty()) {
-            if (this->closed()) {
-                ended = true;
-                co_return status_code::success;
-            }
-            co_await this->wait();
-        }
-        co_return co_await base::operator()(value);
     }
 };
 } // namespace cbor::tags::detail

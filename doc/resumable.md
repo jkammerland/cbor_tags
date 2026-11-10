@@ -107,11 +107,10 @@ or changing the retained prefix. The default adapter does not support
 [ring example](../examples/46_resumable_ring.cpp).
 
 A flat `vector<byte>` or `deque<byte>` can instead receive appended bytes
-directly. Typed decoding finishes once the requested values are complete;
-`close_input()` says no more input will come, so a truncated item returns
-`status_code::incomplete`. Closing applies to the source, even when the
-operation is already finished: later operations on it see the closed input.
-See the [record example](../examples/40_resumable.cpp).
+directly. Typed decoding finishes once the requested values are complete; until
+then, running out of input means waiting for more. If the rest of an item will
+never come, [cancel](#await-completion-or-cancel) the operation. See the
+[record example](../examples/40_resumable.cpp).
 
 ## Encode to a growable container
 
@@ -190,9 +189,8 @@ int main() {
 ```
 
 Only `committed_bytes()` may be published; capacity and tentative writes are not
-encoded length. When no more room will come, `close_output()` ends a waiting
-operation with `status_code::incomplete`. These default chunks stay
-append-only even after publication; the
+encoded length. If no more room will come, cancel the operation. These default
+chunks stay append-only even after publication; the
 [ring example](../examples/46_resumable_ring.cpp) shows explicit publication and
 reclamation ownership.
 
@@ -229,15 +227,14 @@ the last inner range while preserving earlier contents and order:
 - Final-range growth needs a sized range or a changed end boundary. Unsized
   ranges must preserve their previously observed end iterator; an unchanged end
   sentinel cannot expose growth without a custom source or output buffer.
-- Shrinking, replacing earlier ranges, removing chunks, or appending after
-  closure violates the adapter's preconditions. Debug assertions check locally
-  detectable violations; malformed CBOR and an already-acquired source or output
-  buffer remain checked errors.
+- Shrinking, replacing earlier ranges, or removing chunks violates the adapter's
+  preconditions. Debug assertions check locally detectable violations; malformed
+  CBOR and an already-acquired source or output buffer remain checked errors.
 
 Mutation and codec driving are serialized. Repeated `resume()` without new
 input or output space is safe, but the producer should wait for a storage change
-rather than busy-loop; running out of input never closes it, only
-`close_input()` does.
+rather than busy-loop. Running out of input or output space never ends an
+operation by itself.
 
 ## Borrow decoded strings and items
 
@@ -441,19 +438,59 @@ running codec is unsupported.
 
 `make_resumable_generator<T>(source)` retains a current value and operation.
 Call `next()` before driving, copy `value()` before requesting the next item,
-and keep one outstanding request; closing the input between items succeeds with
-zero bytes and sets `done()`. See the
+and keep one outstanding request. See the
 [generator example](../examples/44_resumable_generator.cpp).
 
 `make_resumable_validator(source)` checks one item without constructing values;
-a numeric second argument selects a fixed item count, and `until_closed`
-validates items until `close_input()`. The third argument accepts
+a numeric second argument selects a fixed item count. The third argument accepts
 `validation_options`, whose default depth limit is 64; see the
 [validation example](../examples/42_resumable_validation.cpp).
 
 Validation checks CBOR structure and UTF-8, not an application schema.
-Indefinite text chunks must each contain complete UTF-8 sequences; a declared
-payload that is cut short by closing the input remains `incomplete`.
+Indefinite text chunks must each contain complete UTF-8 sequences.
+
+A sequence has no end marker, so the operation for the next item waits when the
+input stops. When the transport ends, that waiting operation tells a clean end
+from a cut-off item: if it has committed nothing and holds no received bytes, no
+part of another item arrived. Then cancel it:
+
+```cpp
+#include <cbor_tags/cbor_encoder.h>
+#include <cbor_tags/cbor_resumable.h>
+#include <cassert>
+#include <cstddef>
+#include <ranges>
+#include <vector>
+
+namespace ct = cbor::tags;
+
+int main() {
+    std::vector<std::byte> wire;
+    const auto encoded = ct::make_encoder(wire)(7, 1000);
+    assert(encoded);
+
+    // The transport delivers 7 and part of 1000, then ends.
+    std::vector<std::byte> input(wire.begin(), wire.end() - 1);
+    auto source = ct::make_input_source(input);
+    auto items = ct::make_resumable_generator<int>(source);
+    std::vector<int> received;
+    for (;;) {
+        auto &operation = items.next();
+        if (!operation.done()) {
+            const bool clean = operation.committed_bytes() == 0 &&
+                               std::ranges::empty(operation.remaining_input());
+            assert(!clean); // 1000 was cut off
+            operation.cancel();
+            break;
+        }
+        assert(operation.result());
+        received.push_back(items.value());
+    }
+    assert(received == std::vector<int>{7});
+}
+```
+
+One-item validators in a loop end a validated sequence the same way.
 
 ## Compose custom codecs
 
@@ -632,8 +669,7 @@ public members directly; declaring `position_type` selects this contract:
   a short write means temporary exhaustion.
 - Both expose nonthrowing `committed_position()` and `release()`; output
   `restore(position)` is also nonthrowing. `acquire()` enforces one operation,
-  `refresh()` runs before driving, and `close()` and `closed()` mark the end of
-  input or output.
+  and `refresh()` runs before driving.
 - A sized input source reports its retained size and supplies
   `remaining_size(position)` with the exact count of bytes left. A nonzero
   absolute offset is not an index into that retained size; unsized input needs

@@ -32,7 +32,7 @@ template <typename Value, typename Wrapped> void check_leaf_splits(const Value &
         decoder.resume();
         if (!decoder.done()) {
             storage.emplace_back(std::span<const std::byte>{wire}.subspan(cut));
-            decoder.close_input();
+            decoder.resume();
         }
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
@@ -389,7 +389,7 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<double>    actual;
         auto                   decoder = make_resumable_decoder(source)(actual);
         storage.emplace_back(input_chunk{input.cbegin(), input.cend()});
-        decoder.close_input();
+        decoder.resume();
         REQUIRE(decoder.result());
         CHECK(actual == expected);
 

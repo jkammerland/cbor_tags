@@ -92,7 +92,6 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     auto           remaining_output() const { return source_.remaining_output(); }
     one_shot_type &one_shot() noexcept { return one_shot_; }
     auto           wait() noexcept { return control_.wait(); }
-    bool           closed() const { return source_.closed(); }
     void           commit() { source_.commit(); }
     void           rollback() { source_.restore(source_.committed_position()); }
 
@@ -117,7 +116,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         if constexpr (std::ranges::contiguous_range<Range> && std::ranges::sized_range<Range>) {
             auto       bytes  = as_byte_span(value);
             const auto status = drain_payload_bytes(bytes);
-            if (status != status_code::incomplete || closed())
+            if (status != status_code::incomplete)
                 return status;
             return await_payload_bytes(bytes);
         } else {
@@ -125,7 +124,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             auto                     last    = std::ranges::end(value);
             std::optional<std::byte> pending;
             const auto               status = drain_payload_range(current, last, pending);
-            if (status != status_code::incomplete || closed())
+            if (status != status_code::incomplete)
                 return status;
             return await_payload_range(std::move(current), std::move(last), pending);
         }
@@ -168,7 +167,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         for (;;) {
             co_await wait();
             const auto status = drain_payload_bytes(bytes);
-            if (status != status_code::incomplete || closed())
+            if (status != status_code::incomplete)
                 co_return status;
         }
     }
@@ -198,7 +197,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         for (;;) {
             co_await wait();
             const auto status = drain_payload_range(current, last, pending);
-            if (status != status_code::incomplete || closed())
+            if (status != status_code::incomplete)
                 co_return status;
         }
     }
@@ -226,7 +225,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     // Keep the common completed call inline; only an incomplete call needs a frame.
     template <typename Write> resumable_task<status_code> attempt(Write write) {
         const auto status = write_once(write);
-        if (status != status_code::incomplete || closed())
+        if (status != status_code::incomplete)
             return status;
         return retry(std::move(write));
     }
@@ -235,7 +234,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         for (;;) {
             co_await wait();
             const auto status = write_once(write);
-            if (status != status_code::incomplete || closed())
+            if (status != status_code::incomplete)
                 co_return status;
         }
     }
@@ -779,7 +778,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             bool       key_complete{};
             while (current != last) {
                 status = leaf_map_elements(current, last, key_complete);
-                if (status != status_code::incomplete || closed()) {
+                if (status != status_code::incomplete) {
                     if (status != status_code::success)
                         co_return status;
                     break;
@@ -791,7 +790,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             const auto last    = std::ranges::end(range);
             while (current != last) {
                 status = leaf_elements(current, last);
-                if (status != status_code::incomplete || closed()) {
+                if (status != status_code::incomplete) {
                     if (status != status_code::success)
                         co_return status;
                     break;

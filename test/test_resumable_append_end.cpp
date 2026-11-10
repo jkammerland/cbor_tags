@@ -104,36 +104,6 @@ TEST_SUITE("resumable/source") {
         CHECK(source.committed_position().offset() == 8);
     }
 
-    TEST_CASE_TEMPLATE("closed growable output permits overwrite but never growth", Storage, byte_vector, byte_deque, converting_deque) {
-        auto             storage    = append_end_prefix<Storage>();
-        auto             source     = cbor::tags::make_output_buffer(storage);
-        const auto       checkpoint = source.position();
-        const std::array initial{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
-        REQUIRE(source.write(initial) == 4);
-
-        source.close();
-        CHECK(source.closed());
-        CHECK(source.write({}) == 0);
-        CHECK(source.write(initial) == 0);
-        CHECK(append_end_values(storage) == std::vector<unsigned>{10, 11, 1, 2, 3, 4});
-        CHECK(source.size() == 6);
-        CHECK(source.committed_position().offset() == 2);
-
-        // Closure still permits overwriting admitted tentative storage.
-        source.restore(checkpoint);
-        const std::array replacement{std::byte{30}, std::byte{31}, std::byte{32}, std::byte{33}, std::byte{34}, std::byte{35}};
-        CHECK(source.write(replacement) == 4);
-        CHECK(append_end_values(storage) == std::vector<unsigned>{10, 11, 30, 31, 32, 33});
-        CHECK(source.size() == 6);
-        CHECK(source.committed_position().offset() == 2);
-        CHECK(source.write({}) == 0);
-        CHECK(source.write(initial) == 0);
-
-        source.commit();
-        CHECK(source.committed_position().offset() == 6);
-        CHECK(append_end_values(storage) == std::vector<unsigned>{10, 11, 30, 31, 32, 33});
-    }
-
     struct partially_throwing_bytes : std::deque<unsigned char> {
         int remaining = -1;
 

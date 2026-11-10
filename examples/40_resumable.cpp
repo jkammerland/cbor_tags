@@ -52,7 +52,7 @@ int main() {
     assert(final_state == ct::resume_state::finished);
     std::cout << "remaining input: " << example::to_hex(last_chunk) << '\n';
 
-    // Typed decoding finishes when all requested values are available, without closing the input.
+    // Typed decoding finishes when all requested values are available.
     const auto result = operation.result();
     assert(result);
     assert(*result == buffer.size());
