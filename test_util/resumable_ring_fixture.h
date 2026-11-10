@@ -71,9 +71,7 @@ template <bool Output, std::size_t Capacity, bool Windows = false> class ring_so
     std::size_t remaining_size(iterator from) const { return limit() - from.offset(); }
     auto        remaining(iterator from) const { return std::ranges::subrange(from, end()); }
     auto        remaining_output() const { return std::ranges::subrange(position(), iterator{this, retained_ + Capacity}); }
-    bool        closed() const { return closed_; }
     void        refresh() {}
-    void        close() { closed_ = true; }
 
     void acquire() {
         if (active_) {
@@ -180,7 +178,6 @@ template <bool Output, std::size_t Capacity, bool Windows = false> class ring_so
     std::size_t                     available_;
     std::size_t                     working_;
     std::size_t                     committed_;
-    bool                            closed_{};
     bool                            active_{};
 };
 

@@ -12,8 +12,12 @@
 
 namespace cbor::tags {
 
+namespace detail {
+struct resumable_access;
+}
+
 // Small one-shot items return inline. Only a suspended computation owns a frame.
-template <typename T> class [[nodiscard]] resumable_task {
+template <typename T> class [[nodiscard]] resumable {
   public:
     struct promise_type;
     using handle_type = std::coroutine_handle<promise_type>;
@@ -23,7 +27,7 @@ template <typename T> class [[nodiscard]] resumable_task {
         std::exception_ptr      error;
         std::coroutine_handle<> continuation{std::noop_coroutine()};
 
-        resumable_task      get_return_object() noexcept { return resumable_task{handle_type::from_promise(*this)}; }
+        resumable           get_return_object() noexcept { return resumable{handle_type::from_promise(*this)}; }
         std::suspend_always initial_suspend() const noexcept { return {}; }
         struct final_awaiter {
             bool                    await_ready() const noexcept { return false; }
@@ -35,9 +39,9 @@ template <typename T> class [[nodiscard]] resumable_task {
         void          unhandled_exception() noexcept { error = std::current_exception(); }
     };
 
-    resumable_task(T value) : ready_(std::move(value)) {}
-    resumable_task(resumable_task &&other) noexcept : ready_(std::move(other.ready_)), handle_(std::exchange(other.handle_, {})) {}
-    resumable_task &operator=(resumable_task &&other) noexcept {
+    resumable(T value) : ready_(std::move(value)) {}
+    resumable(resumable &&other) noexcept : ready_(std::move(other.ready_)), handle_(std::exchange(other.handle_, {})) {}
+    resumable &operator=(resumable &&other) noexcept {
         if (this != &other) {
             if (handle_)
                 handle_.destroy();
@@ -46,17 +50,16 @@ template <typename T> class [[nodiscard]] resumable_task {
         }
         return *this;
     }
-    resumable_task(const resumable_task &) = delete;
-    ~resumable_task() {
+    resumable(const resumable &) = delete;
+    ~resumable() {
         if (handle_)
             handle_.destroy();
     }
 
-    bool        done() const noexcept { return ready_.has_value() || (handle_ && handle_.done()); }
-    handle_type handle() const noexcept { return handle_; }
-    T           result() {
+    bool done() const noexcept { return ready_.has_value() || (handle_ && handle_.done()); }
+    T    result() {
         if (!done())
-            throw std::logic_error("resumable_task result is not ready");
+            throw std::logic_error("resumable result is not ready");
         if (ready_)
             return std::move(*ready_);
         auto &promise = handle_.promise();
@@ -66,7 +69,7 @@ template <typename T> class [[nodiscard]] resumable_task {
         return std::move(*promise.value);
     }
     struct awaiter {
-        resumable_task          value;
+        resumable               value;
         bool                    await_ready() const noexcept { return value.done(); }
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> parent) const noexcept {
             value.handle_.promise().continuation = parent;
@@ -77,16 +80,36 @@ template <typename T> class [[nodiscard]] resumable_task {
     awaiter operator co_await() && noexcept { return {std::move(*this)}; }
 
   private:
-    explicit resumable_task(handle_type handle) noexcept : handle_(handle) {}
+    // Only the driver resumes the frame. Hooks co_await it
+    friend struct detail::resumable_access;
+    explicit resumable(handle_type handle) noexcept : handle_(handle) {}
     std::optional<T> ready_;
     handle_type      handle_{};
 };
 
-enum class resume_state { need_input, need_output, finished };
-struct until_closed_t {};
-inline constexpr until_closed_t until_closed{};
+enum class resume_state { need_input, need_output, done };
 
 namespace detail {
+struct resumable_access {
+    template <typename T> static auto handle(const resumable<T> &value) noexcept { return value.handle_; }
+};
+
+// Hooks only call the context and one_shot(value). Library code gets the rest here
+struct resumable_context_access {
+    template <typename Context> static auto       &source(Context &context) noexcept { return context.source(); }
+    template <typename Context> static auto       &one_shot(Context &context) noexcept { return context.one_shot(); }
+    template <typename Context> static std::size_t offset(const Context &context) { return context.offset(); }
+    template <typename Context> static auto        remaining_input(const Context &context) { return context.remaining_input(); }
+    template <typename Context> static auto        remaining_output(const Context &context) { return context.remaining_output(); }
+    template <typename Context> static auto        wait(Context &context) noexcept { return context.wait(); }
+    template <typename Context> static bool        empty(const Context &context) { return context.empty(); }
+    template <typename Context> static void        commit(Context &context) { context.commit(); }
+    template <typename Context> static void        rollback(Context &context) { context.rollback(); }
+    template <typename Context, typename... Args> static auto payload(Context &context, Args &&...args) {
+        return context.payload(std::forward<Args>(args)...);
+    }
+};
+
 template <typename Context>
 concept HasResumableSuspendHook = requires(Context &context) {
     { context.suspend() } -> std::same_as<void>;
@@ -127,15 +150,16 @@ template <typename Context> class [[nodiscard]] resume_operation {
     struct operation_state {
         resume_control                     control;
         Context                            context;
-        resumable_task<status_code>        work{status_code::success};
+        resumable<status_code>             work{status_code::success};
         expected<std::size_t, status_code> result{unexpected<status_code>{status_code::incomplete}};
         std::size_t                        start{};
         bool                               finished{};
 
         template <typename... Args>
-        operation_state(typename Context::source_type &source, Args &&...args) : context(source, control), start(context.offset()) {
+        operation_state(typename Context::source_type &source, Args &&...args)
+            : context(source, control), start(resumable_context_access::offset(context)) {
             work         = context(std::forward<Args>(args)...);
-            control.leaf = work.handle();
+            control.leaf = resumable_access::handle(work);
         }
     };
     std::unique_ptr<operation_state> state_;
@@ -143,7 +167,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
     // Publish completion before waking user code. The waiter may destroy this operation.
     static resume_state drive(operation_state &s) {
         if (s.finished || s.control.driving)
-            return s.finished ? resume_state::finished : Context::waiting_state;
+            return s.finished ? resume_state::done : Context::waiting_state;
         s.control.driving = true;
         if (auto handle = std::exchange(s.control.leaf, {}))
             handle.resume();
@@ -155,15 +179,16 @@ template <typename Context> class [[nodiscard]] resume_operation {
             try {
                 status = s.work.result();
             } catch (...) { status = resumable_exception_status(); }
-            s.result   = status == status_code::success ? expected<std::size_t, status_code>{s.context.offset() - s.start}
-                                                        : expected<std::size_t, status_code>{unexpected<status_code>{status}};
+            s.result   = status == status_code::success
+                             ? expected<std::size_t, status_code>{resumable_context_access::offset(s.context) - s.start}
+                             : expected<std::size_t, status_code>{unexpected<status_code>{status}};
             s.finished = true;
         } else if (stalled(s)) {
             end(s, status_code::capacity_exceeded);
         }
         s.control.driving   = false;
         auto       waiter   = s.finished ? std::exchange(s.control.waiter, {}) : std::coroutine_handle<>{};
-        const auto progress = s.finished ? resume_state::finished : Context::waiting_state;
+        const auto progress = s.finished ? resume_state::done : Context::waiting_state;
         if (waiter)
             waiter.resume();
         return progress;
@@ -198,23 +223,12 @@ template <typename Context> class [[nodiscard]] resume_operation {
     resume_state resume() {
         auto &s = checked_state();
         if (s.finished)
-            return resume_state::finished;
+            return resume_state::done;
         if (s.control.driving)
             throw std::logic_error("cannot resume a running codec");
 
-        s.context.source().refresh();
+        resumable_context_access::source(s.context).refresh();
         return drive(s);
-    }
-    // No more input or room will come: the codec ends instead of waiting
-    resume_state close_input()
-        requires(Context::waiting_state == resume_state::need_input)
-    {
-        return close_source();
-    }
-    resume_state close_output()
-        requires(Context::waiting_state == resume_state::need_output)
-    {
-        return close_source();
     }
     void cancel() {
         // Nothing to cancel in a moved-from operation, same as a finished one
@@ -231,7 +245,6 @@ template <typename Context> class [[nodiscard]] resume_operation {
             waiter.resume();
     }
     bool                               done() const noexcept { return state_ && state_->finished; }
-    resume_state                       state() const noexcept { return done() ? resume_state::finished : Context::waiting_state; }
     expected<std::size_t, status_code> result() const {
         // incomplete would look like truncated input, so a pending result is a caller bug
         const auto &s = checked_state();
@@ -239,17 +252,17 @@ template <typename Context> class [[nodiscard]] resume_operation {
             throw std::logic_error("resumable operation has not finished");
         return s.result;
     }
-    std::size_t committed_bytes() const { return state_ ? state_->context.offset() - state_->start : 0; }
+    std::size_t committed_bytes() const { return state_ ? resumable_context_access::offset(state_->context) - state_->start : 0; }
     auto        remaining_input() const
         requires(Context::waiting_state == resume_state::need_input)
     {
-        return checked_state().context.remaining_input();
+        return resumable_context_access::remaining_input(checked_state().context);
     }
 
     auto remaining_output() const
         requires(Context::waiting_state == resume_state::need_output)
     {
-        return checked_state().context.remaining_output();
+        return resumable_context_access::remaining_output(checked_state().context);
     }
 
     struct awaiter {
@@ -282,22 +295,14 @@ template <typename Context> class [[nodiscard]] resume_operation {
         return *state_;
     }
 
-    resume_state close_source() {
-        auto &s = checked_state();
-        if (s.control.driving)
-            throw std::logic_error("cannot close the source of a running codec");
-        s.context.source().close();
-        return resume();
-    }
-
     // Ends a pending operation with status. Waking the waiter is up to the caller.
     static void end(operation_state &s, status_code status) noexcept {
         // Retire every suspended handle before destroying its owning frames.
         // Input retains its committed source position; the dead reader needs no reset.
         s.control.leaf = {};
-        s.work         = resumable_task<status_code>{status};
+        s.work         = resumable<status_code>{status};
         if constexpr (Context::waiting_state == resume_state::need_output)
-            s.context.rollback();
+            resumable_context_access::rollback(s.context);
 
         s.result   = unexpected<status_code>{status};
         s.finished = true;
@@ -315,7 +320,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
         using source_type = typename Context::source_type;
         if constexpr (NamesCapacityReport<source_type>) {
             static_assert(HasCapacityReport<source_type>, "at_capacity() must be a const noexcept member returning bool");
-            return std::as_const(s.context.source()).at_capacity();
+            return std::as_const(resumable_context_access::source(s.context)).at_capacity();
         } else
             return false;
     }
@@ -329,12 +334,12 @@ template <typename Context> class [[nodiscard]] resume_operation {
                     waiter.resume();
             }
 
-            auto &source = state_->context.source();
+            auto &source = resumable_context_access::source(state_->context);
             // Abandoned partial output must not become part of the next item.
             // Destroy suspended frames before restoring their retry boundary.
-            state_->work = resumable_task<status_code>{status_code::cancelled};
+            state_->work = resumable<status_code>{status_code::cancelled};
             if constexpr (Context::waiting_state == resume_state::need_output)
-                state_->context.rollback();
+                resumable_context_access::rollback(state_->context);
             state_.reset();
             source.release();
         }

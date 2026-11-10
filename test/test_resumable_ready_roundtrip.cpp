@@ -132,11 +132,11 @@ TEST_SUITE("roundtrip/resumable") {
             auto                                                              sink = make_output_buffer(storage);
             detail::resume_control                                            control;
             detail::resumable_encode_context<decltype(sink), default_options> context{sink, control};
-            auto                                                              result = context.payload(value);
+            auto result = detail::resumable_context_access::payload(context, value);
             REQUIRE(result.done());
-            CHECK_FALSE(result.handle());
+            CHECK_FALSE(detail::resumable_access::handle(result));
             CHECK(result.result() == status_code::success);
-            CHECK(context.offset() == bytes.size());
+            CHECK(detail::resumable_context_access::offset(context) == bytes.size());
             CHECK(output == bytes);
         };
         check(bytes);
@@ -155,9 +155,9 @@ TEST_SUITE("roundtrip/resumable") {
         auto                                                              sink = make_output_buffer(storage);
         detail::resume_control                                            control;
         detail::resumable_encode_context<decltype(sink), default_options> context{sink, control};
-        auto                                                              result = context.payload(range);
+        auto result = detail::resumable_context_access::payload(context, range);
         REQUIRE_FALSE(result.done());
-        result.handle().resume();
+        detail::resumable_access::handle(result).resume();
         REQUIRE(control.leaf);
         std::exchange(control.leaf, {}).resume();
         CHECK(reads == 1U);
@@ -173,24 +173,28 @@ TEST_SUITE("roundtrip/resumable") {
         CHECK(std::ranges::equal(output, bytes));
     }
 
-    TEST_CASE("optional and variant availability finish incomplete without changing their values") {
+    TEST_CASE("optional and variant availability wait and cancel without changing their values") {
         input_chunks                storage;
         auto                        source = make_input_source(storage);
         std::optional<ready_record> optional{ready_record{"retained", 1.25F}};
         {
             auto operation = make_resumable_decoder(source)(optional);
             REQUIRE_FALSE(operation.done());
-            operation.close_input();
+            CHECK(optional == std::optional<ready_record>{ready_record{"retained", 1.25F}});
+            operation.cancel();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
-            CHECK(operation.result().error() == status_code::incomplete);
+            CHECK(operation.result().error() == status_code::cancelled);
             CHECK(optional == std::optional<ready_record>{ready_record{"retained", 1.25F}});
         }
         ready_variant variant{17};
         auto          operation = make_resumable_decoder(source)(variant);
+        REQUIRE_FALSE(operation.done());
+        CHECK(variant == ready_variant{17});
+        operation.cancel();
         REQUIRE(operation.done());
         REQUIRE_FALSE(operation.result());
-        CHECK(operation.result().error() == status_code::incomplete);
+        CHECK(operation.result().error() == status_code::cancelled);
         CHECK(variant == ready_variant{17});
     }
 }

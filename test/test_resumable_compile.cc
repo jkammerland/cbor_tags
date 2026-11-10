@@ -1,9 +1,11 @@
 #include <cbor_tags/cbor_resumable.h>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <list>
 #include <span>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -17,9 +19,9 @@ using output_buffer_type = decltype(make_output_buffer(std::declval<output_stora
 using decode_operation   = decltype(make_resumable_decoder(std::declval<input_source_type &>())(std::declval<int &>()));
 using encode_operation   = decltype(make_resumable_encoder(std::declval<output_buffer_type &>())(std::declval<const int &>()));
 
-static_assert(!std::is_copy_constructible_v<resumable_task<status_code>>);
-static_assert(!std::is_copy_assignable_v<resumable_task<status_code>>);
-static_assert(std::is_nothrow_move_constructible_v<resumable_task<status_code>>);
+static_assert(!std::is_copy_constructible_v<resumable<status_code>>);
+static_assert(!std::is_copy_assignable_v<resumable<status_code>>);
+static_assert(std::is_nothrow_move_constructible_v<resumable<status_code>>);
 static_assert(!std::is_copy_constructible_v<decode_operation>);
 static_assert(!std::is_copy_constructible_v<encode_operation>);
 static_assert(std::is_move_constructible_v<decode_operation>);
@@ -49,6 +51,98 @@ using source_decoder = decltype(make_resumable_decoder(std::declval<input_source
 using source_encoder = decltype(make_resumable_encoder(std::declval<output_buffer_type &>()));
 static_assert(std::is_invocable_v<source_decoder &&, int &>);
 static_assert(std::is_invocable_v<source_encoder &&, const int &>);
+
+// Every encoder and decoder names the one operation type it makes, whatever the values
+template <typename Factory, typename... T> using operation_for = decltype(std::declval<Factory &>()(std::declval<T>()...));
+static_assert(std::is_same_v<source_decoder::operation, decode_operation>);
+static_assert(std::is_same_v<source_encoder::operation, encode_operation>);
+static_assert(std::is_same_v<source_decoder::operation, operation_for<source_decoder, std::vector<int> &, std::uint8_t &>>);
+static_assert(std::is_same_v<source_encoder::operation, operation_for<source_encoder, const std::vector<int> &>>);
+static_assert(std::is_same_v<storage_decoder::operation, operation_for<storage_decoder, int &>>);
+static_assert(std::is_same_v<storage_decoder::operation, operation_for<storage_decoder, std::vector<int> &>>);
+static_assert(std::is_same_v<storage_encoder::operation, operation_for<storage_encoder, const int &>>);
+static_assert(std::is_same_v<storage_encoder::operation, operation_for<storage_encoder, const std::vector<int> &>>);
+
+// Hooks co_await it, only the driver resumes its frame
+template <typename Resumable>
+concept exposes_handle = requires(const Resumable &value) { value.handle(); };
+struct public_handle {
+    void handle() const;
+};
+static_assert(exposes_handle<public_handle>);
+static_assert(!exposes_handle<resumable<status_code>>);
+
+// Hooks get the context and one_shot(value), the rest stays with the library
+template <typename Operation> struct context_of;
+template <typename Context> struct context_of<detail::resume_operation<Context>> {
+    using type = Context;
+};
+using decode_context = context_of<decode_operation>::type;
+using encode_context = context_of<encode_operation>::type;
+
+template <typename Context, typename T>
+concept hook_callable = requires(Context &context, T &value) {
+    { context(value) } -> std::same_as<resumable<status_code>>;
+    { context.one_shot(value) } -> std::same_as<resumable<status_code>>;
+};
+static_assert(hook_callable<decode_context, int>);
+static_assert(hook_callable<encode_context, const int>);
+
+template <typename Context>
+concept exposes_source = requires(Context &context) { context.source(); };
+template <typename Context>
+concept exposes_offset = requires(Context &context) { context.offset(); };
+template <typename Context>
+concept exposes_one_shot_codec = requires(Context &context) { context.one_shot(); };
+template <typename Context>
+concept exposes_wait = requires(Context &context) { context.wait(); };
+template <typename Context>
+concept exposes_commit = requires(Context &context) { context.commit(); };
+template <typename Context>
+concept exposes_rollback = requires(Context &context) { context.rollback(); };
+template <typename Context>
+concept exposes_empty = requires(Context &context) { context.empty(); };
+template <typename Context>
+concept exposes_remaining_input = requires(Context &context) { context.remaining_input(); };
+template <typename Context>
+concept exposes_remaining_output = requires(Context &context) { context.remaining_output(); };
+template <typename Context>
+concept exposes_decode_payload = requires(Context &context, std::string &text, detail::appender<std::string> &append) {
+    context.payload(text, std::uint64_t{}, append);
+};
+template <typename Context>
+concept exposes_encode_payload = requires(Context &context, std::vector<std::byte> &bytes) { context.payload(bytes); };
+
+// Each concept has to see its member here, or the checks below prove nothing
+struct exposed_context {
+    void source();
+    void offset();
+    void one_shot();
+    void wait();
+    void commit();
+    void rollback();
+    void empty();
+    void remaining_input();
+    void remaining_output();
+    void payload(std::string &, std::uint64_t, detail::appender<std::string> &);
+    void payload(std::vector<std::byte> &);
+};
+static_assert(exposes_source<exposed_context> && exposes_offset<exposed_context> && exposes_one_shot_codec<exposed_context> &&
+              exposes_wait<exposed_context> && exposes_commit<exposed_context> && exposes_rollback<exposed_context> &&
+              exposes_empty<exposed_context> && exposes_remaining_input<exposed_context> && exposes_remaining_output<exposed_context> &&
+              exposes_decode_payload<exposed_context> && exposes_encode_payload<exposed_context>);
+
+static_assert(!exposes_source<decode_context> && !exposes_source<encode_context>);
+static_assert(!exposes_offset<decode_context> && !exposes_offset<encode_context>);
+static_assert(!exposes_one_shot_codec<decode_context> && !exposes_one_shot_codec<encode_context>);
+static_assert(!exposes_wait<decode_context> && !exposes_wait<encode_context>);
+static_assert(!exposes_commit<decode_context> && !exposes_commit<encode_context>);
+static_assert(!exposes_rollback<decode_context> && !exposes_rollback<encode_context>);
+static_assert(!exposes_empty<decode_context>);
+static_assert(!exposes_remaining_input<decode_context>);
+static_assert(!exposes_decode_payload<decode_context>);
+static_assert(!exposes_remaining_output<encode_context>);
+static_assert(!exposes_encode_payload<encode_context>);
 
 template <typename Storage>
 concept accepts_encoder_storage = requires(Storage &&storage) { make_resumable_encoder(std::forward<Storage>(storage)); };
@@ -126,7 +220,7 @@ template <typename Result> class member_hooks {
     Result resumable_transcode(context &) &;
 };
 
-using valid_member_hooks = member_hooks<resumable_task<status_code>>;
+using valid_member_hooks = member_hooks<resumable<status_code>>;
 static_assert(detail::HasResumableEncodeMethod<context, const valid_member_hooks>);
 static_assert(detail::HasResumableDecodeMethod<context, valid_member_hooks>);
 static_assert(detail::HasResumableTranscodeMethod<context, valid_member_hooks>);
@@ -137,7 +231,7 @@ static_assert(!detail::HasResumableDecodeMethod<context, member_hooks<status_cod
 static_assert(!detail::HasResumableTranscodeMethod<context, member_hooks<status_code>>);
 
 struct mutable_encode_member {
-    resumable_task<status_code> resumable_encode(context &) &;
+    resumable<status_code> resumable_encode(context &) &;
 };
 static_assert(!detail::HasResumableEncodeMethod<context, mutable_encode_member>);
 
@@ -147,7 +241,7 @@ template <typename Result> Result resumable_encode(context &, const free_hooks<R
 template <typename Result> Result resumable_decode(context &, free_hooks<Result> &);
 template <typename Result> Result resumable_transcode(context &, free_hooks<Result> &);
 
-using valid_free_hooks = free_hooks<resumable_task<status_code>>;
+using valid_free_hooks = free_hooks<resumable<status_code>>;
 static_assert(detail::HasResumableEncodeFreeFunction<context, const valid_free_hooks>);
 static_assert(detail::HasResumableDecodeFreeFunction<context, valid_free_hooks>);
 static_assert(detail::HasResumableTranscodeFreeFunction<context, valid_free_hooks>);
@@ -156,7 +250,7 @@ static_assert(!detail::HasResumableTranscodeFreeFunction<context, const valid_fr
 static_assert(!detail::HasResumableEncodeFreeFunction<context, free_hooks<status_code>>);
 static_assert(!detail::HasResumableDecodeFreeFunction<context, free_hooks<status_code>>);
 static_assert(!detail::HasResumableTranscodeFreeFunction<context, free_hooks<status_code>>);
-static_assert(!detail::HasResumableEncodeFreeFunction<context, free_hooks<resumable_task<status_code> &>>);
+static_assert(!detail::HasResumableEncodeFreeFunction<context, free_hooks<resumable<status_code> &>>);
 
 template <typename Result> struct mixin_hooks {
     Result resumable_encode(const int &) &;
@@ -164,7 +258,7 @@ template <typename Result> struct mixin_hooks {
     Result resumable_transcode(int &) &;
 };
 
-using valid_mixin_hooks = mixin_hooks<resumable_task<status_code>>;
+using valid_mixin_hooks = mixin_hooks<resumable<status_code>>;
 static_assert(detail::HasResumableEncodeMixin<valid_mixin_hooks, const int>);
 static_assert(detail::HasResumableDecodeMixin<valid_mixin_hooks, int>);
 static_assert(detail::HasResumableTranscodeMixin<valid_mixin_hooks, int>);
@@ -173,7 +267,7 @@ static_assert(!detail::HasResumableTranscodeMixin<valid_mixin_hooks, const int>)
 static_assert(!detail::HasResumableEncodeMixin<mixin_hooks<status_code>, int>);
 static_assert(!detail::HasResumableDecodeMixin<mixin_hooks<status_code>, int>);
 static_assert(!detail::HasResumableTranscodeMixin<mixin_hooks<status_code>, int>);
-static_assert(!detail::HasResumableEncodeMixin<mixin_hooks<resumable_task<status_code> &>, int>);
+static_assert(!detail::HasResumableEncodeMixin<mixin_hooks<resumable<status_code> &>, int>);
 
 } // namespace hook_contract
 
@@ -186,8 +280,8 @@ int main() {
     auto               operation = make_resumable_decoder(source)(destination);
     return operation.done() ? 0 : 1;
 #else
-    resumable_task<status_code> ready{status_code::success};
-    auto                        awaiter = std::move(ready).operator co_await();
+    resumable<status_code> ready{status_code::success};
+    auto                   awaiter = std::move(ready).operator co_await();
     return awaiter.await_ready() && awaiter.await_resume() == status_code::success ? 0 : 1;
 #endif
 }

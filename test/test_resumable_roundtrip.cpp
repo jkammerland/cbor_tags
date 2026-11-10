@@ -35,12 +35,12 @@ struct string_pair {
     std::string second;
     bool        operator==(const string_pair &) const = default;
 
-    template <typename Encoder> auto                        encode(Encoder &encoder) const { return encoder(wrap_as_array{first, second}); }
-    template <typename Decoder> auto                        decode(Decoder &decoder) { return decoder(wrap_as_array{first, second}); }
-    template <typename Encoder> resumable_task<status_code> resumable_encode(Encoder &encoder) const {
+    template <typename Encoder> auto                   encode(Encoder &encoder) const { return encoder(wrap_as_array{first, second}); }
+    template <typename Decoder> auto                   decode(Decoder &decoder) { return decoder(wrap_as_array{first, second}); }
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const {
         co_return co_await encoder(wrap_as_array{first, second});
     }
-    template <typename Decoder> resumable_task<status_code> resumable_decode(Decoder &decoder) {
+    template <typename Decoder> resumable<status_code> resumable_decode(Decoder &decoder) {
         co_return co_await decoder(wrap_as_array{first, second});
     }
 };
@@ -231,13 +231,13 @@ template <typename Self> struct explicit_uint32_codec : codec::base<Self> {
 
     template <typename Value>
         requires std::same_as<std::remove_cvref_t<Value>, std::uint32_t>
-    resumable_task<status_code> resumable_encode(Value &value) {
+    resumable<status_code> resumable_encode(Value &value) {
         ++integer_codec_calls::encoded;
         const auto wire_value = static_cast<std::uint64_t>(value) + 2000;
         co_return co_await static_cast<Self &>(*this)(wire_value);
     }
 
-    resumable_task<status_code> resumable_decode(std::uint32_t &value) {
+    resumable<status_code> resumable_decode(std::uint32_t &value) {
         ++integer_codec_calls::decoded;
         std::uint64_t wire_value{};
         const auto    status = co_await static_cast<Self &>(*this)(wire_value);
@@ -271,13 +271,13 @@ template <typename Self> struct explicit_only_uint32_codec : codec::base<Self> {
 
     template <typename T>
         requires std::same_as<std::remove_cvref_t<T>, std::uint32_t>
-    resumable_task<status_code> resumable_encode(T &value) {
+    resumable<status_code> resumable_encode(T &value) {
         ++integer_codec_calls::encoded;
         const auto wire_value = static_cast<std::uint64_t>(value) + 4000;
         co_return co_await static_cast<Self &>(*this)(wire_value);
     }
 
-    resumable_task<status_code> resumable_decode(std::uint32_t &value) {
+    resumable<status_code> resumable_decode(std::uint32_t &value) {
         ++integer_codec_calls::decoded;
         std::uint64_t wire_value{};
         const auto    status = co_await static_cast<Self &>(*this)(wire_value);
@@ -313,7 +313,7 @@ template <typename T> void check_every_decode_split(const T &expected) {
         operation.resume();
         if (!operation.done()) {
             storage.emplace_back(input.subspan(cut));
-            operation.close_input();
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -433,12 +433,12 @@ struct explicitly_resumable_record {
     }
 };
 
-template <typename Context> resumable_task<status_code> resumable_decode(Context &context, explicitly_resumable_record &value) {
+template <typename Context> resumable<status_code> resumable_decode(Context &context, explicitly_resumable_record &value) {
     ++value.resumable_calls;
     co_return co_await context(wrap_as_array{value.number, value.text});
 }
 
-template <typename Context> resumable_task<status_code> resumable_encode(Context &context, const explicitly_resumable_record &value) {
+template <typename Context> resumable<status_code> resumable_encode(Context &context, const explicitly_resumable_record &value) {
     ++value.resumable_encode_calls;
     co_return co_await context(wrap_as_array{value.number, value.text});
 }
@@ -456,12 +456,12 @@ struct member_tagged_resumable_record : explicitly_resumable_record {
     member_tagged_resumable_record() = default;
     member_tagged_resumable_record(std::uint32_t number, std::string text) : explicitly_resumable_record{number, std::move(text)} {}
 
-    template <typename Context> resumable_task<status_code> resumable_encode(Context &context) const {
+    template <typename Context> resumable<status_code> resumable_encode(Context &context) const {
         ++resumable_encode_calls;
         co_return co_await context(wrap_as_array{number, text});
     }
 
-    template <typename Context> resumable_task<status_code> resumable_decode(Context &context) {
+    template <typename Context> resumable<status_code> resumable_decode(Context &context) {
         ++resumable_calls;
         co_return co_await context(wrap_as_array{number, text});
     }
@@ -529,7 +529,7 @@ struct explicitly_transcoded_record {
 
 template <typename Context, typename Value>
     requires std::same_as<std::remove_cvref_t<Value>, explicitly_transcoded_record>
-resumable_task<status_code> resumable_transcode(Context &context, Value &value) {
+resumable<status_code> resumable_transcode(Context &context, Value &value) {
     ++value.resumable_calls;
     co_return co_await context(wrap_as_array{value.number, value.text});
 }
@@ -591,7 +591,7 @@ TEST_SUITE("roundtrip/resumable") {
             auto              operation = make_resumable_decoder(source)(actual);
             if (!operation.done()) {
                 chunks.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
             REQUIRE(operation.result());
             CHECK(actual.number == expected.number);
@@ -861,7 +861,7 @@ TEST_SUITE("roundtrip/resumable") {
                 }
                 if (!operation.done()) {
                     storage.emplace_back(input.subspan(second));
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.done());
@@ -911,7 +911,7 @@ TEST_SUITE("roundtrip/resumable") {
             operation.resume();
             if (!operation.done()) {
                 storage.emplace_back(input.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
 
             REQUIRE(operation.result());
@@ -947,7 +947,7 @@ TEST_SUITE("roundtrip/resumable") {
                 operation.resume();
                 if (!operation.done()) {
                     storage.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.result());
@@ -983,7 +983,7 @@ TEST_SUITE("roundtrip/resumable") {
                 operation.resume();
                 if (!operation.done()) {
                     storage.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.result());
@@ -1037,7 +1037,7 @@ TEST_SUITE("roundtrip/resumable") {
         resumable_message actual;
         auto              operation = make_resumable_decoder(source)(actual);
         storage.insert(storage.end(), chunks.begin(), chunks.end());
-        operation.close_input();
+        operation.resume();
 
         REQUIRE(operation.done());
         REQUIRE(operation.result());
@@ -1071,7 +1071,7 @@ TEST_SUITE("roundtrip/resumable") {
         CHECK(actual.completed.empty());
         CHECK(operation.committed_bytes() == 0);
         storage.emplace_back(std::span<const std::byte>{bytes}.last(1));
-        operation.close_input();
+        operation.resume();
 
         REQUIRE(operation.result());
         CHECK(*operation.result() == bytes.size());
@@ -1095,7 +1095,7 @@ TEST_SUITE("roundtrip/resumable") {
         auto              operation = make_resumable_decoder(source)(actual);
         const auto        attempts  = actual.attempts;
         storage.insert(storage.end(), chunks.begin(), chunks.end());
-        operation.close_input();
+        operation.resume();
 
         REQUIRE(operation.result());
         CHECK(actual.attempts == attempts + 1);
@@ -1205,7 +1205,7 @@ TEST_SUITE("roundtrip/resumable") {
                 decoder.resume();
                 if (!decoder.done()) {
                     inputs.emplace_back(std::span<const std::byte>{reference}.subspan(cut));
-                    decoder.close_input();
+                    decoder.resume();
                 }
 
                 REQUIRE(decoder.result());
@@ -1259,7 +1259,7 @@ TEST_SUITE("roundtrip/resumable") {
             decoder.resume();
             if (!decoder.done()) {
                 inputs.emplace_back(std::span<const std::byte>{reference}.subspan(cut));
-                decoder.close_input();
+                decoder.resume();
             }
 
             REQUIRE(decoder.result());
@@ -1442,11 +1442,10 @@ TEST_SUITE("roundtrip/resumable") {
         auto         generator = make_resumable_generator<int>(source);
         auto        &first     = generator.next();
         storage.emplace_back(bytes);
-        generator.close_input();
+        generator.resume();
 
         REQUIRE(first.done());
         REQUIRE(first.result());
-        CHECK_FALSE(generator.done());
         CHECK(generator.value() == expected[0]);
         CHECK(generator.value() == expected[0]);
         std::size_t consumed = *first.result();
@@ -1455,16 +1454,15 @@ TEST_SUITE("roundtrip/resumable") {
             auto &next = generator.next();
             REQUIRE(next.done());
             REQUIRE(next.result());
-            CHECK_FALSE(generator.done());
             CHECK(generator.value() == expected[index]);
             consumed += *next.result();
         }
 
-        auto &eof = generator.next();
-        REQUIRE(eof.done());
-        REQUIRE(eof.result());
-        CHECK(*eof.result() == 0U);
-        CHECK(generator.done());
+        // Nothing left, so the next item waits without having touched a byte
+        auto &after = generator.next();
+        REQUIRE_FALSE(after.done());
+        CHECK(after.committed_bytes() == 0U);
+        CHECK(std::ranges::empty(after.remaining_input()));
         CHECK(consumed == bytes.size());
     }
 }

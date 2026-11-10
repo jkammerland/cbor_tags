@@ -176,7 +176,6 @@ template <template <typename> typename Codec> void check_integer_map_override(st
 
             // Construction must suspend cleanly while the header has no output.
             REQUIRE_FALSE(encoder.done());
-            CHECK(encoder.state() == resume_state::need_output);
             CHECK_THROWS_AS(static_cast<void>(encoder.result()), std::logic_error);
 
             if (bytewise) {
@@ -278,7 +277,7 @@ TEST_SUITE("roundtrip/resumable") {
                 decoder.resume();
                 if (!decoder.done()) {
                     input_storage.emplace_back(input.subspan(cut));
-                    decoder.close_input();
+                    decoder.resume();
                 }
                 REQUIRE(decoder.done());
                 REQUIRE(decoder.result());
@@ -328,7 +327,7 @@ TEST_SUITE("roundtrip/resumable") {
             operation.resume();
             if (!operation.done()) {
                 storage.emplace_back(std::span<const std::byte>{wire}.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
             REQUIRE(operation.done());
             REQUIRE(operation.result());
@@ -388,7 +387,7 @@ TEST_SUITE("roundtrip/resumable") {
             operation.resume();
             if (!operation.done()) {
                 storage.emplace_back(input.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
             REQUIRE(operation.done());
             REQUIRE(operation.result());

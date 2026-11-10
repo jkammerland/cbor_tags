@@ -533,7 +533,7 @@ if (encoded) {
 
 `encode_item_segments` checks that the result contains exactly one complete item.
 For an existing `byte_segments` value, use
-`check_item_segments_structure(std::move(segments))` to obtain the same
+`validate_item_segments(std::move(segments))` to obtain the same
 `encoded_item_segments` wrapper. Empty input, incomplete items, and trailing
 bytes fail this check.
 

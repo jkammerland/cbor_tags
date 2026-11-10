@@ -61,9 +61,9 @@ example is standalone and uses standard-library storage.
 | [40_a_resumable.cpp](40_a_resumable.cpp) | Continue a truncated record | A failed one-shot decode is terminal; a resumable decode keeps its progress and finishes once the missing bytes are appended. |
 | [40_resumable.cpp](40_resumable.cpp) | Decode items as input grows | Append bytes to a deque, resume, and inspect the completed values. |
 | [41_resumable_encoding.cpp](41_resumable_encoding.cpp) | Encode into a growable container | Let a deque grow and inspect its committed encoded prefix. |
-| [42_resumable_validation.cpp](42_resumable_validation.cpp) | Validate without constructing values | Validate CBOR structure and UTF-8 across chunks until the input is closed. |
+| [42_resumable_validation.cpp](42_resumable_validation.cpp) | Validate without constructing values | Validate CBOR structure and UTF-8 one item at a time across chunks; check that no item was cut off when the input stops. |
 | [43_resumable_coroutine.cpp](43_resumable_coroutine.cpp) | Await an operation from a coroutine | A serialized codec resume completes the waiting consumer inline. |
-| [44_resumable_generator.cpp](44_resumable_generator.cpp) | Consume a sequence of top-level items | Copy each yielded value before requesting the next; tell the end of the sequence from another item. |
+| [44_resumable_generator.cpp](44_resumable_generator.cpp) | Consume a sequence of top-level items | Copy each yielded value before requesting the next; cancel the wait when the transport ends and check that no item was cut off. |
 | [45_resumable_custom_hook.cpp](45_resumable_custom_hook.cpp) | Customize resumable encoding and decoding | ADL hooks retain progress while choosing an application-specific wire layout. |
 | [46_resumable_ring.cpp](46_resumable_ring.cpp) | Reuse bounded storage through a custom source and output buffer | Absolute positions survive wraparound; reclaim only committed bytes after releasing external borrows; a sink hashes a byte string larger than the ring. |
 | [47_resumable_typed_array.cpp](47_resumable_typed_array.cpp) | Resume typed arrays | Decode into reused, bounded storage as bytes arrive, one whole element at a time; a bound fails on the header, before the payload; a view waits for the whole array, then outlives its operation. |

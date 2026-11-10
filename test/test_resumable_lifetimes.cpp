@@ -75,9 +75,6 @@ raw_consumer collect_values(Generator &generator, std::vector<int> &values, std:
         }
 
         consumed += *result;
-        if (generator.done()) {
-            co_return;
-        }
         values.push_back(generator.value());
     }
 }
@@ -144,8 +141,6 @@ class throwing_position_input {
     position_type committed_position() const noexcept { return {storage_, throw_assignment, committed_}; }
     void          commit(position_type position) { committed_ = position.offset(); }
     auto          remaining(position_type position) const { return std::ranges::subrange(position, end()); }
-    bool          closed() const { return closed_; }
-    void          close() { closed_ = true; }
     void          refresh() {}
 
     void acquire() {
@@ -161,12 +156,11 @@ class throwing_position_input {
   private:
     std::vector<std::byte> &storage_;
     std::size_t             committed_{};
-    bool                    closed_{};
 };
 
 static_assert(ResumableInputSource<throwing_position_input>);
 
-template <typename Context> resumable_task<status_code> resumable_decode(Context &context, hook_lifetime &value) {
+template <typename Context> resumable<status_code> resumable_decode(Context &context, hook_lifetime &value) {
     struct frame_guard {
         int *destroyed;
         ~frame_guard() { ++*destroyed; }
@@ -198,7 +192,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         chunks.emplace_back(std::span<const std::byte>{bytes}.subspan(2));
         const auto state = moved->resume();
 
-        CHECK(state == resume_state::finished);
+        CHECK(state == resume_state::done);
         CHECK_FALSE(moved);
         REQUIRE(consumer.done());
         CHECK_NOTHROW(consumer.rethrow());
@@ -232,7 +226,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         int  actual{};
         auto operation = decoder(actual);
         chunks.emplace_back(bytes);
-        REQUIRE(operation.resume() == resume_state::finished);
+        REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
         CHECK(actual == expected);
     }
@@ -266,7 +260,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
             int  actual{};
             auto next = decoder(actual);
             chunks.emplace_back(bytes);
-            REQUIRE(next.resume() == resume_state::finished);
+            REQUIRE(next.resume() == resume_state::done);
             REQUIRE(next.result());
             CHECK(actual == 65536);
         }
@@ -294,7 +288,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
             CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
 
             input.push_back(std::byte{0x07});
-            REQUIRE(operation.resume() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(value == 7);
         }
@@ -318,7 +312,6 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         CHECK_FALSE(operation.done());
         CHECK(operation.committed_bytes() == 0);
         CHECK_THROWS_AS(operation.resume(), std::logic_error);
-        CHECK_THROWS_AS(operation.close_input(), std::logic_error);
         CHECK_THROWS_AS(static_cast<void>(operation.result()), std::logic_error);
         CHECK_THROWS_AS(static_cast<void>(operation.remaining_input()), std::logic_error);
         CHECK_NOTHROW(operation.cancel()); // nothing to cancel, like a finished one
@@ -332,7 +325,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
 
         // The moved-to operation still owns the decode
         input.push_back(std::byte{0x07});
-        REQUIRE(moved.resume() == resume_state::finished);
+        REQUIRE(moved.resume() == resume_state::done);
         REQUIRE(moved.result());
         CHECK(value == 7);
     }
@@ -379,11 +372,11 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
 
             // Completion is terminal, but acquisition lasts until destruction.
             CHECK_NOTHROW(operation.cancel());
-            CHECK(operation.resume() == resume_state::finished);
+            CHECK(operation.resume() == resume_state::done);
             CHECK(notifications == 1);
             CHECK(source.acquired);
             int rejected{};
-            CHECK_THROWS_AS(decoder(rejected), std::logic_error);
+            CHECK_THROWS_AS((void)decoder(rejected), std::logic_error);
         }
 
         CHECK_FALSE(source.acquired);
@@ -405,7 +398,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         status_code status = status_code::error;
         {
             cbor::tags::test::detail::allocation_failure_guard guard;
-            resumable_task<status_code>                        result{status_code::success};
+            resumable<status_code>                             result{status_code::success};
             auto                                               awaiter = std::move(result).operator co_await();
             ready                                                      = awaiter.await_ready();
             status                                                     = awaiter.await_resume();
@@ -629,22 +622,25 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
 
         SUBCASE("whole batch") {
             storage.emplace_back(bytes);
-            generator.close_input();
+            generator.resume();
         }
         SUBCASE("one byte at a time") {
             for (std::size_t index = 0; index < bytes.size(); ++index) {
                 storage.emplace_back(std::span<const std::byte>{bytes}.subspan(index, 1));
                 generator.resume();
             }
-            CHECK_FALSE(consumer.done());
-            generator.close_input();
         }
 
-        REQUIRE(consumer.done());
-        CHECK_NOTHROW(consumer.rethrow());
+        // Every item arrived and the consumer waits on the next one
+        REQUIRE_FALSE(consumer.done());
         CHECK_FALSE(failure);
-        CHECK(generator.done());
         CHECK(actual == expected);
         CHECK(consumed == bytes.size());
+
+        // No more will come, so stop waiting
+        generator.cancel();
+        REQUIRE(consumer.done());
+        CHECK_NOTHROW(consumer.rethrow());
+        CHECK(failure == status_code::cancelled);
     }
 }

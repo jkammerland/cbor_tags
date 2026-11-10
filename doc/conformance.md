@@ -15,7 +15,7 @@ boundaries:
 
 - The core encoder and typed decoder map between C++ types and CBOR items. The
   requested destination type determines which wire forms are accepted.
-- Directly decoded raw item views, `check_item_segments_structure`, and lazy tag
+- Directly decoded raw item views, `validate_item_segments`, and lazy tag
   discovery perform a structural scan to identify complete item boundaries. They use
   the library's permissive CBOR syntax profile; they are not strict RFC 8949
   validators.

@@ -96,7 +96,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
 
             // Completion alone does not release the shared cursor.
             std::string other = "untouched";
-            CHECK_THROWS_AS(decoder(other), std::logic_error);
+            CHECK_THROWS_AS((void)decoder(other), std::logic_error);
             CHECK(other == "untouched");
         }
 
@@ -121,7 +121,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
             auto operation = encoder(first);
             REQUIRE(operation.done());
             REQUIRE(operation.result());
-            CHECK_THROWS_AS(encoder(second), std::logic_error);
+            CHECK_THROWS_AS((void)encoder(second), std::logic_error);
             return operation.committed_bytes();
         }();
 
@@ -159,7 +159,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
         CHECK(operation.resume() == resume_state::need_output);
         CHECK(chunks.size() == 2);
         chunks.emplace_back(second);
-        REQUIRE(operation.resume() == resume_state::finished);
+        REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
         auto        joined   = std::views::join(chunks);
         auto        produced = std::ranges::subrange(joined.begin(), std::ranges::next(joined.begin(), operation.committed_bytes()));
@@ -210,7 +210,7 @@ TEST_SUITE("roundtrip/resumable_factory") {
         CHECK(actual.values.values() == expected.values.values());
     }
 
-    TEST_CASE("named factory finish makes a truncated typed value terminal") {
+    TEST_CASE("named factory keeps a truncated typed value waiting until it is cancelled") {
         const std::string      expected = "incomplete text";
         std::vector<std::byte> bytes;
         REQUIRE(make_encoder(bytes)(expected));
@@ -220,10 +220,13 @@ TEST_SUITE("roundtrip/resumable_factory") {
         auto         operation = decoder(actual);
         chunks.emplace_back(std::span<const std::byte>{bytes}.first(bytes.size() - 1));
         REQUIRE(operation.resume() == resume_state::need_input);
-        CHECK_THROWS_AS(decoder(actual), std::logic_error);
-        CHECK(operation.close_input() == resume_state::finished);
+        CHECK_THROWS_AS((void)decoder(actual), std::logic_error);
+        CHECK(actual == expected.substr(0, expected.size() - 1));
+
+        operation.cancel();
+        REQUIRE(operation.done());
         REQUIRE_FALSE(operation.result());
-        CHECK(operation.result().error() == status_code::incomplete);
+        CHECK(operation.result().error() == status_code::cancelled);
         CHECK(actual == expected.substr(0, expected.size() - 1));
     }
 }

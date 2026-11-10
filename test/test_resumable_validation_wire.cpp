@@ -20,8 +20,7 @@ using validation_chunks = std::list<std::span<const std::byte>>;
 template <typename Storage>
 void check_validation_error(Storage &storage, status_code expected_status, std::size_t expected_offset, std::string_view expected_tail,
                             validation_options options = {}) {
-    auto source = make_input_source(storage);
-    source.close();
+    auto source    = make_input_source(storage);
     auto operation = make_resumable_validator(source, 1, options);
 
     REQUIRE(operation.done());
@@ -55,7 +54,7 @@ template <typename Bytes, typename Storage> void check_noncontiguous_validation(
 
     const std::array final{chunk{last, last}, chunk{last, bytes.cend()}};
     storage.insert(storage.end(), final.begin(), final.end());
-    operation.close_input();
+    operation.resume();
     REQUIRE(operation.done());
     REQUIRE(operation.result());
     CHECK(*operation.result() == 35U);
@@ -96,23 +95,25 @@ TEST_SUITE("cbor_wire/resumable") {
 
             storage.emplace_back(input.subspan(cut));
 
-            operation.close_input();
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE(operation.result());
             CHECK(*operation.result() == 59U);
             CHECK(source.committed_position().offset() == 59U);
             CHECK(to_hex(operation.remaining_input()) == "ff1c");
 
-            // EOF changes suspension to incomplete without consuming a partial
-            // token or discarding bytes already committed from a payload.
+            // Cancelling doesn't consume a partial token or discard bytes
+            // already committed from a payload.
             validation_chunks truncated_storage;
             auto              truncated_source = make_input_source(truncated_storage);
             auto              truncated        = make_resumable_validator(truncated_source);
             truncated_storage.emplace_back(input.first(cut));
-            truncated.close_input();
+            truncated.resume();
+            REQUIRE_FALSE(truncated.done());
+            truncated.cancel();
             REQUIRE(truncated.done());
             REQUIRE_FALSE(truncated.result());
-            CHECK(truncated.result().error() == status_code::incomplete);
+            CHECK(truncated.result().error() == status_code::cancelled);
             CHECK(truncated_source.committed_position().offset() == committed);
             CHECK(to_hex(truncated.remaining_input()) == to_hex(input.subspan(committed, cut - committed)));
         }
@@ -223,7 +224,7 @@ TEST_SUITE("cbor_wire/resumable") {
 
             storage.emplace_back(input.subspan(cut));
 
-            operation.close_input();
+            operation.resume();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
             CHECK(operation.result().error() == status_code::invalid_utf8_sequence);
@@ -231,11 +232,15 @@ TEST_SUITE("cbor_wire/resumable") {
             CHECK(to_hex(operation.remaining_input()) == "ff1c00010203040506070809");
         }
 
-        // A missing continuation byte is incomplete while the declared payload
-        // is short; the same bytes are invalid UTF-8 at a complete payload end.
+        // A missing continuation byte isn't an error while the declared payload
+        // is short, the validator waits. The same bytes are invalid UTF-8 at a complete payload end.
         const auto        incomplete = to_bytes("821b010203040506070863e282");
         validation_chunks incomplete_storage{std::span<const std::byte>{incomplete}};
-        check_validation_error(incomplete_storage, status_code::incomplete, 13, "");
+        auto              incomplete_source = make_input_source(incomplete_storage);
+        auto              waiting           = make_resumable_validator(incomplete_source);
+        REQUIRE_FALSE(waiting.done());
+        CHECK(incomplete_source.committed_position().offset() == 13U);
+        CHECK(to_hex(waiting.remaining_input()).empty());
 
         const auto        invalid = to_bytes("821b010203040506070862e282ff1c00010203040506070809");
         validation_chunks invalid_storage{std::span<const std::byte>{invalid}};
@@ -301,7 +306,7 @@ TEST_SUITE("cbor_wire/resumable") {
                 source.refresh();
                 {
                     cbor::tags::test::detail::allocation_failure_guard guard;
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.done());
@@ -362,7 +367,7 @@ TEST_SUITE("cbor_wire/resumable") {
             source.refresh();
             {
                 cbor::tags::test::detail::allocation_failure_guard guard;
-                operation.close_input();
+                operation.resume();
             }
 
             REQUIRE(operation.done());
@@ -412,7 +417,7 @@ TEST_SUITE("cbor_wire/resumable") {
         }
     }
 
-    TEST_CASE("validation scalar root batches stop at the requested count and exact eof") {
+    TEST_CASE("validation scalar root batches stop at the requested count") {
         const auto                       bytes = to_bytes("000102030405060708090a0bff1c00010203040506070809");
         const std::span<const std::byte> input{bytes};
 
@@ -430,31 +435,33 @@ TEST_SUITE("cbor_wire/resumable") {
         }
 
         // A nine-byte scalar can end exactly at the batch window boundary.
-        // Until-EOF validation must wait for closure without requesting an item.
+        // The batch commits it and waits for the next item.
         const auto        scalar = to_bytes("1b0102030405060708");
         validation_chunks storage;
         auto              source    = make_input_source(storage);
-        auto              operation = make_resumable_validator(source, until_closed);
+        auto              operation = make_resumable_validator(source, 2);
         storage.emplace_back(scalar);
         operation.resume();
         REQUIRE_FALSE(operation.done());
         CHECK(source.committed_position().offset() == scalar.size());
         CHECK(to_hex(operation.remaining_input()).empty());
 
-        operation.close_input();
+        const auto next = to_bytes("00");
+        storage.emplace_back(next);
+        operation.resume();
         REQUIRE(operation.done());
         REQUIRE(operation.result());
-        CHECK(*operation.result() == scalar.size());
-        CHECK(source.committed_position().offset() == scalar.size());
+        CHECK(*operation.result() == scalar.size() + 1);
+        CHECK(source.committed_position().offset() == scalar.size() + 1);
         CHECK(to_hex(operation.remaining_input()).empty());
     }
 
-    TEST_CASE("validation until eof publishes completed roots while waiting for the next token") {
+    TEST_CASE("validation publishes completed roots while waiting for the next token") {
         const auto                       bytes = to_bytes("1b01020304050607081818f8209f0001ff");
         const std::span<const std::byte> input{bytes};
         validation_chunks                storage;
         auto                             source    = make_input_source(storage);
-        auto                             operation = make_resumable_validator(source, until_closed);
+        auto                             operation = make_resumable_validator(source, 5);
 
         storage.emplace_back(input.first(10));
 
@@ -470,23 +477,29 @@ TEST_SUITE("cbor_wire/resumable") {
         CHECK(source.committed_position().offset() == 17U);
         CHECK(to_hex(operation.remaining_input()).empty());
 
-        SUBCASE("clean eof completes the admitted sequence") {
-            operation.close_input();
-            REQUIRE(operation.done());
-            REQUIRE(operation.result());
-            CHECK(*operation.result() == 17U);
-            CHECK(source.committed_position().offset() == 17U);
-            CHECK(to_hex(operation.remaining_input()).empty());
-        }
-        SUBCASE("truncated next token remains unread at eof") {
+        SUBCASE("truncated next token stays unread") {
             const auto truncated = to_bytes("1a0001");
             storage.emplace_back(truncated);
-            operation.close_input();
-            REQUIRE(operation.done());
-            REQUIRE_FALSE(operation.result());
-            CHECK(operation.result().error() == status_code::incomplete);
+            operation.resume();
+            REQUIRE_FALSE(operation.done());
             CHECK(source.committed_position().offset() == 17U);
             CHECK(to_hex(operation.remaining_input()) == "1a0001");
+
+            operation.cancel();
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::cancelled);
+            CHECK(source.committed_position().offset() == 17U);
+            CHECK(to_hex(operation.remaining_input()) == "1a0001");
+        }
+        SUBCASE("the fifth root completes the request") {
+            const auto last = to_bytes("f6");
+            storage.emplace_back(last);
+            operation.resume();
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == 18U);
+            CHECK(source.committed_position().offset() == 18U);
         }
     }
 

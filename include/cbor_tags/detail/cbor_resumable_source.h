@@ -654,7 +654,6 @@ template <ResumableChunkStorage Storage> class chunk_source {
                 return next == std::ranges::end(*storage_);
         };
         while (!at_end()) {
-            assert(!closed_ && "cannot grow a closed CBOR source");
             if (chunk_count_ == std::numeric_limits<std::size_t>::max())
                 throw std::length_error("CBOR source descriptor count overflow");
             if constexpr (sized) {
@@ -667,7 +666,6 @@ template <ResumableChunkStorage Storage> class chunk_source {
         }
     }
 
-    bool closed() const { return closed_; }
     bool owns(const iterator &position) const { return position.source_ == this; }
 
     // Cleanup only restores known progress positions; an unsized end sentinel
@@ -690,13 +688,6 @@ template <ResumableChunkStorage Storage> class chunk_source {
     }
 
     void release() noexcept { active_ = false; }
-
-    void close() {
-        if (!closed_) {
-            refresh();
-            closed_ = true;
-        }
-    }
 
     auto remaining(const iterator &from) const {
         assert(from.source_ == this);
@@ -838,7 +829,6 @@ template <ResumableChunkStorage Storage> class chunk_source {
     }
 
     void add_available(std::size_t amount) {
-        assert((!closed_ || amount == 0) && "cannot grow a closed CBOR source");
         if (amount > std::numeric_limits<std::size_t>::max() - extent_)
             throw std::length_error("CBOR source byte extent overflow");
         extent_ += amount;
@@ -849,7 +839,6 @@ template <ResumableChunkStorage Storage> class chunk_source {
     std::size_t                   extent_{};
     std::optional<outer_position> last_chunk_;
     std::size_t                   tail_extent_{};
-    bool                          closed_{};
     bool                          active_{};
 };
 
@@ -902,8 +891,6 @@ template <detail::ResumableStorage Storage> class input_source {
     void refresh() { chunks_.refresh(); }
     void acquire() { chunks_.acquire(); }
     void release() noexcept { chunks_.release(); }
-    void close() { chunks_.close(); }
-    bool closed() const { return chunks_.closed(); }
 
     void commit(const iterator &position) {
         assert(chunks_.owns(position) && position.offset() >= committed_.offset());
@@ -947,8 +934,6 @@ template <detail::ResumableOutputStorage Storage> class output_buffer {
     output_buffer &operator=(output_buffer &&)      = delete;
 
     void refresh() { chunks_.refresh(); }
-    bool closed() const { return chunks_.closed(); }
-    void close() { chunks_.close(); }
     void acquire() { chunks_.acquire(); }
     void release() noexcept { chunks_.release(); }
 
@@ -1010,7 +995,7 @@ template <detail::ResumableOutputStorage Storage> class output_buffer {
             }
         }
         if constexpr (growable) {
-            if (!bytes.empty() && !closed()) {
+            if (!bytes.empty()) {
                 if (bytes.size() > std::numeric_limits<std::size_t>::max() - working_.offset())
                     throw std::length_error("CBOR output byte offset overflow");
                 using byte_type = std::ranges::range_value_t<Storage>;

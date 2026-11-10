@@ -157,8 +157,8 @@ template <typename R> class typed_array_writer {
 // Destination ranges are checked against the count first, like one-shot
 // decoding. Owning arrays aren't.
 template <std::uint64_t Tag, bool NativeOrder, bool CheckDestination, typename Context, typename R, typename Convert>
-resumable_task<status_code> resumable_decode_typed_array(Context &context, R &range, std::uint64_t min_count, std::uint64_t max_count,
-                                                         Convert convert) {
+resumable<status_code> resumable_decode_typed_array(Context &context, R &range, std::uint64_t min_count, std::uint64_t max_count,
+                                                    Convert convert) {
     using value_type            = std::ranges::range_value_t<R>;
     constexpr auto element_size = sizeof(value_type);
     static_assert(element_size <= 16U);
@@ -176,16 +176,14 @@ resumable_task<status_code> resumable_decode_typed_array(Context &context, R &ra
     const auto            element_count = static_cast<std::size_t>(header.byte_count / element_size);
     typed_array_writer<R> values{range, element_count};
 
-    auto                               &reader = context.one_shot().reader_;
+    auto                               &source = resumable_context_access::source(context);
+    auto                               &reader = resumable_context_access::one_shot(context).reader_;
     std::array<std::byte, element_size> boundary{};
     std::size_t                         boundary_size{};
     while (values.size() != element_count) {
-        const auto available = resumable_source_access::borrow_window(context.source(), reader.position_);
-        if (available ? available->empty() : context.empty()) {
-            if (context.closed()) {
-                co_return status_code::incomplete;
-            }
-            co_await context.wait();
+        const auto available = resumable_source_access::borrow_window(source, reader.position_);
+        if (available ? available->empty() : resumable_context_access::empty(context)) {
+            co_await resumable_context_access::wait(context);
             continue;
         }
 
@@ -195,26 +193,26 @@ resumable_task<status_code> resumable_decode_typed_array(Context &context, R &ra
                 const auto count = std::min(element_count - values.size(), available->size() / element_size);
                 const auto bytes = count * element_size;
                 values.template append<NativeOrder>(available->first(bytes), count, convert);
-                resumable_source_access::consume_window(context.source(), reader.position_, bytes);
+                resumable_source_access::consume_window(source, reader.position_, bytes);
                 reader.current_offset_ += bytes;
-                context.commit();
+                resumable_context_access::commit(context);
                 continue;
             }
 
             const auto count = std::min(element_size - boundary_size, available->size());
             std::memcpy(boundary.data() + boundary_size, available->data(), count);
-            resumable_source_access::consume_window(context.source(), reader.position_, count);
+            resumable_source_access::consume_window(source, reader.position_, count);
             reader.current_offset_ += count;
             boundary_size += count;
         } else {
-            boundary[boundary_size++] = reader.read(context.source());
+            boundary[boundary_size++] = reader.read(source);
         }
 
         // A split element stays private until all of its representation is present.
         if (boundary_size == element_size) {
             values.push(convert(std::span<const std::byte>{boundary}));
             boundary_size = 0;
-            context.commit();
+            resumable_context_access::commit(context);
         }
     }
     co_return status_code::success;
@@ -222,35 +220,32 @@ resumable_task<status_code> resumable_decode_typed_array(Context &context, R &ra
 
 // Output bytes may span several windows, but an element is published atomically.
 template <typename Context>
-resumable_task<status_code> resumable_encode_typed_array_boundary(Context &context, std::span<const std::byte> bytes) {
+resumable<status_code> resumable_encode_typed_array_boundary(Context &context, std::span<const std::byte> bytes) {
+    auto &source = resumable_context_access::source(context);
     while (!bytes.empty()) {
-        const auto available = resumable_source_access::borrow_window(context.source());
+        const auto available = resumable_source_access::borrow_window(source);
         if (available && !available->empty()) {
             const auto count = std::min(bytes.size(), available->size());
             std::memcpy(available->data(), bytes.data(), count);
-            resumable_source_access::consume_window(context.source(), count);
+            resumable_source_access::consume_window(source, count);
             bytes = bytes.subspan(count);
             continue;
         }
         if (!available) {
-            const auto count = context.source().write(bytes);
+            const auto count = source.write(bytes);
             if (count != 0) {
                 bytes = bytes.subspan(count);
                 continue;
             }
         }
-        if (context.closed()) {
-            context.rollback();
-            co_return status_code::incomplete;
-        }
-        co_await context.wait();
+        co_await resumable_context_access::wait(context);
     }
-    context.commit();
+    resumable_context_access::commit(context);
     co_return status_code::success;
 }
 
 template <std::uint64_t Tag, typename Context, typename Range, typename Fill>
-resumable_task<status_code> resumable_encode_typed_array(Context &context, Range &values, Fill fill) {
+resumable<status_code> resumable_encode_typed_array(Context &context, Range &values, Fill fill) {
     using value_type            = std::ranges::range_value_t<Range>;
     constexpr auto element_size = sizeof(value_type);
     static_assert(element_size <= 16U);
@@ -266,15 +261,16 @@ resumable_task<status_code> resumable_encode_typed_array(Context &context, Range
     }
 
     if constexpr (std::ranges::contiguous_range<Range> && std::ranges::sized_range<Range>) {
-        auto remaining = std::span<const value_type>{std::ranges::data(values), std::ranges::size(values)};
+        auto &source    = resumable_context_access::source(context);
+        auto  remaining = std::span<const value_type>{std::ranges::data(values), std::ranges::size(values)};
         while (!remaining.empty()) {
-            const auto available = resumable_source_access::borrow_window(context.source());
+            const auto available = resumable_source_access::borrow_window(source);
             if (available && available->size() >= element_size) {
                 const auto elements = std::min(remaining.size(), available->size() / element_size);
                 const auto bytes    = elements * element_size;
                 fill(available->first(bytes), remaining.first(elements));
-                resumable_source_access::consume_window(context.source(), bytes);
-                context.commit();
+                resumable_source_access::consume_window(source, bytes);
+                resumable_context_access::commit(context);
                 remaining = remaining.subspan(elements);
                 continue;
             }
