@@ -157,8 +157,8 @@ template <typename R> class typed_array_writer {
 // Destination ranges are checked against the count first, like one-shot
 // decoding. Owning arrays aren't.
 template <std::uint64_t Tag, bool NativeOrder, bool CheckDestination, typename Context, typename R, typename Convert>
-resumable_task<status_code> resumable_decode_typed_array(Context &context, R &range, std::uint64_t min_count, std::uint64_t max_count,
-                                                         Convert convert) {
+resumable<status_code> resumable_decode_typed_array(Context &context, R &range, std::uint64_t min_count, std::uint64_t max_count,
+                                                    Convert convert) {
     using value_type            = std::ranges::range_value_t<R>;
     constexpr auto element_size = sizeof(value_type);
     static_assert(element_size <= 16U);
@@ -220,7 +220,7 @@ resumable_task<status_code> resumable_decode_typed_array(Context &context, R &ra
 
 // Output bytes may span several windows, but an element is published atomically.
 template <typename Context>
-resumable_task<status_code> resumable_encode_typed_array_boundary(Context &context, std::span<const std::byte> bytes) {
+resumable<status_code> resumable_encode_typed_array_boundary(Context &context, std::span<const std::byte> bytes) {
     auto &source = resumable_context_access::source(context);
     while (!bytes.empty()) {
         const auto available = resumable_source_access::borrow_window(source);
@@ -245,7 +245,7 @@ resumable_task<status_code> resumable_encode_typed_array_boundary(Context &conte
 }
 
 template <std::uint64_t Tag, typename Context, typename Range, typename Fill>
-resumable_task<status_code> resumable_encode_typed_array(Context &context, Range &values, Fill fill) {
+resumable<status_code> resumable_encode_typed_array(Context &context, Range &values, Fill fill) {
     using value_type            = std::ranges::range_value_t<Range>;
     constexpr auto element_size = sizeof(value_type);
     static_assert(element_size <= 16U);

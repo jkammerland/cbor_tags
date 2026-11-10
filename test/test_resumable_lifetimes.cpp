@@ -160,7 +160,7 @@ class throwing_position_input {
 
 static_assert(ResumableInputSource<throwing_position_input>);
 
-template <typename Context> resumable_task<status_code> resumable_decode(Context &context, hook_lifetime &value) {
+template <typename Context> resumable<status_code> resumable_decode(Context &context, hook_lifetime &value) {
     struct frame_guard {
         int *destroyed;
         ~frame_guard() { ++*destroyed; }
@@ -398,7 +398,7 @@ TEST_SUITE("roundtrip/resumable_lifetimes") {
         status_code status = status_code::error;
         {
             cbor::tags::test::detail::allocation_failure_guard guard;
-            resumable_task<status_code>                        result{status_code::success};
+            resumable<status_code>                             result{status_code::success};
             auto                                               awaiter = std::move(result).operator co_await();
             ready                                                      = awaiter.await_ready();
             status                                                     = awaiter.await_resume();

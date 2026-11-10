@@ -97,7 +97,7 @@ template <typename Source> class resumable_validation_context : public resumable
     using base::base;
     void suspend() { flush_window(); }
 
-    resumable_task<status_code> operator()(validation_request request) {
+    resumable<status_code> operator()(validation_request request) {
         const window_guard       guard{*this};
         resumable_scalar_batch<> batch{.remaining = request.count};
         while (!batch.finished()) {
@@ -168,7 +168,7 @@ template <typename Source> class resumable_validation_context : public resumable
         return result ? status_code::success : result.error();
     }
 
-    resumable_task<status_code> read_token(resumable_walk_token &token) {
+    resumable<status_code> read_token(resumable_walk_token &token) {
         if (window_.size() < 9)
             refresh_window();
 
@@ -190,16 +190,16 @@ template <typename Source> class resumable_validation_context : public resumable
         return this->one_shot(token);
     }
 
-    resumable_task<status_code> read_item(std::size_t depth, validation_options options) {
+    resumable<status_code> read_item(std::size_t depth, validation_options options) {
         resumable_walk_token token;
         const auto           status = co_await read_token(token);
         if (status != status_code::success)
             co_return status;
         co_return co_await start_item(token.value, depth, options);
     }
-    resumable_task<status_code> start_item(const catch_all_variant &token, std::size_t depth, validation_options options) {
+    resumable<status_code> start_item(const catch_all_variant &token, std::size_t depth, validation_options options) {
         return std::visit(
-            [&](const auto &item) -> resumable_task<status_code> {
+            [&](const auto &item) -> resumable<status_code> {
                 using T = std::remove_cvref_t<decltype(item)>;
                 if constexpr (std::same_as<T, indefinite_break>)
                     return status_code::malformed_structure;
@@ -219,7 +219,7 @@ template <typename Source> class resumable_validation_context : public resumable
             },
             token);
     }
-    template <bool Text> resumable_task<status_code> string_payload(std::uint64_t length) {
+    template <bool Text> resumable<status_code> string_payload(std::uint64_t length) {
         if (length == 0)
             return status_code::success;
         if (window_.empty())
@@ -248,7 +248,7 @@ template <typename Source> class resumable_validation_context : public resumable
         return valid;
     }
 
-    template <bool Text> resumable_task<status_code> await_string_payload(std::uint64_t length) {
+    template <bool Text> resumable<status_code> await_string_payload(std::uint64_t length) {
         utf8_state utf8;
         bool       valid  = true;
         auto      &reader = this->one_shot().reader_;
@@ -283,7 +283,7 @@ template <typename Source> class resumable_validation_context : public resumable
         }
         co_return Text && (!valid || !utf8.complete()) ? status_code::invalid_utf8_sequence : status_code::success;
     }
-    template <typename Header> resumable_task<status_code> sequence(Header header, std::size_t depth, validation_options options) {
+    template <typename Header> resumable<status_code> sequence(Header header, std::size_t depth, validation_options options) {
         resumable_scalar_batch<IsMapHeader<Header>> batch{.remaining = header.size, .indefinite = header.indefinite};
         while (!batch.finished()) {
             auto status = status_code::success;

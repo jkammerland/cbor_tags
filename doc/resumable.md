@@ -37,7 +37,7 @@ struct record {
     }
 
     template <class Decoder>
-    ct::resumable_task<ct::status_code> resumable_decode(Decoder &decoder) {
+    ct::resumable<ct::status_code> resumable_decode(Decoder &decoder) {
         co_return co_await decoder(ct::wrap_as_array{first, second});
     }
 };
@@ -512,12 +512,12 @@ struct message {
 };
 
 template <class Decoder>
-ct::resumable_task<ct::status_code> resumable_decode(Decoder &decoder, message &value) {
+ct::resumable<ct::status_code> resumable_decode(Decoder &decoder, message &value) {
     co_return co_await decoder(ct::wrap_as_array{value.name, value.values});
 }
 
 template <class Encoder>
-ct::resumable_task<ct::status_code> resumable_encode(Encoder &encoder, const message &value) {
+ct::resumable<ct::status_code> resumable_encode(Encoder &encoder, const message &value) {
     co_return co_await encoder(ct::wrap_as_array{value.name, value.values});
 }
 
@@ -542,7 +542,7 @@ int main() {
 }
 ```
 
-ADL, member, and codec-mixin hooks return exactly `resumable_task<status_code>`;
+ADL, member, and codec-mixin hooks return exactly `resumable<status_code>`;
 `resumable_transcode` is the symmetric alternative. Explicit hooks take
 precedence over one-shot codecs; see the
 [custom hook example](../examples/45_resumable_custom_hook.cpp).
@@ -582,7 +582,7 @@ template <typename Self> struct finite_doubles : ct::codec::decoder_base<Self> {
     using base = ct::codec::decoder_base<Self>;
     using base::decode;
 
-    ct::resumable_task<ct::status_code> resumable_decode(double &value) {
+    ct::resumable<ct::status_code> resumable_decode(double &value) {
         const auto status = co_await static_cast<Self &>(*this).one_shot(value);
         if (status == ct::status_code::success && !std::isfinite(value))
             co_return ct::status_code::error;

@@ -88,7 +88,7 @@ struct explicit_only_tagged {
         return {};
     }
 
-    template <typename Context> resumable_task<status_code> resumable_decode(Context &context) { co_return co_await context(value); }
+    template <typename Context> resumable<status_code> resumable_decode(Context &context) { co_return co_await context(value); }
 };
 
 template <typename Self> struct rejecting_optional_bool_codec : codec::base<Self> {
@@ -106,7 +106,7 @@ template <typename Self> struct resumable_bool_codec : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    resumable_task<status_code> resumable_decode(bool &value) {
+    resumable<status_code> resumable_decode(bool &value) {
         ++bool_hook_calls::count;
         const auto status = co_await static_cast<Self &>(*this).one_shot(value);
         if (status == status_code::success)
@@ -119,7 +119,7 @@ template <typename Self> struct rejecting_resumable_bool_codec : codec::base<Sel
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    resumable_task<status_code> resumable_decode(bool &) {
+    resumable<status_code> resumable_decode(bool &) {
         ++bool_hook_calls::count;
         return status_code::no_match_for_tag_simple_on_buffer;
     }
@@ -129,7 +129,7 @@ template <typename Self> struct committed_rejecting_bool_codec : codec::base<Sel
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    resumable_task<status_code> resumable_decode(bool &value) {
+    resumable<status_code> resumable_decode(bool &value) {
         ++bool_hook_calls::count;
         const auto status = co_await static_cast<Self &>(*this).one_shot(value);
         co_return status == status_code::success ? status_code::no_match_for_tag_simple_on_buffer : status;
@@ -144,7 +144,7 @@ template <typename Self> struct finite_double_codec : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    resumable_task<status_code> resumable_decode(double &value) {
+    resumable<status_code> resumable_decode(double &value) {
         ++double_hook_calls::count;
         const auto status = co_await static_cast<Self &>(*this).one_shot(value);
         if (status == status_code::success && !std::isfinite(value))
@@ -166,12 +166,12 @@ template <typename Self> struct one_shot_container_codec : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    resumable_task<status_code> resumable_encode(const std::vector<int> &value) {
+    resumable<status_code> resumable_encode(const std::vector<int> &value) {
         ++container_hook_calls::count;
         co_return co_await static_cast<Self &>(*this).one_shot(value);
     }
 
-    resumable_task<status_code> resumable_encode(const one_shot_record &value) {
+    resumable<status_code> resumable_encode(const one_shot_record &value) {
         ++container_hook_calls::count;
         co_return co_await static_cast<Self &>(*this).one_shot(value);
     }

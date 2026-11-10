@@ -18,7 +18,7 @@ template <typename Self> struct one_shot_hook : ct::codec::decoder_base<Self> {
     using base = ct::codec::decoder_base<Self>;
     using base::decode;
 
-    ct::resumable_task<ct::status_code> resumable_decode(hooked &value) { return static_cast<Self &>(*this).one_shot(value); }
+    ct::resumable<ct::status_code> resumable_decode(hooked &value) { return static_cast<Self &>(*this).one_shot(value); }
 };
 
 int main() {

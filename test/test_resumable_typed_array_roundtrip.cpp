@@ -255,7 +255,7 @@ template <typename Self> struct typed_array_override : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    resumable_task<status_code> resumable_decode(rfc8746::typed_array<std::uint32_t> &array) {
+    resumable<status_code> resumable_decode(rfc8746::typed_array<std::uint32_t> &array) {
         std::uint32_t value{};
         const auto    status = co_await static_cast<Self &>(*this)(value);
         if (status == status_code::success) {
@@ -264,7 +264,7 @@ template <typename Self> struct typed_array_override : codec::base<Self> {
         co_return status;
     }
 
-    resumable_task<status_code> resumable_encode(const rfc8746::typed_array<std::uint32_t> &array) {
+    resumable<status_code> resumable_encode(const rfc8746::typed_array<std::uint32_t> &array) {
         co_return co_await static_cast<Self &>(*this)(array.values().front());
     }
 };
