@@ -93,6 +93,8 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     one_shot_type   one_shot_;
     std::size_t     committed_offset_;
 
+    friend struct resumable_context_access;
+
   public:
     using source_type                           = Source;
     using options                               = Options;
@@ -110,6 +112,20 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         one_shot_.reader_.current_offset_ = one_shot_.reader_.position_.offset();
         committed_offset_                 = one_shot_.reader_.current_offset_;
     }
+
+    // Hooks get these two, decode values resumably or one value one-shot
+    template <typename... T> resumable_task<status_code> operator()(T &&...value) {
+        return arguments(std::tuple<T...>{std::forward<T>(value)...});
+    }
+
+    // A complete normal call is the sole retry boundary, including its nested calls.
+    template <typename T> resumable_task<status_code> one_shot(T &value) {
+        require_retry<T>();
+        return attempt_one_shot(value);
+    }
+
+  protected:
+    // The validator derives from this, other library code uses resumable_context_access
     Source        &source() noexcept { return source_; }
     std::size_t    offset() const noexcept { return committed_offset_; }
     auto           remaining_input() const { return source_.remaining(source_.committed_position()); }
@@ -126,12 +142,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         one_shot_.reader_.current_offset_ = committed_offset_;
     }
 
-    // A complete normal call is the sole retry boundary, including its nested calls.
-    template <typename T> resumable_task<status_code> one_shot(T &value) {
-        require_retry<T>();
-        return attempt_one_shot(value);
-    }
-
+  private:
     template <typename T, payload_decode_context Context> resumable_task<status_code> one_shot(resume_context_value<T, Context> &value) {
         require_retry<T, Context>();
         return attempt_one_shot(value);
@@ -146,7 +157,6 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     // destination or codec state before completing that check.
     resumable_task<status_code> one_shot(resume_group_header &value) { return attempt_one_shot(value); }
 
-  private:
     template <typename T, payload_decode_context Context = payload_decode_context::direct> static consteval void require_retry() {
         static_assert(resumable_decode_retry_allowed<one_shot_type, T, Context, Codecs<one_shot_type>...>(),
                       "one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in");
@@ -164,11 +174,6 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         return retry(value);
     }
 
-  public:
-    template <typename... T> resumable_task<status_code> operator()(T &&...value) {
-        return arguments(std::tuple<T...>{std::forward<T>(value)...});
-    }
-
     // Bulk string transfer uses the same destination appender as one-shot decoding.
     template <typename T> resumable_task<status_code> payload(T &value, std::uint64_t length, appender<T> &append) {
         drain_payload(value, length, append);
@@ -177,7 +182,6 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         return await_payload(value, length, append);
     }
 
-  private:
     template <typename T> void drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
         while (length != 0 && !empty()) {
             if (const auto span = resumable_source_access::borrow_window(source_, one_shot_.reader_.position_); span && !span->empty()) {

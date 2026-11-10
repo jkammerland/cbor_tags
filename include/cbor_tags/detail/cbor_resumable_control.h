@@ -94,6 +94,22 @@ struct resumable_task_access {
     template <typename T> static auto handle(const resumable_task<T> &task) noexcept { return task.handle_; }
 };
 
+// Hooks only call the context and one_shot(value). Library code gets the rest here
+struct resumable_context_access {
+    template <typename Context> static auto       &source(Context &context) noexcept { return context.source(); }
+    template <typename Context> static auto       &one_shot(Context &context) noexcept { return context.one_shot(); }
+    template <typename Context> static std::size_t offset(const Context &context) { return context.offset(); }
+    template <typename Context> static auto        remaining_input(const Context &context) { return context.remaining_input(); }
+    template <typename Context> static auto        remaining_output(const Context &context) { return context.remaining_output(); }
+    template <typename Context> static auto        wait(Context &context) noexcept { return context.wait(); }
+    template <typename Context> static bool        empty(const Context &context) { return context.empty(); }
+    template <typename Context> static void        commit(Context &context) { context.commit(); }
+    template <typename Context> static void        rollback(Context &context) { context.rollback(); }
+    template <typename Context, typename... Args> static auto payload(Context &context, Args &&...args) {
+        return context.payload(std::forward<Args>(args)...);
+    }
+};
+
 template <typename Context>
 concept HasResumableSuspendHook = requires(Context &context) {
     { context.suspend() } -> std::same_as<void>;
@@ -140,7 +156,8 @@ template <typename Context> class [[nodiscard]] resume_operation {
         bool                               finished{};
 
         template <typename... Args>
-        operation_state(typename Context::source_type &source, Args &&...args) : context(source, control), start(context.offset()) {
+        operation_state(typename Context::source_type &source, Args &&...args)
+            : context(source, control), start(resumable_context_access::offset(context)) {
             work         = context(std::forward<Args>(args)...);
             control.leaf = resumable_task_access::handle(work);
         }
@@ -162,8 +179,9 @@ template <typename Context> class [[nodiscard]] resume_operation {
             try {
                 status = s.work.result();
             } catch (...) { status = resumable_exception_status(); }
-            s.result   = status == status_code::success ? expected<std::size_t, status_code>{s.context.offset() - s.start}
-                                                        : expected<std::size_t, status_code>{unexpected<status_code>{status}};
+            s.result   = status == status_code::success
+                             ? expected<std::size_t, status_code>{resumable_context_access::offset(s.context) - s.start}
+                             : expected<std::size_t, status_code>{unexpected<status_code>{status}};
             s.finished = true;
         } else if (stalled(s)) {
             end(s, status_code::capacity_exceeded);
@@ -209,7 +227,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
         if (s.control.driving)
             throw std::logic_error("cannot resume a running codec");
 
-        s.context.source().refresh();
+        resumable_context_access::source(s.context).refresh();
         return drive(s);
     }
     void cancel() {
@@ -234,17 +252,17 @@ template <typename Context> class [[nodiscard]] resume_operation {
             throw std::logic_error("resumable operation has not finished");
         return s.result;
     }
-    std::size_t committed_bytes() const { return state_ ? state_->context.offset() - state_->start : 0; }
+    std::size_t committed_bytes() const { return state_ ? resumable_context_access::offset(state_->context) - state_->start : 0; }
     auto        remaining_input() const
         requires(Context::waiting_state == resume_state::need_input)
     {
-        return checked_state().context.remaining_input();
+        return resumable_context_access::remaining_input(checked_state().context);
     }
 
     auto remaining_output() const
         requires(Context::waiting_state == resume_state::need_output)
     {
-        return checked_state().context.remaining_output();
+        return resumable_context_access::remaining_output(checked_state().context);
     }
 
     struct awaiter {
@@ -284,7 +302,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
         s.control.leaf = {};
         s.work         = resumable_task<status_code>{status};
         if constexpr (Context::waiting_state == resume_state::need_output)
-            s.context.rollback();
+            resumable_context_access::rollback(s.context);
 
         s.result   = unexpected<status_code>{status};
         s.finished = true;
@@ -302,7 +320,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
         using source_type = typename Context::source_type;
         if constexpr (NamesCapacityReport<source_type>) {
             static_assert(HasCapacityReport<source_type>, "at_capacity() must be a const noexcept member returning bool");
-            return std::as_const(s.context.source()).at_capacity();
+            return std::as_const(resumable_context_access::source(s.context)).at_capacity();
         } else
             return false;
     }
@@ -316,12 +334,12 @@ template <typename Context> class [[nodiscard]] resume_operation {
                     waiter.resume();
             }
 
-            auto &source = state_->context.source();
+            auto &source = resumable_context_access::source(state_->context);
             // Abandoned partial output must not become part of the next item.
             // Destroy suspended frames before restoring their retry boundary.
             state_->work = resumable_task<status_code>{status_code::cancelled};
             if constexpr (Context::waiting_state == resume_state::need_output)
-                state_->context.rollback();
+                resumable_context_access::rollback(state_->context);
             state_.reset();
             source.release();
         }

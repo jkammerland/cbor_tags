@@ -80,6 +80,8 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     resume_control &control_;
     one_shot_type   one_shot_;
 
+    friend struct resumable_context_access;
+
   public:
     using source_type                           = Source;
     using options                               = Options;
@@ -87,13 +89,10 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     resumable_encode_context(Source &source, resume_control &control) : source_(source), control_(control), one_shot_(source) {}
 
-    Source        &source() noexcept { return source_; }
-    std::size_t    offset() const { return source_.committed_position().offset(); }
-    auto           remaining_output() const { return source_.remaining_output(); }
-    one_shot_type &one_shot() noexcept { return one_shot_; }
-    auto           wait() noexcept { return control_.wait(); }
-    void           commit() { source_.commit(); }
-    void           rollback() { source_.restore(source_.committed_position()); }
+    // Hooks get these two, encode values resumably or one value one-shot
+    template <typename... T> resumable_task<status_code> operator()(T &&...value) {
+        return arguments(std::tuple<T...>{std::forward<T>(value)...});
+    }
 
     // A complete normal call is the retry boundary, including nested customizations.
     // Its writes stay tentative until the whole call succeeds.
@@ -106,9 +105,15 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         });
     }
 
-    template <typename... T> resumable_task<status_code> operator()(T &&...value) {
-        return arguments(std::tuple<T...>{std::forward<T>(value)...});
-    }
+  private:
+    // Other library code uses these through resumable_context_access
+    Source        &source() noexcept { return source_; }
+    std::size_t    offset() const { return source_.committed_position().offset(); }
+    auto           remaining_output() const { return source_.remaining_output(); }
+    one_shot_type &one_shot() noexcept { return one_shot_; }
+    auto           wait() noexcept { return control_.wait(); }
+    void           commit() { source_.commit(); }
+    void           rollback() { source_.restore(source_.committed_position()); }
 
     // Payload chunks commit independently, so a long string never has to fit in
     // one output window. Contiguous ranges keep the source's bulk-write path.
@@ -130,7 +135,6 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         }
     }
 
-  private:
     status_code drain_payload_bytes(std::span<const std::byte> &bytes) {
         if (bytes.empty())
             return status_code::success;

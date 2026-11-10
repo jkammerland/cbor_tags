@@ -1,9 +1,11 @@
 #include <cbor_tags/cbor_resumable.h>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <list>
 #include <span>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -69,6 +71,78 @@ struct public_handle {
 };
 static_assert(exposes_handle<public_handle>);
 static_assert(!exposes_handle<resumable_task<status_code>>);
+
+// Hooks get the context and one_shot(value), the rest stays with the library
+template <typename Operation> struct context_of;
+template <typename Context> struct context_of<detail::resume_operation<Context>> {
+    using type = Context;
+};
+using decode_context = context_of<decode_operation>::type;
+using encode_context = context_of<encode_operation>::type;
+
+template <typename Context, typename T>
+concept hook_callable = requires(Context &context, T &value) {
+    { context(value) } -> std::same_as<resumable_task<status_code>>;
+    { context.one_shot(value) } -> std::same_as<resumable_task<status_code>>;
+};
+static_assert(hook_callable<decode_context, int>);
+static_assert(hook_callable<encode_context, const int>);
+
+template <typename Context>
+concept exposes_source = requires(Context &context) { context.source(); };
+template <typename Context>
+concept exposes_offset = requires(Context &context) { context.offset(); };
+template <typename Context>
+concept exposes_one_shot_codec = requires(Context &context) { context.one_shot(); };
+template <typename Context>
+concept exposes_wait = requires(Context &context) { context.wait(); };
+template <typename Context>
+concept exposes_commit = requires(Context &context) { context.commit(); };
+template <typename Context>
+concept exposes_rollback = requires(Context &context) { context.rollback(); };
+template <typename Context>
+concept exposes_empty = requires(Context &context) { context.empty(); };
+template <typename Context>
+concept exposes_remaining_input = requires(Context &context) { context.remaining_input(); };
+template <typename Context>
+concept exposes_remaining_output = requires(Context &context) { context.remaining_output(); };
+template <typename Context>
+concept exposes_decode_payload = requires(Context &context, std::string &text, detail::appender<std::string> &append) {
+    context.payload(text, std::uint64_t{}, append);
+};
+template <typename Context>
+concept exposes_encode_payload = requires(Context &context, std::vector<std::byte> &bytes) { context.payload(bytes); };
+
+// Each concept has to see its member here, or the checks below prove nothing
+struct exposed_context {
+    void source();
+    void offset();
+    void one_shot();
+    void wait();
+    void commit();
+    void rollback();
+    void empty();
+    void remaining_input();
+    void remaining_output();
+    void payload(std::string &, std::uint64_t, detail::appender<std::string> &);
+    void payload(std::vector<std::byte> &);
+};
+static_assert(exposes_source<exposed_context> && exposes_offset<exposed_context> && exposes_one_shot_codec<exposed_context> &&
+              exposes_wait<exposed_context> && exposes_commit<exposed_context> && exposes_rollback<exposed_context> &&
+              exposes_empty<exposed_context> && exposes_remaining_input<exposed_context> && exposes_remaining_output<exposed_context> &&
+              exposes_decode_payload<exposed_context> && exposes_encode_payload<exposed_context>);
+
+static_assert(!exposes_source<decode_context> && !exposes_source<encode_context>);
+static_assert(!exposes_offset<decode_context> && !exposes_offset<encode_context>);
+static_assert(!exposes_one_shot_codec<decode_context> && !exposes_one_shot_codec<encode_context>);
+static_assert(!exposes_wait<decode_context> && !exposes_wait<encode_context>);
+static_assert(!exposes_commit<decode_context> && !exposes_commit<encode_context>);
+static_assert(!exposes_rollback<decode_context> && !exposes_rollback<encode_context>);
+static_assert(!exposes_empty<decode_context>);
+static_assert(!exposes_remaining_input<decode_context>);
+static_assert(!exposes_decode_payload<decode_context>);
+static_assert(!exposes_remaining_output<encode_context>);
+static_assert(!exposes_encode_payload<encode_context>);
 
 template <typename Storage>
 concept accepts_encoder_storage = requires(Storage &&storage) { make_resumable_encoder(std::forward<Storage>(storage)); };

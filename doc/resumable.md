@@ -555,6 +555,39 @@ Install mixins with `make_resumable_encoder<Codec...>` or
 `make_resumable_*_with_options<Options, Codec...>`. Member/ADL hooks follow the
 automatic metadata-tag convention; mixin hooks own their complete wire shape.
 
+A hook can make two calls on the `encoder` or `decoder` it receives, which in a
+mixin is `static_cast<Self &>(*this)`:
+
+- `co_await decoder(values...)` decodes values resumably, as in the example
+  above.
+- `co_await decoder.one_shot(value)` decodes `value` with the one-shot decoder
+  and skips resumable hooks. It commits nothing until all of `value` has
+  arrived, and starts over whenever more input arrives. Use it for values read
+  in one piece, such as numbers, views, or a type's one-shot customization.
+  Decode containers and structs with `decoder(value)`.
+
+Encoders work the same way with `encoder(values...)` and
+`encoder.one_shot(value)`.
+
+A hook that calls `decoder(value)` on the type it handles calls itself again.
+`one_shot(value)` uses the one-shot codec for that type instead:
+
+```cpp
+// Rejects NaN and infinity in every double. Install with
+// make_resumable_decoder<finite_doubles>(input)
+template <typename Self> struct finite_doubles : ct::codec::decoder_base<Self> {
+    using base = ct::codec::decoder_base<Self>;
+    using base::decode;
+
+    ct::resumable_task<ct::status_code> resumable_decode(double &value) {
+        const auto status = co_await static_cast<Self &>(*this).one_shot(value);
+        if (status == ct::status_code::success && !std::isfinite(value))
+            co_return ct::status_code::error;
+        co_return status;
+    }
+};
+```
+
 Structural decoding commits completed headers, fields, and elements.
 Reservable destinations may allocate from validated lengths before payload
 arrival; use `as_bounded_size<0, limit>(values)` or a bounded allocator to impose
@@ -616,7 +649,7 @@ does not authorize an installed mixin override; each applicable customization
 must declare its direction, including header/tag dispatch inside optionals and
 variants. Tag-observer mixins also need a declaration for one-shot retry units:
 a complete tag can be observed before the rest of a tagged header suspends.
-Calling `context.one_shot(value)` from a hook uses the same declaration checks.
+Calling `one_shot(value)` from a hook uses the same declaration checks.
 
 The entire one-shot retry unit must fit retained storage. Prefer hooks for
 large values and for stateful codecs. A retry declaration cannot enable
