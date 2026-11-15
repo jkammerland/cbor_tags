@@ -110,11 +110,6 @@ struct resumable_context_access {
     }
 };
 
-template <typename Context>
-concept HasResumableSuspendHook = requires(Context &context) {
-    { context.suspend() } -> std::same_as<void>;
-};
-
 // Any at_capacity() opts in, so a misdeclared one fails to compile instead of
 // being ignored
 template <typename Source>
@@ -171,9 +166,6 @@ template <typename Context> class [[nodiscard]] resume_operation {
         s.control.driving = true;
         if (auto handle = std::exchange(s.control.leaf, {}))
             handle.resume();
-        // A caller may relocate or reclaim storage after this drive returns.
-        if constexpr (HasResumableSuspendHook<Context>)
-            s.context.suspend();
         if (s.work.done()) {
             status_code status;
             try {

@@ -83,6 +83,8 @@ template <typename Source> class resumable_validation_context : public resumable
     using base           = resumable_decode_context<Source, default_options>;
     using window_decoder = decoder<std::span<const std::byte>, default_options, cbor_header_decoder, cbor_indefinite_decoder>;
 
+    // Borrowed from the source. Every wait flushes first, the caller may
+    // relocate or reclaim the storage while the operation is suspended
     std::span<const std::byte> window_;
     std::size_t                pending_{};
 
@@ -101,7 +103,6 @@ template <typename Source> class resumable_validation_context : public resumable
 
   public:
     using base::base;
-    void suspend() { flush_window(); }
 
     resumable<status_code> operator()(validation_request request) {
         const window_guard       guard{*this};
