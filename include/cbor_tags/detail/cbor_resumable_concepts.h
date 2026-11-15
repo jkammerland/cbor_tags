@@ -118,6 +118,12 @@ concept HasRvalueOnlyResumableTranscodeFreeFunction = !requires(Context &context
     resumable_transcode(context, value);
 } && requires(Context &context, resumable_hook_rvalue<T> value) { resumable_transcode(context, value); };
 
+// An encode hook gets a const lvalue, so one for T && is never called either
+template <typename Context, typename T>
+concept HasRvalueOnlyResumableEncodeFreeFunction = !requires(Context &context, const T &value) {
+    resumable_encode(context, value);
+} && requires(Context &context, resumable_hook_rvalue<T> value) { resumable_encode(context, value); };
+
 template <typename Context, typename T>
 concept HasMismatchedResumableTranscodeHook = requires(Context &context, T &value) {
     { Access::resumable_transcode(context, value) } -> UnusableResumableHookResult;
@@ -145,6 +151,7 @@ concept HasMismatchedResumableEncodeHook =
         { Access::resumable_encode(context, value) } -> UnusableResumableHookResult;
     } || requires(Context &context, const T &value) {
         { resumable_encode(context, value) } -> UnusableResumableHookResult;
-    } || HasMutableOnlyResumableEncodeMember<Context, T> || HasMismatchedResumableTranscodeHook<Context, T>);
+    } || HasRvalueOnlyResumableEncodeFreeFunction<Context, T> || HasMutableOnlyResumableEncodeMember<Context, T> ||
+                           HasMismatchedResumableTranscodeHook<Context, T>);
 
 } // namespace cbor::tags::detail

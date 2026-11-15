@@ -581,6 +581,12 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     template <typename T> resumable<status_code> header_item(T &value) {
         using U = std::remove_cvref_t<T>;
+        // Same as in item(). A struct right inside an optional or a variant
+        // gets its fields read from here and never passes through there
+        static_assert(has_explicit_hook<U>() || has_mixin<U>() || !HasMismatchedResumableDecodeHook<self_type, U>,
+                      "this type has a resumable decode hook that is never called, every hook takes the value as T & and "
+                      "returns resumable<status_code>");
+
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())
             // Opt-in hooks own dispatch; the final branch handles ordinary direct-compatible items.
             return item(value); // NOLINT(bugprone-branch-clone)
