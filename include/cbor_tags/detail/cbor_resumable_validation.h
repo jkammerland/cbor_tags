@@ -88,9 +88,15 @@ template <typename Source> class resumable_validation_context : public resumable
 
     // Publish complete tokens and consumed payload bytes on every exit,
     // including allocation failure after decoding a nested item's header.
+    // A normal return has flushed already. What is left here is an exception on
+    // its way out, and that one ends the operation whatever commit() does
     struct window_guard {
         resumable_validation_context &context;
-        ~window_guard() { context.flush_window(); }
+        ~window_guard() {
+            try {
+                context.flush_window();
+            } catch (...) {} // NOLINT(bugprone-empty-catch)
+        }
     };
 
   public:
@@ -100,36 +106,39 @@ template <typename Source> class resumable_validation_context : public resumable
     resumable<status_code> operator()(validation_request request) {
         const window_guard       guard{*this};
         resumable_scalar_batch<> batch{.remaining = request.count};
-        while (!batch.finished()) {
+        auto                     status = status_code::success;
+        while (status == status_code::success && !batch.finished()) {
             while (this->empty())
                 co_await this->wait();
 
-            auto status = read_scalars(batch);
-            if (status != status_code::success)
-                co_return status;
-            if (batch.finished())
+            status = read_scalars(batch);
+            if (status != status_code::success || batch.finished())
                 break;
             if (batch.accepted != 0 && !batch.deferred && window_.empty())
                 continue;
 
             status = batch.deferred ? co_await start_item(batch.token.value, 0, request.options) : co_await read_item(0, request.options);
-            if (status != status_code::success)
-                co_return status;
-            batch.complete_item();
+            if (status == status_code::success)
+                batch.complete_item();
         }
-        co_return status_code::success;
+
+        // A commit that throws here ends the operation with status_code::error
+        flush_window();
+        co_return status;
     }
 
   private:
     void flush_window() {
-        if (pending_ != 0) {
-            auto &reader = this->one_shot().reader_;
-            resumable_source_access::consume_window(this->source(), reader.position_, pending_);
-            reader.current_offset_ += pending_;
-            this->commit();
-        }
-        window_  = {};
-        pending_ = 0;
+        // Forget the window first, a throwing commit must not get flushed twice
+        const auto pending = std::exchange(pending_, 0);
+        window_            = {};
+        if (pending == 0)
+            return;
+
+        auto &reader = this->one_shot().reader_;
+        resumable_source_access::consume_window(this->source(), reader.position_, pending);
+        reader.current_offset_ += pending;
+        this->commit();
     }
 
     bool empty() {

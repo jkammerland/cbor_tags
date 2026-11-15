@@ -5,9 +5,11 @@
 #include <cstddef>
 #include <deque>
 #include <iterator>
+#include <limits>
 #include <list>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -60,6 +62,70 @@ template <typename Bytes, typename Storage> void check_noncontiguous_validation(
     CHECK(*operation.result() == 35U);
     CHECK(source.committed_position().offset() == 35U);
     CHECK(to_hex(operation.remaining_input()) == "ff1c");
+}
+
+// The source concept doesn't ask for a noexcept commit(), so this one may throw
+class throwing_commit_source {
+    using source_type = input_source<validation_chunks>;
+    source_type source_;
+
+  public:
+    using iterator      = source_type::iterator;
+    using position_type = iterator;
+
+    explicit throwing_commit_source(validation_chunks &chunks) : source_(chunks) {}
+    auto begin() const { return source_.begin(); }
+    auto end() const { return source_.end(); }
+    auto size() const { return source_.size(); }
+    auto remaining_size(const iterator &from) const { return source_.remaining_size(from); }
+    auto committed_position() const noexcept { return source_.committed_position(); }
+    auto remaining(const iterator &from) const { return source_.remaining(from); }
+    void refresh() { source_.refresh(); }
+    void acquire() { source_.acquire(); }
+    void release() noexcept { source_.release(); }
+    auto borrow_window(iterator &from) const { return source_.borrow_window(from); }
+    void consume_window(iterator &from, std::size_t count) const { source_.consume_window(from, count); }
+
+    void commit(const iterator &position) {
+        if (commits++ == failing_commit)
+            throw std::runtime_error("commit failed");
+        source_.commit(position);
+    }
+
+    std::size_t commits{};
+    std::size_t failing_commit{std::numeric_limits<std::size_t>::max()};
+};
+
+static_assert(ResumableInputSource<throwing_commit_source>);
+
+// Validates bytes that arrive in two parts and returns how many commits that
+// took. failing_commit picks the commit() call that throws.
+std::size_t check_validation_with_failing_commit(std::span<const std::byte> bytes, std::size_t cut, std::size_t count,
+                                                 std::size_t failing_commit) {
+    validation_chunks      chunks;
+    throwing_commit_source source(chunks);
+    source.failing_commit = failing_commit;
+
+    chunks.emplace_back(bytes.first(cut));
+    auto operation = make_resumable_validator(source, count);
+    if (!operation.done()) {
+        chunks.emplace_back(bytes.subspan(cut));
+        operation.resume();
+    }
+
+    REQUIRE(operation.done());
+    if (failing_commit < source.commits) {
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::error);
+        // Nothing gets published after the commit that threw
+        CHECK(source.commits == failing_commit + 1);
+    } else {
+        CHECK(operation.result());
+    }
+
+    // A finished operation stays finished
+    CHECK(operation.resume() == resume_state::done);
+    return source.commits;
 }
 
 } // namespace
@@ -518,6 +584,34 @@ TEST_SUITE("cbor_wire/resumable") {
             CHECK(*operation.result() == 35U);
             CHECK(source.committed_position().offset() == 35U);
             CHECK(to_hex(operation.remaining_input()) == "ff1c");
+        }
+    }
+
+    TEST_CASE("validation ends with an error when a source commit throws") {
+        constexpr auto never   = std::numeric_limits<std::size_t>::max();
+        const auto     scalars = to_bytes("000102030405060708090a0b");
+        const auto     nested  = to_bytes("878200019f0203ffa10102bf0304ffd864c0055f4200014102ff7f62c3a963e282acff");
+
+        struct validation_case {
+            std::span<const std::byte> bytes;
+            std::size_t                count;
+        };
+        const validation_case cases[]{{scalars, 1}, {scalars, 12}, {nested, 1}};
+
+        for (const auto &[bytes, count] : cases) {
+            for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
+                CAPTURE(bytes.size());
+                CAPTURE(count);
+                CAPTURE(cut);
+                const auto commits = check_validation_with_failing_commit(bytes, cut, count, never);
+                REQUIRE(commits > 0);
+
+                // Every commit of the clean run gets its turn to throw
+                for (std::size_t failing_commit = 0; failing_commit != commits; ++failing_commit) {
+                    CAPTURE(failing_commit);
+                    check_validation_with_failing_commit(bytes, cut, count, failing_commit);
+                }
+            }
         }
     }
 
