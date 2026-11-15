@@ -382,14 +382,29 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     // not make their one-shot overloads instantiate. A value that isn't const
     // also asks for an encode that only takes a mutable one.
     template <typename T> static consteval bool own_hook_beats_one_shot_codec() {
-        using U      = std::remove_cvref_t<T>;
-        using codecs = codec_payload_mixin_customization<one_shot_type>;
+        using U = std::remove_cvref_t<T>;
         if constexpr (has_mixin<T>() || explicit_hook_kind<T>() == explicit_hook_type::none)
             return false;
         else if constexpr (std::is_const_v<T>)
-            return codecs::template accepts<U>();
+            return one_shot_codec_encodes<const U>();
         else
-            return codecs::template accepts<U>() || codecs::template accepts<U &>();
+            return one_shot_codec_encodes<const U>() || one_shot_codec_encodes<U>();
+    }
+
+    // V is the value the way an encode would get it, const U or U
+    template <typename V> static consteval bool one_shot_codec_encodes() {
+        return codec_payload_mixin_customization<one_shot_type>::template accepts<V &>() ||
+               (plain_codec_encodes<V, Codecs<one_shot_type>>() || ...);
+    }
+
+    // A mixin without the codec base. accepts() skips those, and a one-shot
+    // encoder calls their encode all the same. The probe pulls encode in by
+    // name, so first see that the mixin has one for this value.
+    template <typename V, typename Codec> static consteval bool plain_codec_encodes() {
+        if constexpr (std::is_base_of_v<cbor::tags::codec::encoder_base<one_shot_type>, Codec> || !RetryEncodeDirect<Codec, V>)
+            return false;
+        else
+            return codec_payload_mixin_customization<one_shot_type>::template codec_overload_selected<V &, Codec>();
     }
 
     template <typename T> resumable<status_code> item(T &value) {

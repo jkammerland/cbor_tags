@@ -28,16 +28,21 @@ struct codec_payload_mixin_customization<encoder<Buffer, Options, Codecs...>> {
         if constexpr (std::is_void_v<T> || !std::is_base_of_v<cbor::tags::codec::encoder_base<self_type>, Codec>) {
             return false;
         } else {
-            using probe = cbor::tags::detail::payload_encoder_overload_probe<self_type, Codec>;
-            if constexpr (requires(self_type &self, probe &codec, const T &value) {
-                              self.encode(value);
-                              codec.encode(value);
-                          }) {
-                return !std::same_as<decltype(std::declval<probe &>().encode(std::declval<const T &>())),
-                                     cbor::tags::detail::core_payload_overload>;
-            } else {
-                return false;
-            }
+            return codec_overload_selected<T, Codec>();
+        }
+    }
+
+    // The probe pulls in Codec's encode by name, so Codec must have one.
+    template <typename T, typename Codec> static consteval bool codec_overload_selected() {
+        using probe = cbor::tags::detail::payload_encoder_overload_probe<self_type, Codec>;
+        if constexpr (requires(self_type &self, probe &codec, const T &value) {
+                          self.encode(value);
+                          codec.encode(value);
+                      }) {
+            return !std::same_as<decltype(std::declval<probe &>().encode(std::declval<const T &>())),
+                                 cbor::tags::detail::core_payload_overload>;
+        } else {
+            return false;
         }
     }
 
@@ -52,32 +57,37 @@ struct codec_payload_mixin_customization<decoder<Buffer, Options, Codecs...>> {
         if constexpr (std::is_void_v<T> || !std::is_base_of_v<cbor::tags::codec::decoder_base<self_type>, Codec>) {
             return false;
         } else {
-            using probe                     = cbor::tags::detail::payload_decoder_overload_probe<self_type, Codec>;
-            constexpr bool has_header_codec = requires(self_type &self, probe &codec, T &value, major_type major, std::byte info) {
-                { self.decode(value, major, info) } -> std::same_as<status_code>;
-                { codec.decode(value, major, info) } -> std::same_as<status_code>;
+            return codec_overload_selected<T, Context, Codec>();
+        }
+    }
+
+    // The probe pulls in Codec's decode by name, so Codec must have one.
+    template <typename T, payload_decode_context Context, typename Codec> static consteval bool codec_overload_selected() {
+        using probe                     = cbor::tags::detail::payload_decoder_overload_probe<self_type, Codec>;
+        constexpr bool has_header_codec = requires(self_type &self, probe &codec, T &value, major_type major, std::byte info) {
+            { self.decode(value, major, info) } -> std::same_as<status_code>;
+            { codec.decode(value, major, info) } -> std::same_as<status_code>;
+        };
+        if constexpr (Context == payload_decode_context::header) {
+            return has_header_codec;
+        } else if constexpr (Context == payload_decode_context::tag) {
+            return requires(self_type &self, probe &codec, T &value, std::uint64_t tag) {
+                { self.decode(value, tag) } -> std::same_as<status_code>;
+                { codec.decode(value, tag) } -> std::same_as<status_code>;
             };
-            if constexpr (Context == payload_decode_context::header) {
-                return has_header_codec;
-            } else if constexpr (Context == payload_decode_context::tag) {
-                return requires(self_type &self, probe &codec, T &value, std::uint64_t tag) {
-                    { self.decode(value, tag) } -> std::same_as<status_code>;
-                    { codec.decode(value, tag) } -> std::same_as<status_code>;
-                };
-            } else if constexpr (requires(self_type &self, probe &codec, T &value) {
-                                     { self.decode(value) } -> std::same_as<status_code>;
-                                     { codec.decode(value) } -> std::same_as<status_code>;
-                                 }) {
-                return true;
-            } else {
-                // Only the generic one-argument decoder forwards to the
-                // header overload. Reflected groups decode their fields directly.
-                return has_header_codec &&
-                    requires(probe & codec, T & value)
-                {
-                    {codec.decode(value)}->std::same_as<cbor::tags::detail::forwarding_payload_overload>;
-                };
-            }
+        } else if constexpr (requires(self_type &self, probe &codec, T &value) {
+                                 { self.decode(value) } -> std::same_as<status_code>;
+                                 { codec.decode(value) } -> std::same_as<status_code>;
+                             }) {
+            return true;
+        } else {
+            // Only the generic one-argument decoder forwards to the
+            // header overload. Reflected groups decode their fields directly.
+            return has_header_codec &&
+                requires(probe & codec, T & value)
+            {
+                {codec.decode(value)}->std::same_as<cbor::tags::detail::forwarding_payload_overload>;
+            };
         }
     }
 

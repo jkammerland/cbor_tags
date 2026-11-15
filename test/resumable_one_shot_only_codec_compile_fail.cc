@@ -22,9 +22,14 @@ struct point {
     template <typename Decoder> ct::resumable<ct::status_code> resumable_decode(Decoder &decoder) { return decoder(x, y); }
 };
 
+#if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_PLAIN_ENCODE) || defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_PLAIN_DECODE)
+// Without the codec base, a one-shot encoder or decoder calls these all the same
+template <typename Self> struct swapped_points {
+#else
 template <typename Self> struct swapped_points : ct::codec::base<Self> {
     using ct::codec::base<Self>::decode;
     using ct::codec::base<Self>::encode;
+#endif
 
 #if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_MUTABLE_ENCODE)
     // Only for a point that isn't const, a one-shot encoder still picks it for one
@@ -76,10 +81,11 @@ int main() {
     auto    plain         = plain_decoder(alone);
     (void)plain;
 
-#if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_ENCODE) || defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_MUTABLE_ENCODE)
+#if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_ENCODE) || defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_MUTABLE_ENCODE) ||                              \
+    defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_PLAIN_ENCODE)
     auto encoder   = ct::make_resumable_encoder<swapped_points>(bytes);
     auto operation = encoder(value);
-#elif defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_DECODE)
+#elif defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_DECODE) || defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_PLAIN_DECODE)
     auto decoder   = ct::make_resumable_decoder<swapped_points>(bytes);
     auto operation = decoder(value);
 #elif defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_VARIANT_DECODE)
