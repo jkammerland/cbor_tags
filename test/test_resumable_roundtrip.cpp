@@ -684,6 +684,36 @@ template <typename Self> struct shape_codec : codec::base<Self> {
     resumable<status_code> resumable_decode(shape &value) { return static_cast<Self &>(*this)(value.id); }
 };
 
+// One function visits the fields in both directions, so it isn't const, and the
+// hook takes whatever it is given and gets its return type from it. With a
+// const point that body doesn't compile, so nothing may ask about one
+struct visited_point {
+    int x{};
+    int y{};
+
+    template <typename Transcoder> auto visit(Transcoder &transcoder) { return transcoder(y, x); }
+};
+
+template <typename Transcoder, typename Value>
+    requires std::same_as<std::remove_const_t<Value>, visited_point>
+auto resumable_transcode(Transcoder &transcoder, Value &value) {
+    return value.visit(transcoder);
+}
+
+// Same, with a hook that only encodes
+struct visited_encode_point {
+    int x{};
+    int y{};
+
+    template <typename Encoder> auto visit(Encoder &encoder) { return encoder(y, x); }
+};
+
+template <typename Encoder, typename Value>
+    requires std::same_as<std::remove_const_t<Value>, visited_encode_point>
+auto resumable_encode(Encoder &encoder, Value &value) {
+    return value.visit(encoder);
+}
+
 // Encodes value with Codec installed, expects these bytes, and decodes them back
 template <template <typename> typename Codec, typename T> T check_wire_with_codec(const T &value, std::string_view expected_hex) {
     std::vector<std::byte> wire;
@@ -1672,6 +1702,38 @@ TEST_SUITE("roundtrip/resumable") {
 
         SUBCASE("the mixin hook runs") { check_weighted_wire<weight_doubling_codec>("820118de"); }
         SUBCASE("the type's hooks run without a mixin") { check_weighted_wire<>("8201186f"); }
+    }
+
+    TEST_CASE("a mutable value's hook is not tried on a const one") {
+        visited_point          value{1, 2};
+        std::vector<std::byte> wire;
+
+        // Encode
+        {
+            auto encoder   = make_resumable_encoder(wire);
+            auto operation = encoder(value);
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(to_hex(wire) == "0201");
+        }
+
+        // Decode
+        visited_point actual;
+        auto          decoder   = make_resumable_decoder(wire);
+        auto          operation = decoder(actual);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(actual.x == 1);
+        CHECK(actual.y == 2);
+
+        // An encode hook goes through the same checks
+        visited_encode_point   encode_only{1, 2};
+        std::vector<std::byte> encode_only_wire;
+        auto                   encode_only_encoder   = make_resumable_encoder(encode_only_wire);
+        auto                   encode_only_operation = encode_only_encoder(encode_only);
+        REQUIRE(encode_only_operation.done());
+        REQUIRE(encode_only_operation.result());
+        CHECK(to_hex(encode_only_wire) == "0201");
     }
 
     TEST_CASE("a mixin hook for a base type leaves derived values alone in both directions") {

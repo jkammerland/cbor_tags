@@ -355,6 +355,28 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     template <typename T> static consteval bool hooked() { return explicit_hook_kind<T>() != explicit_hook_type::none || has_mixin<T>(); }
 
+    // A hook that only takes a mutable value is skipped for a const one, and
+    // the bytes would then depend on how the caller passed it. Mixins go
+    // first, so one of those must not leave a const value to the type's own hook.
+    // Only a const value asks. A hook can take whatever it is given, and its
+    // body need not compile for a const value it never gets.
+    template <typename T> static consteval bool const_value_skips_hook() {
+        using U = std::remove_cv_t<T>;
+        if constexpr (!std::is_const_v<T>)
+            return false;
+        else
+            return (has_mixin<U>() && !has_mixin<T>()) || (hooked<U>() && !hooked<T>());
+    }
+
+    // The type has a hook that nothing calls, however the value is passed.
+    // One that runs for a mutable value answers that before a const one is tried.
+    template <typename U> static consteval bool has_uncalled_hook() {
+        if constexpr (hooked<U>())
+            return false;
+        else
+            return !hooked<const U>() && HasMismatchedResumableEncodeHook<self_type, U>;
+    }
+
     // The type's own hook would run, and an installed codec has a one-shot
     // encode for the type. Only looks at the codecs when it has to, a hook must
     // not make their one-shot overloads instantiate.
@@ -367,13 +389,10 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     template <typename T> resumable<status_code> item(T &value) {
         using U = std::remove_cvref_t<T>;
-        // A hook that only takes a mutable value is skipped for a const one, and
-        // the bytes would then depend on how the caller passed it. Mixins go
-        // first, so one of those must not leave a const value to the type's own hook.
-        static_assert(!std::is_const_v<T> || ((has_mixin<const U>() || !has_mixin<U>()) && (hooked<const U>() || !hooked<U>())),
+        static_assert(!const_value_skips_hook<T>(),
                       "this type's resumable hook only takes a mutable value and would be skipped for a const one, "
                       "add a hook that takes it as const or pass it mutable");
-        static_assert(hooked<U>() || hooked<const U>() || !HasMismatchedResumableEncodeHook<self_type, U>,
+        static_assert(!has_uncalled_hook<U>(),
                       "this type has a resumable encode hook that is never called, an encode member must be const, and every "
                       "hook takes the value as an lvalue and returns resumable<status_code>");
 
