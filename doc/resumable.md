@@ -144,6 +144,11 @@ int main() {
 }
 ```
 
+Encoding appends after the contents the container had when the encoder or
+output buffer was bound to it. Bytes the application adds after that count as
+room, and the next write replaces them. Put bytes of your own, such as a frame
+header, into the container before binding the encoder.
+
 ## Expose bounded output capacity
 
 Fixed storage and writable chunks suspend when capacity runs out. The caller
@@ -195,9 +200,8 @@ chunks stay append-only even after publication; the
 [ring example](../examples/46_resumable_ring.cpp) shows explicit publication and
 reclamation ownership.
 
-Growable encoding appends after existing contents. See the
-[bounded encoding example](../examples/41_resumable_encoding.cpp) for a complete
-program that exposes writable chunks in two steps.
+See the [bounded encoding example](../examples/41_resumable_encoding.cpp) for
+a complete program that exposes writable chunks in two steps.
 
 ## Keep owners alive
 
@@ -543,7 +547,9 @@ int main() {
 ```
 
 ADL, member, and codec-mixin hooks return exactly `resumable<status_code>`;
-`resumable_transcode` is the symmetric alternative. Explicit hooks take
+`resumable_transcode` is the symmetric alternative. A hook takes its value as
+an lvalue. An encode hook takes it as `const`, and a member encode hook is a
+`const` member, so a const value reaches the hook too. Explicit hooks take
 precedence over one-shot codecs; see the
 [custom hook example](../examples/45_resumable_custom_hook.cpp).
 
@@ -572,12 +578,18 @@ Encoders work the same way with `encoder(values...)` and
 `encoder.one_shot(value)`. Since a retry drops what the last try wrote,
 `encoder.one_shot(value)` takes strings, containers and structs too.
 
+A hook waits only through these two calls. If it awaits something else, the
+operation can't tell: `resume()` keeps reporting `need_input` or `need_output`,
+and cancelling or destroying the operation in the meantime leaves the other
+side with a destroyed coroutine. Do other asynchronous work between `resume()`
+calls.
+
 A hook that calls `decoder(value)` on the type it handles calls itself again.
 `one_shot(value)` uses the one-shot codec for that type instead:
 
 ```cpp
-// Rejects NaN and infinity in every double. Install with
-// make_resumable_decoder<finite_doubles>(input)
+// Rejects NaN and infinity in the doubles a resumable decoder reads. Install
+// with make_resumable_decoder<finite_doubles>(input)
 template <typename Self> struct finite_doubles : ct::codec::decoder_base<Self> {
     using base = ct::codec::decoder_base<Self>;
     using base::decode;
@@ -590,6 +602,15 @@ template <typename Self> struct finite_doubles : ct::codec::decoder_base<Self> {
     }
 };
 ```
+
+`using base::decode` leaves one-shot decoding of a double as it is. The hook
+does not run for a double inside a value decoded through a
+[retry declaration](#one-shot-retry-declarations), or in a one-shot decoder
+with the same mixin.
+
+Each operation builds its own mixin objects, one for hooks and one for the
+one-shot codec. A mixin's data members carry nothing from one to the other, or
+from one operation to the next.
 
 Structural decoding commits completed headers, fields, and elements.
 Reservable destinations may allocate from validated lengths before payload
@@ -654,6 +675,33 @@ variants. Tag-observer mixins also need a declaration for one-shot retry units:
 a complete tag can be observed before the rest of a tagged header suspends.
 Calling `one_shot(value)` from a hook uses the same declaration checks.
 
+A retry runs the one-shot call again from the start, including the members it
+already read. A `decode` that reads straight into a string or container member
+adds to it again each time, so read into locals and assign them once the call
+succeeds:
+
+```cpp
+struct transactional_record {
+    int id{};
+    std::string name;
+    int count{};
+
+    template <typename Decoder> auto decode(Decoder &decoder) {
+        int new_id{};
+        std::string new_name;
+        int new_count{};
+
+        auto result = decoder(new_id, new_name, new_count);
+        if (result) {
+            id = new_id;
+            name = std::move(new_name);
+            count = new_count;
+        }
+        return result;
+    }
+};
+```
+
 The entire one-shot retry unit must fit retained storage. Prefer hooks for
 large values and for stateful codecs. A retry declaration cannot enable
 `codec::shared_ptr` in a resumable encoder or decoder.
@@ -702,10 +750,12 @@ public members directly; declaring `position_type` selects this contract:
 - Positions are copyable and expose a monotonic `offset()` of exactly
   `std::size_t`; positions at and after commitment survive permitted mutations.
   Byte counts, sized-range sizes, and any `size_type` also use `std::size_t`.
-- Input supplies logical byte traversal, `commit(position)`, and
-  `remaining(position)`. Output supplies `value_type = std::byte`, `position()`,
-  `commit()`, `restore(position)`, `remaining_output()`, and `write(bytes)`;
-  a short write means temporary exhaustion.
+- Input supplies logical byte traversal with its const iterator as
+  `position_type`, `commit(position)`, and `remaining(position)`. Output is a
+  forward range over the bytes it holds and supplies `value_type = std::byte`,
+  `size_type`, `position()`, `commit()`, `restore(position)`,
+  `remaining_output()`, and `write(bytes)`; a short write means temporary
+  exhaustion.
 - Both expose nonthrowing `committed_position()` and `release()`; output
   `restore(position)` is also nonthrowing. `acquire()` enforces one operation,
   and `refresh()` runs before driving.
