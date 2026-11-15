@@ -498,7 +498,28 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return false;
     }
 
-    template <typename T> resumable<status_code> item(T &value) {
+    // No hook, and nobody asks the one-shot decoder either. A hook must not
+    // make the one-shot overloads instantiate, so it answers first
+    template <typename T> static consteval bool read_piece_by_piece() {
+        if constexpr (has_mixin<T>() || has_explicit_hook<T>())
+            return false;
+        else
+            return !read_in_one_piece<T>();
+    }
+
+    // The value is read piece by piece, and a one-shot decoder would give it
+    // to a mixin without the codec base. Nobody asks that mixin here, so the
+    // same bytes would give a different value. Asked is how the one-shot
+    // decoder gets to the value: from its first byte, with the header read,
+    // or with the tag read. It can only call the decode that fits.
+    template <typename T, payload_decode_context Asked> static consteval bool plain_codec_skipped() {
+        if constexpr (read_piece_by_piece<T>())
+            return (plain_codec_decodes<T, Asked, Codecs<one_shot_type>>() || ...);
+        else
+            return false;
+    }
+
+    template <typename T, payload_decode_context Asked = payload_decode_context::direct> resumable<status_code> item(T &value) {
         using U = std::remove_cvref_t<T>;
         static_assert(has_explicit_hook<U>() || has_mixin<U>() || !HasMismatchedResumableDecodeHook<self_type, U>,
                       "this type has a resumable decode hook that is never called, every hook takes the value as T & and "
@@ -510,6 +531,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         static_assert(!(own_hook_beats_one_shot_codec<U, payload_decode_context::direct, payload_decode_context::header>()),
                       "an installed codec has a one-shot decode for this type and no resumable hook, so the type's own hook "
                       "would run here and the codec in a one-shot decoder, give the codec a resumable_decode too");
+        static_assert(!(plain_codec_skipped<U, Asked>()),
+                      "an installed codec without the codec base has a one-shot decode for this type, a one-shot decoder would "
+                      "call it and this one reads the value itself, derive the codec from cbor::tags::codec::decoder_base<Self>");
 
         if constexpr (has_mixin<U>())
             return mixin(value);
@@ -611,9 +635,15 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                       "this type has a resumable decode hook that is never called, every hook takes the value as T & and "
                       "returns resumable<status_code>");
 
+        // A one-shot decoder has read the header by here, and only a decode
+        // that takes the header can still get the value
+        static_assert(!(plain_codec_skipped<U, payload_decode_context::header>()),
+                      "an installed codec without the codec base has a one-shot decode for this type, a one-shot decoder would "
+                      "call it and this one reads the value itself, derive the codec from cbor::tags::codec::decoder_base<Self>");
+
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())
             // Opt-in hooks own dispatch; the final branch handles ordinary direct-compatible items.
-            return item(value); // NOLINT(bugprone-branch-clone)
+            return item<T, payload_decode_context::header>(value); // NOLINT(bugprone-branch-clone)
         else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::header>())
             return contextual_one_shot<payload_decode_context::header>(value);
         else if constexpr (IsAggregate<U> && !IsTag<U>)
@@ -621,7 +651,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else if constexpr (IsUntaggedTuple<U>)
             return header_group(std::apply([](auto &...fields) { return std::tie(fields...); }, value));
         else
-            return item(value);
+            return item<T, payload_decode_context::header>(value);
     }
     template <typename Tuple> resumable<status_code> header_group(Tuple values) {
         constexpr auto count = std::tuple_size_v<Tuple>;
@@ -981,7 +1011,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::tag>())
                 status = co_await contextual_one_shot<payload_decode_context::tag>(decoded);
             else
-                status = co_await item(decoded);
+                status = co_await item<U, payload_decode_context::tag>(decoded);
         } else
             status = co_await header_item(decoded);
         if (status == status_code::success)

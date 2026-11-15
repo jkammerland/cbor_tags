@@ -393,8 +393,11 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     // V is the value the way an encode would get it, const U or U
     template <typename V> static consteval bool one_shot_codec_encodes() {
-        return codec_payload_mixin_customization<one_shot_type>::template accepts<V &>() ||
-               (plain_codec_encodes<V, Codecs<one_shot_type>>() || ...);
+        return codec_payload_mixin_customization<one_shot_type>::template accepts<V &>() || any_plain_codec_encodes<V>();
+    }
+
+    template <typename V> static consteval bool any_plain_codec_encodes() {
+        return (plain_codec_encodes<V, Codecs<one_shot_type>>() || ...);
     }
 
     // A mixin without the codec base. accepts() skips those, and a one-shot
@@ -416,6 +419,43 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             return false;
     }
 
+    // item() gives these to the one-shot encoder whole and writes everything
+    // else piece by piece. Same order as item(), explicit one-shot
+    // customizations come first
+    template <typename U> static consteval bool written_in_one_piece() {
+        if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::direct>())
+            return true;
+        else if constexpr (IsAnyBoundedSizeWrapper<U> || IsIndefiniteWrapper<U> || resumable_encode_wrap_array<U> ||
+                           (CBOR_TAGS_HAS_NAMED_REFLECTION && IsNamedMapWrapper<U>))
+            return false;
+        else
+            return is_static_tag_t<U>::value || is_dynamic_tag_t<U> || IsAnyHeader<U> ||
+                   !(IsArrayRangeWrapper<U> || IsMapRangeWrapper<U> || IsStringRangeWrapper<U> || IsEncodedItemView<U> || IsString<U> ||
+                     IsMap<U> || IsArray<U> || IsOptional<U> || IsVariant<U> || IsTaggedTuple<U> || IsUntaggedTuple<U> || IsAggregate<U>);
+    }
+
+    // No hook, and nobody asks the one-shot encoder either. A hook must not
+    // make the one-shot overloads instantiate, so it answers first
+    template <typename T> static consteval bool written_piece_by_piece() {
+        if constexpr (hooked<T>())
+            return false;
+        else
+            return !written_in_one_piece<std::remove_cvref_t<T>>();
+    }
+
+    // The value is written piece by piece, and a one-shot encoder would give
+    // it to a mixin without the codec base. Nobody asks that mixin here, so
+    // the same value would get different bytes.
+    template <typename T> static consteval bool plain_codec_skipped() {
+        using U = std::remove_cvref_t<T>;
+        if constexpr (!written_piece_by_piece<T>())
+            return false;
+        else if constexpr (std::is_const_v<T>)
+            return any_plain_codec_encodes<const U>();
+        else
+            return any_plain_codec_encodes<const U>() || any_plain_codec_encodes<U>();
+    }
+
     template <typename T> resumable<status_code> item(T &value) {
         using U = std::remove_cvref_t<T>;
         static_assert(!const_value_skips_hook<T>(),
@@ -432,14 +472,16 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         static_assert(!own_hook_beats_one_shot_codec<T>(),
                       "an installed codec has a one-shot encode for this type and no resumable hook, so the type's own hook "
                       "would run here and the codec in a one-shot encoder, give the codec a resumable_encode too");
+        static_assert(!plain_codec_skipped<T>(),
+                      "an installed codec without the codec base has a one-shot encode for this type, a one-shot encoder would "
+                      "call it and this one writes the value itself, derive the codec from cbor::tags::codec::encoder_base<Self>");
 
         if constexpr (has_mixin<T>())
             return mixin(value);
         else if constexpr (hook != explicit_hook_type::none)
             return explicit_hook<hook>(value);
-        else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::direct>())
-            // Explicit one-shot customizations precede every structural category.
-            return one_shot(value); // NOLINT(bugprone-branch-clone)
+        else if constexpr (written_in_one_piece<U>())
+            return one_shot(value);
         else if constexpr (IsAnyBoundedSizeWrapper<U>) {
             if constexpr (IsBoundedSizeWrapper<U>)
                 return bounded(value.value(), U::min_size, U::max_size);
@@ -453,8 +495,6 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         else if constexpr (IsNamedMapWrapper<U>)
             return named_map(value.value_);
 #endif
-        else if constexpr (is_static_tag_t<U>::value || is_dynamic_tag_t<U> || IsAnyHeader<U>)
-            return one_shot(value);
         else if constexpr (IsArrayRangeWrapper<U>)
             return container<false>(value.range_);
         else if constexpr (IsMapRangeWrapper<U>)
@@ -475,10 +515,8 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             return variant(value);
         else if constexpr (IsTaggedTuple<U> || IsUntaggedTuple<U>)
             return tuple(value);
-        else if constexpr (IsAggregate<U>)
-            return aggregate(value);
         else
-            return one_shot(value);
+            return aggregate(value);
     }
 
     template <typename Tuple> static auto tuple_references(Tuple &value) {

@@ -327,10 +327,24 @@ foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE PLAIN_ENCODE DECODE PLAIN_DECODE VAR
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
 
-# The checks above must not ask a codec that has the codec base about a value directly.
+# A mixin without the codec base. What has to keep compiling runs as a test,
+# each case is a value the resumable side would handle without asking the mixin.
 add_executable(resumable_plain_codec_compile resumable_plain_codec_compile.cc)
 target_link_libraries(resumable_plain_codec_compile PRIVATE cbor::tags)
 add_test(NAME resumable_plain_codec_compile COMMAND resumable_plain_codec_compile)
+
+foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE CONTAINER_ENCODE DECODE CONTAINER_DECODE HEADER_DECODE TAG_DECODE)
+  string(TOLOWER "resumable_plain_codec_${CASE}_compile_fails" TEST_NAME)
+  string(REGEX REPLACE "^.*_" "" DIRECTION "${CASE}")
+  string(TOLOWER "${DIRECTION}" DIRECTION)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_plain_codec_compile.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_PLAIN_CODEC_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=an installed codec without the codec base has a one-shot ${DIRECTION} for this type" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
 foreach(CASE IN ITEMS MEMBER_ENCODE RETURN_ENCODE RVALUE_ENCODE RVALUE_DECODE RVALUE_DECODE_OPTIONAL RETURN_DECODE RVALUE_TRANSCODE_DECODE RVALUE_TRANSCODE_ENCODE)
   string(TOLOWER "resumable_hook_signature_${CASE}_compile_fails" TEST_NAME)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_hook_signature_compile_fail.cc)

@@ -570,6 +570,14 @@ doesn't compile, because the one-shot side would use the mixin and the
 resumable side the type's hook. Give the mixin a `resumable_encode` or
 `resumable_decode` for that type too.
 
+Derive a mixin that has a one-shot `encode` or `decode` from
+`codec::encoder_base<Self>`, `codec::decoder_base<Self>`, or
+`codec::base<Self>`, as [codec extensions](codec_extensions.md) describes. One
+without the base doesn't compile when a one-shot encoder or decoder would give
+it a value that the resumable side resumes structurally, such as a string,
+container, optional, variant, tuple, or reflected record: the resumable side
+would never call it.
+
 A hook can make two calls on the `encoder` or `decoder` it receives, which in a
 mixin is `static_cast<Self &>(*this)`:
 
