@@ -1260,14 +1260,24 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
 endif()
 add_test(NAME resumable_one_way_retry_compile COMMAND resumable_one_way_retry_compile)
 
-add_executable(resumable_retry_one_flag_compile_fails EXCLUDE_FROM_ALL resumable_one_way_retry_compile.cc)
-target_compile_definitions(resumable_retry_one_flag_compile_fails PRIVATE CBOR_TAGS_RETRY_ONE_FLAG)
-target_link_libraries(resumable_retry_one_flag_compile_fails PRIVATE cbor::tags)
-add_test(NAME resumable_retry_one_flag_compile_fails COMMAND ${CMAKE_COMMAND}
-  "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=resumable_retry_one_flag_compile_fails" "-DCONFIG=$<CONFIG>"
-  "-DPASS_REGEX=a resumable_retry_traits specialization declares both encode and decode"
+# The same with declarations that only have the flag they need.
+add_executable(resumable_one_flag_retry_compile resumable_one_way_retry_compile.cc)
+target_compile_definitions(resumable_one_flag_retry_compile PRIVATE CBOR_TAGS_RETRY_ONE_FLAG)
+target_link_libraries(resumable_one_flag_retry_compile PRIVATE cbor::tags)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
+  target_compile_options(resumable_one_flag_retry_compile PRIVATE -Werror=unused-const-variable)
+endif()
+add_test(NAME resumable_one_flag_retry_compile COMMAND resumable_one_flag_retry_compile)
+
+# A flag that was left out is false, so the other direction still needs its opt-in.
+add_executable(resumable_retry_missing_flag_compile_fails EXCLUDE_FROM_ALL resumable_one_way_retry_compile.cc)
+target_compile_definitions(resumable_retry_missing_flag_compile_fails PRIVATE CBOR_TAGS_RETRY_ONE_FLAG CBOR_TAGS_RETRY_MISSING_FLAG)
+target_link_libraries(resumable_retry_missing_flag_compile_fails PRIVATE cbor::tags)
+add_test(NAME resumable_retry_missing_flag_compile_fails COMMAND ${CMAKE_COMMAND}
+  "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=resumable_retry_missing_flag_compile_fails" "-DCONFIG=$<CONFIG>"
+  "-DPASS_REGEX=one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
-set_tests_properties(resumable_retry_one_flag_compile_fails PROPERTIES LABELS "compile-fail")
+set_tests_properties(resumable_retry_missing_flag_compile_fails PROPERTIES LABELS "compile-fail")
 add_resumable_retry_failure(NODISCARD "nodiscard" CBOR_RETRY_NODISCARD)
 
 foreach(DIRECTION ENCODE DECODE)

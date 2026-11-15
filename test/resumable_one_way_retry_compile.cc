@@ -16,10 +16,14 @@ struct label {
     std::string text;
 
     template <typename Encoder> auto encode(Encoder &encoder) const { return encoder(text); }
+#if defined(CBOR_TAGS_RETRY_MISSING_FLAG)
+    template <typename Decoder> auto decode(Decoder &decoder) { return decoder(text); }
+#endif
 };
 } // namespace
 
-// A declaration has both flags, leaving one out is the compile-fail case
+// One flag is enough. This file is built a second time without the decode
+// flags, and a flag that isn't there is false
 template <> struct cbor::tags::resumable_retry_traits<label> {
     static constexpr bool encode = true;
 #if !defined(CBOR_TAGS_RETRY_ONE_FLAG)
@@ -40,7 +44,9 @@ template <typename Self> struct doubled : ct::codec::encoder_base<Self> {
 // gets a flag that can always be worked out
 template <typename Self> struct cbor::tags::resumable_retry_traits<std::uint32_t, doubled<Self>> {
     static constexpr bool encode = true;
-#if defined(_MSC_VER) && !defined(__clang__)
+#if defined(CBOR_TAGS_RETRY_ONE_FLAG)
+    // No decode flag at all in this build
+#elif defined(_MSC_VER) && !defined(__clang__)
     static constexpr bool decode = false;
 #else
     static constexpr bool decode = std::is_class_v<typename Self::input_buffer_type>;
@@ -57,6 +63,13 @@ int main() {
     std::vector<std::byte> doubled_bytes;
     auto                   doubling          = ct::make_resumable_encoder<doubled>(doubled_bytes);
     auto                   doubled_operation = doubling(std::uint32_t{21});
+
+#if defined(CBOR_TAGS_RETRY_MISSING_FLAG)
+    // label's declaration says nothing about decoding, so this may not retry
+    label decoded;
+    auto  decoder          = ct::make_resumable_decoder(bytes);
+    auto  decode_operation = decoder(decoded);
+#endif
 
     // 21 goes out as 42
     const bool doubled_ok =

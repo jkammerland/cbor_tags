@@ -35,22 +35,22 @@ concept RetryDecodeObserver = requires(Codec &codec) { codec.observe_decoded_cbo
 template <typename Codec>
 concept RetryEncodeObserver = requires(Codec &codec) { codec.observe_encoded_cbor_tag(std::uint64_t{}); };
 
-// What a declaration says for one direction. It names both flags either way:
-// a declaration for a file-local type that only ever goes one way would
-// otherwise make Clang warn about the flag nobody named. Only the one that
-// was asked for gets its value read.
+// What a declaration says for one direction, a flag it leaves out is false.
+// Both flags get looked for either way: a declaration for a file-local type
+// that only ever goes one way would otherwise make Clang warn about the flag
+// nobody named. Only the one that was asked for gets its value read.
 template <typename T, typename Codec, bool Encode> consteval bool resumable_retry_declared() {
     using traits = resumable_retry_traits<std::remove_cvref_t<T>, Codec>;
-    static_assert(
-        requires {
-            traits::encode;
-            traits::decode;
-        }, "a resumable_retry_traits specialization declares both encode and decode");
 
-    if constexpr (Encode)
+    constexpr bool has_encode = requires { traits::encode; };
+    constexpr bool has_decode = requires { traits::decode; };
+
+    if constexpr (Encode && has_encode)
         return static_cast<bool>(traits::encode);
-    else
+    else if constexpr (!Encode && has_decode)
         return static_cast<bool>(traits::decode);
+    else
+        return false;
 }
 
 // Probe each installed mixin separately. A value's declaration must never

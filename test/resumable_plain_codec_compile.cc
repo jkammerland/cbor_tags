@@ -145,11 +145,9 @@ struct named {
 
 template <typename Self> struct cbor::tags::resumable_retry_traits<std::uint32_t, offset_uint32_encoder<Self>> {
     static constexpr bool encode = true;
-    static constexpr bool decode = false;
 };
 
 template <typename Self> struct cbor::tags::resumable_retry_traits<std::uint32_t, offset_uint32_decoder<Self>> {
-    static constexpr bool encode = false;
     static constexpr bool decode = true;
 };
 
