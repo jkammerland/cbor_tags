@@ -379,12 +379,17 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     // The type's own hook would run, and an installed codec has a one-shot
     // encode for the type. Only looks at the codecs when it has to, a hook must
-    // not make their one-shot overloads instantiate.
+    // not make their one-shot overloads instantiate. A value that isn't const
+    // also asks for an encode that only takes a mutable one.
     template <typename T> static consteval bool own_hook_beats_one_shot_codec() {
+        using U      = std::remove_cvref_t<T>;
+        using codecs = codec_payload_mixin_customization<one_shot_type>;
         if constexpr (has_mixin<T>() || explicit_hook_kind<T>() == explicit_hook_type::none)
             return false;
+        else if constexpr (std::is_const_v<T>)
+            return codecs::template accepts<U>();
         else
-            return codec_payload_mixin_customization<one_shot_type>::template accepts<std::remove_cvref_t<T>>();
+            return codecs::template accepts<U>() || codecs::template accepts<U &>();
     }
 
     template <typename T> resumable<status_code> item(T &value) {

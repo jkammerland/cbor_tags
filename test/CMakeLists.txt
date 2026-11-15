@@ -314,7 +314,7 @@ foreach(CASE IN ITEMS ADL_ENCODE ADL_TRANSCODE MEMBER_TRANSCODE MIXIN_ENCODE MIX
     "-DPASS_REGEX=resumable hook only takes a mutable value and would be skipped for a const one" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
-foreach(CASE IN ITEMS ENCODE DECODE VARIANT_DECODE)
+foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE DECODE VARIANT_DECODE)
   string(TOLOWER "resumable_one_shot_only_codec_${CASE}_compile_fails" TEST_NAME)
   string(REGEX REPLACE "^.*_" "" DIRECTION "${CASE}")
   string(TOLOWER "${DIRECTION}" DIRECTION)

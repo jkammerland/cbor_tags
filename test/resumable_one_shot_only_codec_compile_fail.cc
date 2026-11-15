@@ -26,7 +26,12 @@ template <typename Self> struct swapped_points : ct::codec::base<Self> {
     using ct::codec::base<Self>::decode;
     using ct::codec::base<Self>::encode;
 
+#if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_MUTABLE_ENCODE)
+    // Only for a point that isn't const, a one-shot encoder still picks it for one
+    void encode(point &value) { static_cast<Self &>(*this)(value.y, value.x); }
+#else
     void encode(const point &value) { static_cast<Self &>(*this)(value.y, value.x); }
+#endif
 
     ct::status_code decode(point &value) {
         const auto result = static_cast<Self &>(*this)(value.y, value.x);
@@ -71,7 +76,7 @@ int main() {
     auto    plain         = plain_decoder(alone);
     (void)plain;
 
-#if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_ENCODE)
+#if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_ENCODE) || defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_MUTABLE_ENCODE)
     auto encoder   = ct::make_resumable_encoder<swapped_points>(bytes);
     auto operation = encoder(value);
 #elif defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_DECODE)
