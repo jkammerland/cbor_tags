@@ -560,6 +560,8 @@ Install mixins with `make_resumable_encoder<Codec...>` or
 `make_resumable_decoder<Codec...>`, and select options with
 `make_resumable_*_with_options<Options, Codec...>`. Member/ADL hooks follow the
 automatic metadata-tag convention; mixin hooks own their complete wire shape.
+A mixin's hook for a type goes before that type's own member or ADL hook, the
+same order the one-shot encoder and decoder use for installed codecs.
 
 A hook can make two calls on the `encoder` or `decoder` it receives, which in a
 mixin is `static_cast<Self &>(*this)`:

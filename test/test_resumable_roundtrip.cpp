@@ -18,6 +18,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -554,6 +555,89 @@ template <typename Self> struct negated_double_transcode_hook : codec::encoder_b
         co_return co_await static_cast<Self &>(*this).one_shot(negated);
     }
 };
+
+// Has hooks of its own, and weight_doubling_codec has hooks for it too. The
+// mixin doubles the weight on the wire, so the bytes show which of them ran.
+struct weighted {
+    int id{};
+    int weight{};
+
+    bool operator==(const weighted &) const = default;
+
+    template <typename Encoder> auto encode(Encoder &encoder) const { return encoder(wrap_as_array{id, weight}); }
+    template <typename Decoder> auto decode(Decoder &decoder) { return decoder(wrap_as_array{id, weight}); }
+
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const {
+        co_return co_await encoder(wrap_as_array{id, weight});
+    }
+
+    template <typename Decoder> resumable<status_code> resumable_decode(Decoder &decoder) {
+        co_return co_await decoder(wrap_as_array{id, weight});
+    }
+};
+
+// Only the one-shot half
+template <typename Self> struct one_shot_weight_doubling_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    void encode(const weighted &value) { static_cast<Self &>(*this)(wrap_as_array{value.id, value.weight * 2}); }
+
+    status_code decode(weighted &value) {
+        int        id{};
+        int        doubled{};
+        const auto result = static_cast<Self &>(*this)(wrap_as_array{id, doubled});
+        if (!result)
+            return result.error();
+
+        value = {id, doubled / 2};
+        return status_code::success;
+    }
+};
+
+template <typename Self> struct weight_doubling_codec : one_shot_weight_doubling_codec<Self> {
+    using one_shot_weight_doubling_codec<Self>::decode;
+    using one_shot_weight_doubling_codec<Self>::encode;
+
+    resumable<status_code> resumable_encode(const weighted &value) {
+        const int doubled = value.weight * 2;
+        co_return co_await static_cast<Self &>(*this)(wrap_as_array{value.id, doubled});
+    }
+
+    resumable<status_code> resumable_decode(weighted &value) {
+        int        id{};
+        int        doubled{};
+        const auto status = co_await static_cast<Self &>(*this)(wrap_as_array{id, doubled});
+        if (status == status_code::success)
+            value = {id, doubled / 2};
+        co_return status;
+    }
+};
+
+// Encodes and decodes weighted{1, 111} with a resumable encoder and decoder
+// that have Codecs installed, and expects these bytes in between
+template <template <typename> typename... Codecs> void check_weighted_wire(std::string_view expected_hex) {
+    const weighted         expected{1, 111};
+    std::vector<std::byte> wire;
+
+    // Encode
+    {
+        auto encoder   = make_resumable_encoder<Codecs...>(wire);
+        auto operation = encoder(expected);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(to_hex(wire) == expected_hex);
+    }
+
+    // Decode what the hex says, not what the encoder wrote
+    auto     input = to_bytes(expected_hex);
+    weighted actual;
+    auto     decoder   = make_resumable_decoder<Codecs...>(input);
+    auto     operation = decoder(actual);
+    REQUIRE(operation.done());
+    REQUIRE(operation.result());
+    CHECK(actual == expected);
+}
 
 template <template <typename> typename Hook> void check_mixin_hook_ignores_conversions() {
     std::vector<std::byte> output;
@@ -1504,5 +1588,25 @@ TEST_SUITE("roundtrip/resumable") {
     TEST_CASE("a mixin encode hook leaves values it would only convert from alone") {
         SUBCASE("encode hook") { check_mixin_hook_ignores_conversions<negated_double_encode_hook>(); }
         SUBCASE("transcode hook") { check_mixin_hook_ignores_conversions<negated_double_transcode_hook>(); }
+    }
+
+    TEST_CASE("an installed mixin hook goes before the hooks a type has itself") {
+        const weighted expected{1, 111};
+
+        // The one-shot encoder and decoder let the installed codec go first
+        std::vector<std::byte> reference;
+        REQUIRE(make_encoder<weight_doubling_codec>(reference)(expected));
+        REQUIRE(to_hex(reference) == "820118de");
+
+        weighted one_shot;
+        REQUIRE(make_decoder<weight_doubling_codec>(reference)(one_shot));
+        REQUIRE(one_shot == expected);
+
+        SUBCASE("the mixin hook runs") { check_weighted_wire<weight_doubling_codec>("820118de"); }
+        SUBCASE("the type's hooks run without a mixin") { check_weighted_wire<>("8201186f"); }
+        // A resumable hook still goes before any one-shot codec
+        SUBCASE("the type's hooks run when the mixin only has a one-shot codec") {
+            check_weighted_wire<one_shot_weight_doubling_codec>("8201186f");
+        }
     }
 }

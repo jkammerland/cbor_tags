@@ -470,10 +470,11 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                       "this type has a resumable decode hook that is never called, every hook takes the value as T & and "
                       "returns resumable<status_code>");
 
-        if constexpr (has_explicit_hook<U>())
-            return customization(value);
-        else if constexpr (has_mixin<U>())
+        // Installed codecs first, like the one-shot decoder
+        if constexpr (has_mixin<U>())
             return mixin(value);
+        else if constexpr (has_explicit_hook<U>())
+            return customization(value);
         else if constexpr (read_in_one_piece<U>())
             return one_shot(value);
         else if constexpr (IsStringSink<U>)
