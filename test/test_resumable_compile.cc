@@ -269,6 +269,24 @@ static_assert(!detail::HasResumableDecodeMixin<mixin_hooks<status_code>, int>);
 static_assert(!detail::HasResumableTranscodeMixin<mixin_hooks<status_code>, int>);
 static_assert(!detail::HasResumableEncodeMixin<mixin_hooks<resumable<status_code> &>, int>);
 
+// The encoder only gives a mixin hook the values it takes without a conversion.
+struct double_mixin_hooks {
+    resumable<status_code> resumable_encode(const double &) &;
+    resumable<status_code> resumable_transcode(double) &;
+};
+
+static_assert(detail::HasResumableEncodeMixin<double_mixin_hooks, const int>);
+static_assert(detail::HasDirectResumableEncodeMixin<double_mixin_hooks, const double>);
+static_assert(detail::HasDirectResumableEncodeMixin<double_mixin_hooks, double>);
+static_assert(!detail::HasDirectResumableEncodeMixin<double_mixin_hooks, const int>);
+static_assert(!detail::HasDirectResumableEncodeMixin<double_mixin_hooks, const float>);
+static_assert(!detail::HasDirectResumableEncodeMixin<double_mixin_hooks, const bool>);
+static_assert(detail::HasDirectResumableTranscodeMixin<double_mixin_hooks, const double>);
+static_assert(detail::HasDirectResumableTranscodeMixin<double_mixin_hooks, double>);
+static_assert(!detail::HasDirectResumableTranscodeMixin<double_mixin_hooks, const int>);
+static_assert(detail::HasDirectResumableEncodeMixin<valid_mixin_hooks, const int>);
+static_assert(!detail::HasDirectResumableEncodeMixin<mixin_hooks<status_code>, int>);
+
 } // namespace hook_contract
 
 int main() {

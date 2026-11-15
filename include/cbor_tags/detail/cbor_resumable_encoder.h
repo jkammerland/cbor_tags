@@ -290,8 +290,8 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     template <typename T, std::size_t I = 0> static consteval bool has_mixin() {
         if constexpr (I == sizeof...(Codecs))
             return false;
-        else if constexpr (HasResumableEncodeMixin<std::tuple_element_t<I, mixins>, T> ||
-                           HasResumableTranscodeMixin<std::tuple_element_t<I, mixins>, T>)
+        else if constexpr (HasDirectResumableEncodeMixin<std::tuple_element_t<I, mixins>, T> ||
+                           HasDirectResumableTranscodeMixin<std::tuple_element_t<I, mixins>, T>)
             return true;
         else
             return has_mixin<T, I + 1>();
@@ -299,9 +299,9 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     template <typename T, std::size_t I = 0> resumable<status_code> mixin(T &value) {
         using codec = std::tuple_element_t<I, mixins>;
-        if constexpr (HasResumableEncodeMixin<codec, T>)
+        if constexpr (HasDirectResumableEncodeMixin<codec, T>)
             return static_cast<codec &>(*this).resumable_encode(value);
-        else if constexpr (HasResumableTranscodeMixin<codec, T>)
+        else if constexpr (HasDirectResumableTranscodeMixin<codec, T>)
             return static_cast<codec &>(*this).resumable_transcode(value);
         else
             return mixin<T, I + 1>(value);

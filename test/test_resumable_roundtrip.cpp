@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
@@ -532,6 +534,39 @@ template <typename Context, typename Value>
 resumable<status_code> resumable_transcode(Context &context, Value &value) {
     ++value.resumable_calls;
     co_return co_await context(wrap_as_array{value.number, value.text});
+}
+
+// Hooks for double only. They negate it, so the bytes show where they ran.
+template <typename Self> struct negated_double_encode_hook : codec::encoder_base<Self> {
+    using codec::encoder_base<Self>::encode;
+
+    resumable<status_code> resumable_encode(const double &value) {
+        const double negated = -value;
+        co_return co_await static_cast<Self &>(*this).one_shot(negated);
+    }
+};
+
+template <typename Self> struct negated_double_transcode_hook : codec::encoder_base<Self> {
+    using codec::encoder_base<Self>::encode;
+
+    resumable<status_code> resumable_transcode(double value) {
+        const double negated = -value;
+        co_return co_await static_cast<Self &>(*this).one_shot(negated);
+    }
+};
+
+template <template <typename> typename Hook> void check_mixin_hook_ignores_conversions() {
+    std::vector<std::byte> output;
+    auto                   encoder   = make_resumable_encoder<Hook>(output);
+    auto                   operation = encoder(42, 1.5F, true, 2.5);
+
+    REQUIRE(operation.done());
+    REQUIRE(operation.result());
+    // int, float and bool keep their own encoding, only the double is negated
+    CHECK(to_hex(output) == "182a"
+                            "fa3fc00000"
+                            "f5"
+                            "fbc004000000000000");
 }
 
 } // namespace
@@ -1464,5 +1499,10 @@ TEST_SUITE("roundtrip/resumable") {
         CHECK(after.committed_bytes() == 0U);
         CHECK(std::ranges::empty(after.remaining_input()));
         CHECK(consumed == bytes.size());
+    }
+
+    TEST_CASE("a mixin encode hook leaves values it would only convert from alone") {
+        SUBCASE("encode hook") { check_mixin_hook_ignores_conversions<negated_double_encode_hook>(); }
+        SUBCASE("transcode hook") { check_mixin_hook_ignores_conversions<negated_double_transcode_hook>(); }
     }
 }
