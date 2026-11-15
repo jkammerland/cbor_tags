@@ -353,8 +353,16 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             co_return co_await resumable_transcode(*this, value);
     }
 
+    template <typename T> static consteval bool hooked() { return explicit_hook_kind<T>() != explicit_hook_type::none || has_mixin<T>(); }
+
     template <typename T> resumable<status_code> item(T &value) {
-        using U             = std::remove_cvref_t<T>;
+        using U = std::remove_cvref_t<T>;
+        // A hook that only takes a mutable value is skipped for a const one, and
+        // the bytes would then depend on how the caller passed it
+        static_assert(!std::is_const_v<T> || hooked<const U>() || !hooked<U>(),
+                      "this type's resumable hook only takes a mutable value and would be skipped for a const one, "
+                      "add a hook that takes it as const or pass it mutable");
+
         constexpr auto hook = explicit_hook_kind<T>();
         if constexpr (hook != explicit_hook_type::none)
             return explicit_hook<hook>(value);
