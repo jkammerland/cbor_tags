@@ -314,6 +314,18 @@ foreach(CASE IN ITEMS ADL_ENCODE ADL_TRANSCODE MEMBER_TRANSCODE MIXIN_ENCODE MIX
     "-DPASS_REGEX=resumable hook only takes a mutable value and would be skipped for a const one" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
+foreach(CASE IN ITEMS ENCODE DECODE VARIANT_DECODE)
+  string(TOLOWER "resumable_one_shot_only_codec_${CASE}_compile_fails" TEST_NAME)
+  string(REGEX REPLACE "^.*_" "" DIRECTION "${CASE}")
+  string(TOLOWER "${DIRECTION}" DIRECTION)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_one_shot_only_codec_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_ONE_SHOT_ONLY_CODEC_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=an installed codec has a one-shot ${DIRECTION} for this type and no resumable hook" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
 foreach(CASE IN ITEMS MEMBER_ENCODE RETURN_ENCODE RVALUE_DECODE RETURN_DECODE RVALUE_TRANSCODE_DECODE RVALUE_TRANSCODE_ENCODE)
   string(TOLOWER "resumable_hook_signature_${CASE}_compile_fails" TEST_NAME)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_hook_signature_compile_fail.cc)

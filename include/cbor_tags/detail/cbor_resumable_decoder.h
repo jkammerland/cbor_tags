@@ -464,13 +464,29 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                      IsUntaggedTuple<U> || IsAggregate<U>);
     }
 
+    // The type's own hook would run, and an installed codec has a one-shot
+    // decode for the type in one of these forms. Only looks at the codecs when
+    // it has to, a hook must not make their one-shot overloads instantiate.
+    template <typename T, payload_decode_context... Forms> static consteval bool own_hook_beats_one_shot_codec() {
+        if constexpr (has_mixin<T>() || !has_explicit_hook<T>())
+            return false;
+        else
+            return (codec_payload_mixin_customization<one_shot_type>::template accepts<T, Forms>() || ...);
+    }
+
     template <typename T> resumable<status_code> item(T &value) {
         using U = std::remove_cvref_t<T>;
         static_assert(has_explicit_hook<U>() || has_mixin<U>() || !HasMismatchedResumableDecodeHook<self_type, U>,
                       "this type has a resumable decode hook that is never called, every hook takes the value as T & and "
                       "returns resumable<status_code>");
 
-        // Installed codecs first, like the one-shot decoder
+        // Installed codecs first, like the one-shot decoder. One that only has a
+        // one-shot decode for the type would lose to the type's own hook here
+        // and win there, so the same bytes would give different values.
+        static_assert(!(own_hook_beats_one_shot_codec<U, payload_decode_context::direct, payload_decode_context::header>()),
+                      "an installed codec has a one-shot decode for this type and no resumable hook, so the type's own hook "
+                      "would run here and the codec in a one-shot decoder, give the codec a resumable_decode too");
+
         if constexpr (has_mixin<U>())
             return mixin(value);
         else if constexpr (has_explicit_hook<U>())
@@ -922,6 +938,11 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     // finishes. Only metadata-only candidate selection can return eagerly.
     template <std::size_t I, typename T> resumable<status_code> selected_alternative(T &value) {
         using U = variant_alternative_t<I, T>;
+        // A one-shot variant has read the tag by now and asks the codecs with it
+        static_assert(!IsTag<U> || !(own_hook_beats_one_shot_codec<U, payload_decode_context::tag>()),
+                      "an installed codec has a one-shot decode for this type and no resumable hook, so the type's own hook "
+                      "would run here and the codec in a one-shot decoder, give the codec a resumable_decode too");
+
         U           decoded{};
         status_code status;
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())

@@ -355,6 +355,16 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
 
     template <typename T> static consteval bool hooked() { return explicit_hook_kind<T>() != explicit_hook_type::none || has_mixin<T>(); }
 
+    // The type's own hook would run, and an installed codec has a one-shot
+    // encode for the type. Only looks at the codecs when it has to, a hook must
+    // not make their one-shot overloads instantiate.
+    template <typename T> static consteval bool own_hook_beats_one_shot_codec() {
+        if constexpr (has_mixin<T>() || explicit_hook_kind<T>() == explicit_hook_type::none)
+            return false;
+        else
+            return codec_payload_mixin_customization<one_shot_type>::template accepts<std::remove_cvref_t<T>>();
+    }
+
     template <typename T> resumable<status_code> item(T &value) {
         using U = std::remove_cvref_t<T>;
         // A hook that only takes a mutable value is skipped for a const one, and
@@ -367,8 +377,14 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
                       "this type has a resumable encode hook that is never called, an encode member must be const, and every "
                       "hook takes the value as an lvalue and returns resumable<status_code>");
 
-        // Installed codecs first, like the one-shot encoder
+        // Installed codecs first, like the one-shot encoder. One that only has a
+        // one-shot encode for the type would lose to the type's own hook here
+        // and win there, so the same value would get different bytes.
         constexpr auto hook = explicit_hook_kind<T>();
+        static_assert(!own_hook_beats_one_shot_codec<T>(),
+                      "an installed codec has a one-shot encode for this type and no resumable hook, so the type's own hook "
+                      "would run here and the codec in a one-shot encoder, give the codec a resumable_encode too");
+
         if constexpr (has_mixin<T>())
             return mixin(value);
         else if constexpr (hook != explicit_hook_type::none)

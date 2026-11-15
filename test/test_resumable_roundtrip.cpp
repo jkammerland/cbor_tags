@@ -576,8 +576,7 @@ struct weighted {
     }
 };
 
-// Only the one-shot half
-template <typename Self> struct one_shot_weight_doubling_codec : codec::base<Self> {
+template <typename Self> struct weight_doubling_codec : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
@@ -593,11 +592,6 @@ template <typename Self> struct one_shot_weight_doubling_codec : codec::base<Sel
         value = {id, doubled / 2};
         return status_code::success;
     }
-};
-
-template <typename Self> struct weight_doubling_codec : one_shot_weight_doubling_codec<Self> {
-    using one_shot_weight_doubling_codec<Self>::decode;
-    using one_shot_weight_doubling_codec<Self>::encode;
 
     resumable<status_code> resumable_encode(const weighted &value) {
         const int doubled = value.weight * 2;
@@ -1604,9 +1598,5 @@ TEST_SUITE("roundtrip/resumable") {
 
         SUBCASE("the mixin hook runs") { check_weighted_wire<weight_doubling_codec>("820118de"); }
         SUBCASE("the type's hooks run without a mixin") { check_weighted_wire<>("8201186f"); }
-        // A resumable hook still goes before any one-shot codec
-        SUBCASE("the type's hooks run when the mixin only has a one-shot codec") {
-            check_weighted_wire<one_shot_weight_doubling_codec>("8201186f");
-        }
     }
 }
