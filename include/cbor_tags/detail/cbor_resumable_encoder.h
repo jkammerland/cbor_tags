@@ -659,9 +659,10 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         if constexpr (!resumable_builtin_leaf<value> || !std::is_lvalue_reference_v<reference> || !std::same_as<value, Value>) {
             return false;
         } else {
-            if constexpr (explicit_hook_kind<element>() != explicit_hook_type::none || has_mixin<element>()) {
+            if constexpr (hooked<element>() || const_value_skips_hook<element>()) {
                 // A bypassed one-shot overload may have a deduced return type whose
                 // body is intentionally invalid for this context. Do not probe it.
+                // A const element that would skip a hook goes to item() too, which refuses it.
                 return false;
             } else {
                 // Include mutable-only codec overloads, even though the one-shot
