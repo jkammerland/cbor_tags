@@ -466,6 +466,10 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     template <typename T> resumable<status_code> item(T &value) {
         using U = std::remove_cvref_t<T>;
+        static_assert(has_explicit_hook<U>() || has_mixin<U>() || !HasMismatchedResumableDecodeHook<self_type, U>,
+                      "this type has a resumable decode hook that is never called, every hook takes the value as T & and "
+                      "returns resumable<status_code>");
+
         if constexpr (has_explicit_hook<U>())
             return customization(value);
         else if constexpr (has_mixin<U>())

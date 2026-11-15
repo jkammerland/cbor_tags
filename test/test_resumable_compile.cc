@@ -287,6 +287,36 @@ static_assert(!detail::HasDirectResumableTranscodeMixin<double_mixin_hooks, cons
 static_assert(detail::HasDirectResumableEncodeMixin<valid_mixin_hooks, const int>);
 static_assert(!detail::HasDirectResumableEncodeMixin<mixin_hooks<status_code>, int>);
 
+// A hook the concepts above turn down is still found by its name, so the
+// encoder and decoder can refuse it instead of quietly skipping it.
+static_assert(!detail::HasMismatchedResumableEncodeHook<context, valid_member_hooks>);
+static_assert(!detail::HasMismatchedResumableDecodeHook<context, valid_member_hooks>);
+static_assert(!detail::HasMismatchedResumableEncodeHook<context, valid_free_hooks>);
+static_assert(!detail::HasMismatchedResumableDecodeHook<context, valid_free_hooks>);
+static_assert(detail::HasMismatchedResumableEncodeHook<context, member_hooks<status_code>>);
+static_assert(detail::HasMismatchedResumableDecodeHook<context, member_hooks<status_code>>);
+static_assert(detail::HasMismatchedResumableEncodeHook<context, free_hooks<status_code>>);
+static_assert(detail::HasMismatchedResumableDecodeHook<context, free_hooks<status_code>>);
+static_assert(detail::HasMismatchedResumableEncodeHook<context, mutable_encode_member>);
+static_assert(!detail::HasMismatchedResumableDecodeHook<context, mutable_encode_member>);
+
+struct rvalue_free_hooks {};
+resumable<status_code> resumable_decode(context &, rvalue_free_hooks &&);
+resumable<status_code> resumable_transcode(context &, rvalue_free_hooks &&);
+static_assert(!detail::HasResumableDecodeFreeFunction<context, rvalue_free_hooks>);
+static_assert(detail::HasMismatchedResumableDecodeHook<context, rvalue_free_hooks>);
+static_assert(detail::HasMismatchedResumableEncodeHook<context, rvalue_free_hooks>);
+
+// A hook for another type must not answer for a type that only converts to it.
+struct converts_to_rvalue_free_hooks {
+    operator rvalue_free_hooks() const;
+};
+static_assert(!detail::HasMismatchedResumableDecodeHook<context, converts_to_rvalue_free_hooks>);
+static_assert(!detail::HasMismatchedResumableEncodeHook<context, converts_to_rvalue_free_hooks>);
+static_assert(!detail::HasMismatchedResumableDecodeHook<context, std::vector<int>>);
+static_assert(!detail::HasMismatchedResumableEncodeHook<context, std::string>);
+static_assert(!detail::HasMismatchedResumableDecodeHook<context, int>);
+
 } // namespace hook_contract
 
 int main() {

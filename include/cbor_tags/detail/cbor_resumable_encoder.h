@@ -362,6 +362,9 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         static_assert(!std::is_const_v<T> || hooked<const U>() || !hooked<U>(),
                       "this type's resumable hook only takes a mutable value and would be skipped for a const one, "
                       "add a hook that takes it as const or pass it mutable");
+        static_assert(hooked<U>() || hooked<const U>() || !HasMismatchedResumableEncodeHook<self_type, U>,
+                      "this type has a resumable encode hook that is never called, an encode member must be const, and every "
+                      "hook takes the value as an lvalue and returns resumable<status_code>");
 
         constexpr auto hook = explicit_hook_kind<T>();
         if constexpr (hook != explicit_hook_type::none)
