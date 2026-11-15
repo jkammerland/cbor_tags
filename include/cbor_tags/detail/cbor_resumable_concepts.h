@@ -54,14 +54,21 @@ concept HasResumableTranscodeMixin = requires(Codec &codec, T &value) {
     { codec.resumable_transcode(value) } -> std::same_as<resumable<status_code>>;
 };
 
-// A built-in match must beat a mixin encode hook that only fits through a
-// conversion, like the one-shot overload probe. A hook for double would
-// otherwise take every int, and keep a reference to the converted temporary.
+// A built-in match must beat a mixin hook that only fits through a
+// conversion, like the one-shot overload probe. An encode hook for double
+// would otherwise take every int, and keep a reference to the converted
+// temporary. A hook for a base type fits a derived value the same way, in both
+// directions, and the one-shot encoder and decoder leave that one alone too.
 struct builtin_resumable_overload {};
 
 template <typename Codec> struct resumable_encode_overload_probe : Codec {
     using Codec::resumable_encode;
     template <typename T> builtin_resumable_overload resumable_encode(const volatile T &);
+};
+
+template <typename Codec> struct resumable_decode_overload_probe : Codec {
+    using Codec::resumable_decode;
+    template <typename T> builtin_resumable_overload resumable_decode(const volatile T &);
 };
 
 template <typename Codec> struct resumable_transcode_overload_probe : Codec {
@@ -74,6 +81,12 @@ template <typename Codec, typename T>
 concept HasDirectResumableEncodeMixin =
     HasResumableEncodeMixin<Codec, T> && !requires(resumable_encode_overload_probe<Codec> &probe, T &value) {
         { probe.resumable_encode(value) } -> std::same_as<builtin_resumable_overload>;
+    };
+
+template <typename Codec, typename T>
+concept HasDirectResumableDecodeMixin =
+    HasResumableDecodeMixin<Codec, T> && !requires(resumable_decode_overload_probe<Codec> &probe, T &value) {
+        { probe.resumable_decode(value) } -> std::same_as<builtin_resumable_overload>;
     };
 
 template <typename Codec, typename T>

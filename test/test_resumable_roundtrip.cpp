@@ -633,6 +633,80 @@ template <template <typename> typename... Codecs> void check_weighted_wire(std::
     CHECK(actual == expected);
 }
 
+// A mixin's hooks are for the type they name. A type derived from that one is
+// another type, and the one-shot encoder and decoder see it that way too
+struct int_list : std::vector<int> {
+    using std::vector<int>::vector;
+};
+
+// Reverses the ints on the wire, so the bytes and the values show whether it ran
+template <typename Self> struct reversed_ints_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    resumable<status_code> resumable_encode(const std::vector<int> &value) {
+        // Not a vector of int, that would come straight back here
+        const std::vector<long> reversed(value.rbegin(), value.rend());
+        co_return co_await static_cast<Self &>(*this)(reversed);
+    }
+
+    resumable<status_code> resumable_decode(std::vector<int> &value) {
+        std::vector<long> reversed;
+        const auto        status = co_await static_cast<Self &>(*this)(reversed);
+        if (status == status_code::success)
+            value.assign(reversed.rbegin(), reversed.rend());
+        co_return status;
+    }
+};
+
+// Has hooks of its own, and the mixin has hooks for its base
+struct shape {
+    int id{};
+};
+
+struct circle : shape {
+    int radius{};
+
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const {
+        co_return co_await encoder(wrap_as_array{id, radius});
+    }
+
+    template <typename Decoder> resumable<status_code> resumable_decode(Decoder &decoder) {
+        co_return co_await decoder(wrap_as_array{id, radius});
+    }
+};
+
+template <typename Self> struct shape_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    resumable<status_code> resumable_encode(const shape &value) { return static_cast<Self &>(*this)(value.id); }
+    resumable<status_code> resumable_decode(shape &value) { return static_cast<Self &>(*this)(value.id); }
+};
+
+// Encodes value with Codec installed, expects these bytes, and decodes them back
+template <template <typename> typename Codec, typename T> T check_wire_with_codec(const T &value, std::string_view expected_hex) {
+    std::vector<std::byte> wire;
+
+    // Encode
+    {
+        auto encoder   = make_resumable_encoder<Codec>(wire);
+        auto operation = encoder(value);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(to_hex(wire) == expected_hex);
+    }
+
+    // Decode what the hex says, not what the encoder wrote
+    auto input = to_bytes(expected_hex);
+    T    actual;
+    auto decoder   = make_resumable_decoder<Codec>(input);
+    auto operation = decoder(actual);
+    REQUIRE(operation.done());
+    REQUIRE(operation.result());
+    return actual;
+}
+
 template <template <typename> typename Hook> void check_mixin_hook_ignores_conversions() {
     std::vector<std::byte> output;
     auto                   encoder   = make_resumable_encoder<Hook>(output);
@@ -1598,5 +1672,32 @@ TEST_SUITE("roundtrip/resumable") {
 
         SUBCASE("the mixin hook runs") { check_weighted_wire<weight_doubling_codec>("820118de"); }
         SUBCASE("the type's hooks run without a mixin") { check_weighted_wire<>("8201186f"); }
+    }
+
+    TEST_CASE("a mixin hook for a base type leaves derived values alone in both directions") {
+        SUBCASE("the type the hooks name") {
+            const std::vector<int> expected{1, 2, 3};
+            CHECK(check_wire_with_codec<reversed_ints_codec>(expected, "83030201") == expected);
+        }
+
+        SUBCASE("a type derived from it") {
+            // Same bytes as the one-shot encoder, which leaves the codec out too
+            const int_list         expected{1, 2, 3};
+            std::vector<std::byte> reference;
+            REQUIRE(make_encoder(reference)(expected));
+            REQUIRE(to_hex(reference) == "83010203");
+
+            CHECK(check_wire_with_codec<reversed_ints_codec>(expected, "83010203") == expected);
+        }
+
+        SUBCASE("a derived type with hooks of its own") {
+            circle expected;
+            expected.id     = 7;
+            expected.radius = 9;
+
+            const auto actual = check_wire_with_codec<shape_codec>(expected, "820709");
+            CHECK(actual.id == expected.id);
+            CHECK(actual.radius == expected.radius);
+        }
     }
 }
