@@ -182,12 +182,14 @@ resumable<status_code> resumable_decode_typed_array(Context &context, R &range, 
     std::size_t                         boundary_size{};
     while (values.size() != element_count) {
         const auto available = resumable_source_access::borrow_window(source, reader.position_);
-        if (available ? available->empty() : resumable_context_access::empty(context)) {
+        // An empty window only says this run ended, the next byte may sit in the next one
+        const bool window = available && !available->empty();
+        if (!window && resumable_context_access::empty(context)) {
             co_await resumable_context_access::wait(context);
             continue;
         }
 
-        if (available) {
+        if (window) {
             // Complete elements go straight into their final destination storage.
             if (boundary_size == 0U && available->size() >= element_size) {
                 const auto count = std::min(element_count - values.size(), available->size() / element_size);
@@ -231,12 +233,12 @@ resumable<status_code> resumable_encode_typed_array_boundary(Context &context, s
             bytes = bytes.subspan(count);
             continue;
         }
-        if (!available) {
-            const auto count = source.write(bytes);
-            if (count != 0) {
-                bytes = bytes.subspan(count);
-                continue;
-            }
+
+        // No window, or an empty one. write() still knows if there is room
+        const auto count = source.write(bytes);
+        if (count != 0) {
+            bytes = bytes.subspan(count);
+            continue;
         }
         co_await resumable_context_access::wait(context);
     }
