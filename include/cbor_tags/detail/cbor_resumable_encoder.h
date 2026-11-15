@@ -398,13 +398,22 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     }
 
     // A mixin without the codec base. accepts() skips those, and a one-shot
-    // encoder calls their encode all the same. The probe pulls encode in by
-    // name, so first see that the mixin has one for this value.
+    // encoder calls their encode all the same. One with the base isn't asked
+    // anything here, asking it directly can be an error inside its encode.
     template <typename V, typename Codec> static consteval bool plain_codec_encodes() {
-        if constexpr (std::is_base_of_v<cbor::tags::codec::encoder_base<one_shot_type>, Codec> || !RetryEncodeDirect<Codec, V>)
+        if constexpr (std::is_base_of_v<cbor::tags::codec::encoder_base<one_shot_type>, Codec>)
             return false;
         else
+            return codec_encode_selected<V, Codec>();
+    }
+
+    // The probe pulls encode in by name, so first see that the mixin has one
+    // for this value.
+    template <typename V, typename Codec> static consteval bool codec_encode_selected() {
+        if constexpr (RetryEncodeDirect<Codec, V>)
             return codec_payload_mixin_customization<one_shot_type>::template codec_overload_selected<V &, Codec>();
+        else
+            return false;
     }
 
     template <typename T> resumable<status_code> item(T &value) {

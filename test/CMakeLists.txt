@@ -326,6 +326,11 @@ foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE PLAIN_ENCODE DECODE PLAIN_DECODE VAR
     "-DPASS_REGEX=an installed codec has a one-shot ${DIRECTION} for this type and no resumable hook" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
+
+# The checks above must not ask a codec that has the codec base about a value directly.
+add_executable(resumable_plain_codec_compile resumable_plain_codec_compile.cc)
+target_link_libraries(resumable_plain_codec_compile PRIVATE cbor::tags)
+add_test(NAME resumable_plain_codec_compile COMMAND resumable_plain_codec_compile)
 foreach(CASE IN ITEMS MEMBER_ENCODE RETURN_ENCODE RVALUE_ENCODE RVALUE_DECODE RVALUE_DECODE_OPTIONAL RETURN_DECODE RVALUE_TRANSCODE_DECODE RVALUE_TRANSCODE_ENCODE)
   string(TOLOWER "resumable_hook_signature_${CASE}_compile_fails" TEST_NAME)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_hook_signature_compile_fail.cc)

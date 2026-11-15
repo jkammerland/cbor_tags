@@ -480,14 +480,22 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     // A mixin without the codec base. accepts() skips those, and a one-shot
-    // decoder calls their decode all the same. The probe pulls decode in by
-    // name, so first see that the mixin has one for this value.
+    // decoder calls their decode all the same. One with the base isn't asked
+    // anything here, asking it directly can be an error inside its decode.
     template <typename T, payload_decode_context Form, typename Codec> static consteval bool plain_codec_decodes() {
-        if constexpr (std::is_base_of_v<cbor::tags::codec::decoder_base<one_shot_type>, Codec> ||
-                      !(RetryDecodeDirect<Codec, T> || RetryDecodeHeader<Codec, T> || RetryDecodeTag<Codec, T>))
+        if constexpr (std::is_base_of_v<cbor::tags::codec::decoder_base<one_shot_type>, Codec>)
             return false;
         else
+            return codec_decode_selected<T, Form, Codec>();
+    }
+
+    // The probe pulls decode in by name, so first see that the mixin has one
+    // for this value.
+    template <typename T, payload_decode_context Form, typename Codec> static consteval bool codec_decode_selected() {
+        if constexpr (RetryDecodeDirect<Codec, T> || RetryDecodeHeader<Codec, T> || RetryDecodeTag<Codec, T>)
             return codec_payload_mixin_customization<one_shot_type>::template codec_overload_selected<T, Form, Codec>();
+        else
+            return false;
     }
 
     template <typename T> resumable<status_code> item(T &value) {
