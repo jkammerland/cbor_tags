@@ -1232,7 +1232,7 @@ add_resumable_retry_failure(MEMBER_ENCODE "one-shot encoding requires a resumabl
 add_resumable_retry_failure(OBSERVER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
 
 # A declaration for a file-local type that is only used one way must not warn.
-# Clang is the one that does, about the flag nobody read. GCC with this flag
+# Clang is the one that does, about the flag nobody used. GCC with this flag
 # goes through the headers too and finds constants that have nothing to do with it.
 add_executable(resumable_one_way_retry_compile resumable_one_way_retry_compile.cc)
 target_link_libraries(resumable_one_way_retry_compile PRIVATE cbor::tags)
