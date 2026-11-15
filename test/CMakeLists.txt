@@ -1230,6 +1230,25 @@ foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG PLAIN OBSERVE
 endforeach()
 add_resumable_retry_failure(MEMBER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
 add_resumable_retry_failure(OBSERVER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
+
+# A declaration for a file-local type that is only used one way must not warn.
+# Clang is the one that does, about the flag nobody read. GCC with this flag
+# goes through the headers too and finds constants that have nothing to do with it.
+add_executable(resumable_one_way_retry_compile resumable_one_way_retry_compile.cc)
+target_link_libraries(resumable_one_way_retry_compile PRIVATE cbor::tags)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
+  target_compile_options(resumable_one_way_retry_compile PRIVATE -Werror=unused-const-variable)
+endif()
+add_test(NAME resumable_one_way_retry_compile COMMAND resumable_one_way_retry_compile)
+
+add_executable(resumable_retry_one_flag_compile_fails EXCLUDE_FROM_ALL resumable_one_way_retry_compile.cc)
+target_compile_definitions(resumable_retry_one_flag_compile_fails PRIVATE CBOR_TAGS_RETRY_ONE_FLAG)
+target_link_libraries(resumable_retry_one_flag_compile_fails PRIVATE cbor::tags)
+add_test(NAME resumable_retry_one_flag_compile_fails COMMAND ${CMAKE_COMMAND}
+  "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=resumable_retry_one_flag_compile_fails" "-DCONFIG=$<CONFIG>"
+  "-DPASS_REGEX=a resumable_retry_traits specialization declares both encode and decode"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+set_tests_properties(resumable_retry_one_flag_compile_fails PROPERTIES LABELS "compile-fail")
 add_resumable_retry_failure(NODISCARD "nodiscard" CBOR_RETRY_NODISCARD)
 
 foreach(DIRECTION ENCODE DECODE)

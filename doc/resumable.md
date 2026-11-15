@@ -650,9 +650,9 @@ Other wrappers need an applicable hook or retry declaration.
 ### One-shot retry declarations
 
 `resumable_retry_traits<T, Codec = void>` defaults both `encode` and `decode`
-to `false`. Specialize it before instantiating an operation. Omit `Codec` for
-member or ADL customizations; for a mixin, specialize on its actual one-shot
-`Codec<Transcoder>` instantiation:
+to `false`. Specialize it before instantiating an operation, and declare both
+flags in the specialization. Omit `Codec` for member or ADL customizations; for
+a mixin, specialize on its actual one-shot `Codec<Transcoder>` instantiation:
 
 ```cpp
 // transactional_record's decoder must publish changes only after success.
