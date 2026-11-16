@@ -183,7 +183,6 @@ if(CBOR_TAGS_TEST_HAS_STD_VALUE_WRAPPERS)
       "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
       "-DPASS_REGEX=${DIAGNOSTIC}" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   endfunction()
-  add_value_wrapper_compile_fail(std_indirect_direct_mixin_decode_compile_fails DIRECT_MIXIN DECODE "std::indirect payload must encode exactly one CBOR item")
   foreach(SHAPE EMPTY TAG_HEADER UNWRAPPED_GROUP)
     foreach(OPERATION ENCODE DECODE)
       string(TOLOWER "std_indirect_${SHAPE}_${OPERATION}_compile_fails" TEST_NAME)

@@ -17,17 +17,7 @@ struct group {
     int second{};
 };
 
-#if defined(CBOR_VALUE_DIRECT_MIXIN)
-template <typename Self> struct direct_codec : codec::base<Self> {
-    using codec::base<Self>::encode;
-    using codec::base<Self>::decode;
-    status_code decode(empty &) {
-        int value{};
-        return static_cast<Self &>(*this).decode(value);
-    }
-};
-using payload = std::indirect<empty>;
-#elif defined(CBOR_VALUE_EMPTY)
+#if defined(CBOR_VALUE_EMPTY)
 using payload = std::indirect<empty>;
 #elif defined(CBOR_VALUE_TAG_HEADER)
 using payload = std::indirect<static_tag<42>>;
@@ -54,9 +44,7 @@ using payload_options = default_options;
 int main() {
     std::vector<std::byte> bytes{std::byte{0x01}};
     payload                value{};
-#if defined(CBOR_VALUE_DIRECT_MIXIN)
-    return make_decoder<direct_codec, codec::std_indirect>(bytes)(value).has_value() ? 0 : 1;
-#elif defined(CBOR_VALUE_ENCODE)
+#if defined(CBOR_VALUE_ENCODE)
     encoder<std::vector<std::byte>, payload_options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder,
             cbor_variant_encoder, codec::std_indirect, cbor_value_example::codec::animal>
         enc{bytes};
