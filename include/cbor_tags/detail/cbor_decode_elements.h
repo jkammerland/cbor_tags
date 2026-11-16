@@ -36,7 +36,8 @@ constexpr status_code decode_array_elements(Decoder &decoder, Container &value, 
 }
 
 // A consumed break is distinct from a temporarily exhausted input window.
-// Header-context dispatch matches the one-shot indefinite container decoder.
+// Header-context dispatch matches the one-shot indefinite container decoder:
+// a codec that only has decode(T &) gets the header byte stepped back.
 // Mutable count/break references cannot be swapped; bounds follow min/max order.
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 template <bool CheckBounds = false, typename Decoder, typename Container, typename Appender, typename Completed = ignore_decoded_element,
@@ -62,7 +63,7 @@ constexpr status_code decode_indefinite_array_elements(Decoder &decoder, Contain
         }
 
         auto       decoded = make_decode_value_for<typename Container::value_type>(value);
-        const auto status  = decoder.decode(decoded, major, info);
+        const auto status  = decoder.decode_after_header(decoded, major, info);
         if (status != status_code::success)
             return status;
 
@@ -122,7 +123,7 @@ constexpr status_code decode_map_elements(Decoder &decoder, Container &value, Ap
             }
             const auto status = [&] {
                 if constexpr (Indefinite)
-                    return decoder.decode(entry->first, major, info);
+                    return decoder.decode_after_header(entry->first, major, info);
                 else
                     return decoder.decode(entry->first);
             }();
@@ -137,7 +138,7 @@ constexpr status_code decode_map_elements(Decoder &decoder, Container &value, Ap
                 const auto [major, info] = decoder.read_initial_byte();
                 if (major == major_type::Simple && info == std::byte{31})
                     return status_code::malformed_structure;
-                return decoder.decode(entry->second, major, info);
+                return decoder.decode_after_header(entry->second, major, info);
             } else
                 return decoder.decode(entry->second);
         }();

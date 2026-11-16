@@ -62,13 +62,13 @@ template <typename Self> struct offset_uint32_encoder {
     void encode(std::uint32_t value) { static_cast<Self &>(*this).encode(std::uint64_t{value} + 1000); }
 };
 
-// A one-shot decoder calls this for a point it starts on. Right inside an
-// optional it has read the header already and can't
+// A one-shot decoder calls this wherever it reads a point. Right inside an
+// optional it has read the header by then and steps back for it
 template <typename Self> struct swapped_points_decoder {
     ct::status_code decode(point &value) { return static_cast<Self &>(*this).decode(ct::wrap_as_array{value.y, value.x}); }
 };
 
-// The same with the header read, so this is the one for inside an optional
+// Takes the header that was read, so no stepping back inside an optional
 template <typename Self> struct swapped_points_header_decoder {
     ct::status_code decode(point &value, ct::major_type major, std::byte info) {
         auto &self = static_cast<Self &>(*this);
@@ -85,7 +85,7 @@ template <typename Self> struct swapped_points_header_decoder {
     }
 };
 
-// Back to front, for a vector a one-shot decoder starts on
+// Back to front, and it reads the header of the vector itself
 template <typename Self> struct reversed_ints_decoder {
     ct::status_code decode(std::vector<int> &value) {
         auto &self = static_cast<Self &>(*this);
@@ -126,6 +126,17 @@ template <typename Self> struct offset_uint32_decoder {
     }
 };
 
+// And for a number the decoder still stands in front of
+template <typename Self> struct offset_uint32_first_byte_decoder {
+    ct::status_code decode(std::uint32_t &value) {
+        std::uint64_t wire_value{};
+        const auto    status = static_cast<Self &>(*this).decode(wire_value);
+        if (status == ct::status_code::success)
+            value = static_cast<std::uint32_t>(wire_value + 1000);
+        return status;
+    }
+};
+
 // This one has the codec base, and none of the above is its business. Its
 // return type is deduced, so asking it about a std::string directly is an
 // error inside its body. A one-shot encoder never gets that far, its own
@@ -148,6 +159,10 @@ template <typename Self> struct cbor::tags::resumable_retry_traits<std::uint32_t
 };
 
 template <typename Self> struct cbor::tags::resumable_retry_traits<std::uint32_t, offset_uint32_decoder<Self>> {
+    static constexpr bool decode = true;
+};
+
+template <typename Self> struct cbor::tags::resumable_retry_traits<std::uint32_t, offset_uint32_first_byte_decoder<Self>> {
     static constexpr bool decode = true;
 };
 
@@ -206,33 +221,29 @@ bool number_encoder_is_called() {
     return result && operation.done() && operation.result() && one_shot_bytes == expected && resumable_bytes == expected;
 }
 
-// [1, 2] right inside an optional. Neither decoder can call a codec that has
-// to start on the point, so both read x, y
-bool point_in_optional_reads_in_order() {
+// [1, 2] right inside an optional. The one-shot decoder steps back to the
+// header and calls the codec, so y comes first. A resumable decoder reading
+// the same optional is one of the cases at the end of main
+bool point_in_optional_reads_swapped() {
     const auto           bytes = bytes_of({0x82, 0x01, 0x02});
-    std::optional<point> one_shot_value;
-    std::optional<point> resumable_value;
+    std::optional<point> value;
 
-    const auto result    = ct::make_decoder<swapped_points_decoder>(bytes)(one_shot_value);
-    auto       decoder   = ct::make_resumable_decoder<swapped_points_decoder>(bytes);
-    auto       operation = decoder(resumable_value);
+    auto       decoder = ct::make_decoder<swapped_points_decoder>(bytes);
+    const auto result  = decoder(value);
 
-    const auto in_order = [](const std::optional<point> &value) { return value && value->x == 1 && value->y == 2; };
-    return result && operation.done() && operation.result() && in_order(one_shot_value) && in_order(resumable_value);
+    return result && value && value->x == 2 && value->y == 1;
 }
 
 // The same for [1, 2, 3] and the codec that reads a vector back to front
-bool ints_in_optional_read_in_order() {
+bool ints_in_optional_read_reversed() {
     const auto                      bytes = bytes_of({0x83, 0x01, 0x02, 0x03});
-    std::optional<std::vector<int>> one_shot_value;
-    std::optional<std::vector<int>> resumable_value;
+    std::optional<std::vector<int>> value;
 
-    const auto result    = ct::make_decoder<reversed_ints_decoder>(bytes)(one_shot_value);
-    auto       decoder   = ct::make_resumable_decoder<reversed_ints_decoder>(bytes);
-    auto       operation = decoder(resumable_value);
+    auto       decoder = ct::make_decoder<reversed_ints_decoder>(bytes);
+    const auto result  = decoder(value);
 
-    const std::optional<std::vector<int>> expected{{1, 2, 3}};
-    return result && operation.done() && operation.result() && one_shot_value == expected && resumable_value == expected;
+    const std::optional<std::vector<int>> expected{{3, 2, 1}};
+    return result && value == expected;
 }
 
 // 7 right inside an optional, both decoders get to the codec for the number.
@@ -256,11 +267,28 @@ bool number_decoder_is_called() {
     return numbers_ok && point_ok;
 }
 
+// The same 7 and the codec that starts on the number. The one-shot decoder
+// steps back for it, the resumable one has only looked at the byte
+bool number_decoder_from_first_byte_is_called() {
+    const auto                   bytes = bytes_of({0x07});
+    std::optional<std::uint32_t> one_shot_value;
+    std::optional<std::uint32_t> resumable_value;
+
+    auto       one_shot_decoder = ct::make_decoder<offset_uint32_first_byte_decoder>(bytes);
+    const auto result           = one_shot_decoder(one_shot_value);
+
+    auto decoder   = ct::make_resumable_decoder<offset_uint32_first_byte_decoder>(bytes);
+    auto operation = decoder(resumable_value);
+
+    return result && operation.done() && operation.result() && one_shot_value == 1007U && resumable_value == 1007U;
+}
+
 } // namespace
 
 int main() {
     const bool ok = string_keeps_its_bytes() && codec_with_base_is_not_asked() && number_encoder_is_called() &&
-                    point_in_optional_reads_in_order() && ints_in_optional_read_in_order() && number_decoder_is_called();
+                    point_in_optional_reads_swapped() && ints_in_optional_read_reversed() && number_decoder_is_called() &&
+                    number_decoder_from_first_byte_is_called();
 
     [[maybe_unused]] std::vector<std::byte> bytes;
 
@@ -280,6 +308,14 @@ int main() {
     std::vector<int> value;
     auto             decoder   = ct::make_resumable_decoder<reversed_ints_decoder>(bytes);
     auto             operation = decoder(value);
+#elif defined(CBOR_TAGS_PLAIN_CODEC_OPTIONAL_DECODE)
+    std::optional<point> value;
+    auto                 decoder   = ct::make_resumable_decoder<swapped_points_decoder>(bytes);
+    auto                 operation = decoder(value);
+#elif defined(CBOR_TAGS_PLAIN_CODEC_OPTIONAL_CONTAINER_DECODE)
+    std::optional<std::vector<int>> value;
+    auto                            decoder   = ct::make_resumable_decoder<reversed_ints_decoder>(bytes);
+    auto                            operation = decoder(value);
 #elif defined(CBOR_TAGS_PLAIN_CODEC_HEADER_DECODE)
     std::optional<point> value;
     auto                 decoder   = ct::make_resumable_decoder<swapped_points_header_decoder>(bytes);

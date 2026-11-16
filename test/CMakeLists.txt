@@ -75,6 +75,10 @@ add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,r
 add_test(NAME container_item_shape_wire COMMAND tests "--test-suite=cbor_wire/container_item_shape")
 set_tests_properties(container_item_shape_wire PROPERTIES LABELS "cbor-wire")
 
+# A codec that only has decode(T &), from every place a decoder gets to a T
+add_test(NAME codec_first_byte_wire COMMAND tests "--test-suite=cbor_wire/codec_first_byte")
+set_tests_properties(codec_first_byte_wire PROPERTIES LABELS "cbor-wire")
+
 # Reject only unbounded zero-input iterations, including nested count loops.
 foreach(SHAPE ARRAY_EMPTY ARRAY_NESTED_EMPTY ARRAY_TUPLE_EMPTY ARRAY_UNWRAPPED_EMPTY MAP_EMPTY
     OPTIONAL_ARRAY_EMPTY VARIANT_ARRAY_EMPTY)
@@ -333,7 +337,8 @@ add_executable(resumable_plain_codec_compile resumable_plain_codec_compile.cc)
 target_link_libraries(resumable_plain_codec_compile PRIVATE cbor::tags)
 add_test(NAME resumable_plain_codec_compile COMMAND resumable_plain_codec_compile)
 
-foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE CONTAINER_ENCODE DECODE CONTAINER_DECODE HEADER_DECODE TAG_DECODE)
+foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE CONTAINER_ENCODE DECODE CONTAINER_DECODE OPTIONAL_DECODE OPTIONAL_CONTAINER_DECODE
+                      HEADER_DECODE TAG_DECODE)
   string(TOLOWER "resumable_plain_codec_${CASE}_compile_fails" TEST_NAME)
   string(REGEX REPLACE "^.*_" "" DIRECTION "${CASE}")
   string(TOLOWER "${DIRECTION}" DIRECTION)
