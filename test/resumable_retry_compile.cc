@@ -31,6 +31,51 @@ struct tagged_record {
     int                            value{};
 };
 
+enum class retry_level : std::uint32_t { low = 7 };
+
+template <typename Self> struct unsafe_integer_codec : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+    std::size_t calls{};
+
+    status_code decode(std::uint32_t &value) {
+        ++calls;
+        std::uint64_t next{};
+        const auto    result = static_cast<Self &>(*this)(next);
+        if (!result)
+            return result.error();
+        value = static_cast<std::uint32_t>(next);
+        return status_code::success;
+    }
+};
+
+// A whole-enum codec does not call the installed uint32 codec.
+template <typename Self> struct enum_codec : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(retry_level &value) {
+        std::uint64_t next{};
+        const auto    result = static_cast<Self &>(*this)(next);
+        if (!result)
+            return result.error();
+        value = static_cast<retry_level>(next);
+        return status_code::success;
+    }
+};
+
+// The core IsEnum overload hides this same-signature template.
+template <typename Self> struct hidden_enum_codec : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    template <IsEnum T> status_code decode(T &value) {
+        std::uint64_t next{};
+        const auto    result = static_cast<Self &>(*this)(next);
+        if (!result)
+            return result.error();
+        value = static_cast<T>(next);
+        return status_code::success;
+    }
+};
+
 template <typename Self> struct unsafe_codec : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
@@ -80,6 +125,12 @@ template <typename Self> struct view_override : codec::base<Self> {
 // A value-only declaration cannot authorize a mixin, and an encode declaration
 // cannot authorize that codec's decoding direction.
 namespace cbor::tags {
+template <typename Self> struct resumable_retry_traits<retry_level, enum_codec<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<retry_level, hidden_enum_codec<Self>> {
+    static constexpr bool decode = true;
+};
 template <> struct resumable_retry_traits<std::uint32_t> {
     static constexpr bool encode = true;
     static constexpr bool decode = true;
@@ -141,6 +192,18 @@ int main() {
     std::uint32_t value{};
     auto          factory   = make_resumable_decoder<unsafe_codec>(bytes);
     auto          operation = factory(value);
+#elif defined(CBOR_RETRY_ENUM_DIRECT)
+    retry_level value{};
+    auto        factory   = make_resumable_decoder<unsafe_integer_codec>(bytes);
+    auto        operation = factory(value);
+#elif defined(CBOR_RETRY_ENUM_HEADER)
+    std::optional<retry_level> value;
+    auto                       factory   = make_resumable_decoder<unsafe_codec>(bytes);
+    auto                       operation = factory(value);
+#elif defined(CBOR_RETRY_ENUM_HIDDEN)
+    retry_level value{};
+    auto        factory   = make_resumable_decoder<hidden_enum_codec, unsafe_integer_codec>(bytes);
+    auto        operation = factory(value);
 #elif defined(CBOR_RETRY_MIXIN_HEADER)
     std::optional<std::uint32_t> value;
     auto                         factory   = make_resumable_decoder<unsafe_codec>(bytes);
@@ -169,6 +232,13 @@ int main() {
     std::uint64_t value{};
     if (!ordinary(value) || value != 42)
         return 2;
+
+    // Inactive integer codecs need no declaration when the enum has its own codec.
+    auto        enum_factory = make_resumable_decoder<enum_codec, unsafe_integer_codec, unsafe_codec>(bytes);
+    retry_level enum_value{};
+    auto        enum_operation = enum_factory(enum_value);
+    if (!enum_operation.done() || !enum_operation.result() || static_cast<std::uint32_t>(enum_value) != 42)
+        return 3;
     (void)factory(std::uint32_t{1});
 #endif
 }

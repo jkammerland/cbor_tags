@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
+#include <limits>
 #include <list>
 #include <map>
 #include <memory>
@@ -135,6 +136,22 @@ template <typename Self> struct offset_numbers : codec::decoder_base<Self> {
     }
 };
 
+// The public call returns incomplete as a status, rather than throwing it.
+template <typename Self> struct checked_numbers : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(std::uint32_t &value) {
+        std::uint64_t wire_value{};
+        const auto    result = static_cast<Self &>(*this)(wire_value);
+        if (!result)
+            return result.error();
+        if (wire_value > std::numeric_limits<std::uint32_t>::max() - 1000U)
+            return status_code::error;
+        value = static_cast<std::uint32_t>(wire_value + 1000);
+        return status_code::success;
+    }
+};
+
 // Reads the tag itself, and 1000 more than on the wire again
 template <typename Self> struct offset_readings : codec::decoder_base<Self> {
     using codec::decoder_base<Self>::decode;
@@ -197,6 +214,9 @@ template <typename Self> struct resumable_retry_traits<position, y_first<Self>> 
     static constexpr bool decode = true;
 };
 template <typename Self> struct resumable_retry_traits<std::uint32_t, offset_numbers<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<std::uint32_t, checked_numbers<Self>> {
     static constexpr bool decode = true;
 };
 template <std::uint64_t Tag, typename Self> struct resumable_retry_traits<reading<Tag>, offset_readings<Self>> {
@@ -309,6 +329,21 @@ template <typename Pointer> auto points_at(typename Pointer::element_type expect
 } // namespace
 
 TEST_SUITE("cbor_wire/codec_first_byte") {
+    TEST_CASE("an enum propagates incomplete and terminal statuses from its integer codec") {
+        // All integer bytes must arrive before the resumable operation can finish.
+        check_reads<level, checked_numbers>("1903e8", level::high);
+
+        for (const auto hex : {"19", "1903", "1bffffffffffffffff"}) {
+            CAPTURE(hex);
+            const auto bytes  = to_bytes(hex);
+            level      value  = level::low;
+            const auto result = make_decoder<checked_numbers>(bytes)(value);
+            REQUIRE_FALSE(result);
+            CHECK(result.error() == (hex == std::string_view{"1bffffffffffffffff"} ? status_code::error : status_code::incomplete));
+            CHECK(value == level::low);
+        }
+    }
+
     TEST_CASE("a first-byte codec supplies the complete item after a header or tag") {
         using decoder_type = decltype(make_decoder<markers>(std::declval<const std::vector<std::byte> &>()));
         using core_type    = decltype(make_decoder(std::declval<const std::vector<std::byte> &>()));
@@ -469,6 +504,35 @@ TEST_SUITE("cbor_wire/codec_first_byte") {
         check_one_shot_reads<std::shared_ptr<position>, shared_ptr, y_first>("d81c820703", points_at<std::shared_ptr<position>>({3, 7}));
         check_one_shot_reads<std::shared_ptr<reading<100>>, shared_ptr, offset_readings>("d81cd86405",
                                                                                          points_at<std::shared_ptr<reading<100>>>({1005}));
+    }
+
+    TEST_CASE("a first-byte variant codec observes its tag once for shared references") {
+        // The prefix owns reference 0, then the two shared integers own 1 and 2.
+        for (const auto prefix : {"d81c07", "d9001c07", "da0000001c07", "db000000000000001c07"}) {
+            CAPTURE(std::string_view{prefix});
+            const auto                  bytes = to_bytes(std::string(prefix) + "d81c09d81c0ad81d02182a");
+            const std::deque<std::byte> segments(bytes.begin(), bytes.end());
+
+            const auto check = [](const auto &input) {
+                std::variant<reading<28>, int> first;
+                std::shared_ptr<int>           a, b, alias;
+                int                            trailer{};
+                auto                           decoder = make_decoder<codec::shared_ptr, offset_readings>(input);
+                REQUIRE(decoder(first, a, b, alias, trailer));
+                REQUIRE(std::holds_alternative<reading<28>>(first));
+                CHECK(std::get<reading<28>>(first).value == 1007);
+                REQUIRE(a);
+                REQUIRE(b);
+                REQUIRE(alias);
+                CHECK(*a == 9);
+                CHECK(*b == 10);
+                CHECK(alias == b);
+                CHECK(alias != a);
+                CHECK(trailer == TRAILER);
+            };
+            check(bytes);
+            check(segments);
+        }
     }
 
 #if defined(__cpp_lib_indirect) && __cpp_lib_indirect >= 202502L

@@ -163,12 +163,14 @@ auto result = dec(temperature);
 ```
 
 Codec implementations that hand a consumed header to another value call
-`dec.decode_after_header(value, major, additional_info)`. After consuming a tag,
+`dec.decode_after_header(value, major, additional_info)`. After decoding a tag
+through `dec.decode(...)` or `dec.decode_tag_argument(...)`,
 call `dec.decode_after_tag(value, tag, additional_info)` with the original tag
 header's additional information, which preserves its encoded width. These calls
 require the decoder to stand immediately after that header or tag, before any
 payload bytes have been consumed. They select the contextual overload or return
-to the first byte for a codec that needs it. Direct `dec.decode(value, major,
+to the first byte for a codec that needs it. Re-reading the tag does not notify
+tag observers again. Direct `dec.decode(value, major,
 additional_info)` and `dec.decode(value, tag)` calls select only that overload
 form.
 

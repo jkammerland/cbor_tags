@@ -254,7 +254,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // The encoder writes the number through its codecs, so read it through them
         auto status = this->decode_after_header(result, major, additionalInfo);
         if (status != status_code::success) {
-            return status_code::no_match_for_enum_on_buffer;
+            // Keep enum mismatch diagnostics, but let incomplete and codec failures propagate.
+            return status == status_code::no_match_for_int_on_buffer || status == status_code::no_match_for_uint_on_buffer
+                       ? status_code::no_match_for_enum_on_buffer
+                       : status;
         }
         value = static_cast<U>(result);
         return status_code::success;
@@ -1369,8 +1372,21 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             const auto info      = static_cast<unsigned>(additionalInfo);
             const auto tag_bytes = info < 24U ? std::ptrdiff_t{0} : std::ptrdiff_t{1} << (info - 24U);
 
-            reader_.seek(-1 - tag_bytes);
-            return this->decode(value);
+            if constexpr (detail::HasDecodedCborTagObserver<self_t>) {
+                // This tag was already observed. Suppress only its repeated read,
+                // leaving nested payload tags and later items visible to observers.
+                struct restore_observation {
+                    std::optional<size_type> &slot;
+                    std::optional<size_type>  previous;
+                    constexpr ~restore_observation() { slot = previous; }
+                } guard{reread_tag_end_, std::exchange(reread_tag_end_, current_offset())};
+
+                reader_.seek(-1 - tag_bytes);
+                return this->decode(value);
+            } else {
+                reader_.seek(-1 - tag_bytes);
+                return this->decode(value);
+            }
         } else {
             return this->decode(value, tag);
         }
@@ -1563,6 +1579,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     constexpr status_code decode_tag_argument(byte additionalInfo, std::uint64_t &tag) {
         tag = decode_unsigned(additionalInfo);
         if constexpr (detail::HasDecodedCborTagObserver<self_t>) {
+            if (reread_tag_end_ == current_offset()) {
+                return status_code::success;
+            }
             return static_cast<self_t &>(*this).observe_decoded_cbor_tag(tag);
         }
         return status_code::success;
@@ -1994,6 +2013,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    // Decoders without a tag observer need no replay state or storage.
+    struct no_tag_observer {};
+    [[no_unique_address]] std::conditional_t<(detail::HasDecodedCborTagObserver<Decoders<self_t>> || ...), std::optional<size_type>,
+                                             no_tag_observer> reread_tag_end_{};
+
     constexpr auto take_bstring_payload(size_type span_length) {
         if constexpr (IsContiguous<InputBuffer>) {
             auto *begin  = std::ranges::data(data_) + reader_.position_;

@@ -80,8 +80,23 @@ consteval bool resumable_codec_decode_retry_allowed() {
 
 template <typename OneShot, typename T, payload_decode_context Context, typename... Codecs>
 consteval bool resumable_decode_retry_allowed() {
-    return (!IsClassWithDecodingOverload<OneShot, T> || resumable_retry_declared<T, void, false>()) &&
-           (resumable_codec_decode_retry_allowed<OneShot, T, Codecs, Context>() && ...);
+    constexpr bool allowed = (!IsClassWithDecodingOverload<OneShot, T> || resumable_retry_declared<T, void, false>()) &&
+                             (resumable_codec_decode_retry_allowed<OneShot, T, Codecs, Context>() && ...);
+    if constexpr (IsEnum<T>) {
+        using customization = codec_payload_mixin_customization<OneShot>;
+        if constexpr (!IsClassWithDecodingOverload<OneShot, T> && !customization::template starts_on_first_byte<T>()) {
+            // Built-in enum decoding calls the underlying integer's codec.
+            // A whole-enum override instead owns its complete retry contract.
+            using underlying    = std::underlying_type_t<T>;
+            constexpr auto form = customization::template wants_first_byte<underlying, payload_decode_context::header>()
+                                      ? payload_decode_context::direct
+                                      : payload_decode_context::header;
+            return allowed && ((!customization::template codec_overload_selected<underlying, form, Codecs>() ||
+                                resumable_retry_declared<underlying, Codecs, false>()) &&
+                               ...);
+        }
+    }
+    return allowed;
 }
 
 template <typename OneShot, typename T, typename Codec> consteval bool resumable_codec_encode_retry_allowed() {
