@@ -578,6 +578,9 @@ it a value that the resumable side resumes structurally, such as a string,
 container, optional, variant, tuple, or reflected record: the resumable side
 would never call it.
 
+The one-shot decoder's [entry points](codec_extensions.md#decoder-entry-points)
+also determine which decode form runs when a resumable decoder retries a codec.
+
 A hook can make two calls on the `encoder` or `decoder` it receives, which in a
 mixin is `static_cast<Self &>(*this)`:
 

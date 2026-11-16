@@ -375,7 +375,7 @@ template <typename Self> struct samples : ct::codec::base<Self> {
         requires std::same_as<std::remove_cvref_t<Value>, app::samples>
     ct::status_code decode(ct::bounded_size<Value, Min, Max> &bounded, ct::major_type major, std::byte additional_info) {
         auto values = ct::as_bounded_size<Min, Max>(bounded.value().values);
-        return static_cast<Self &>(*this).decode(values, major, additional_info);
+        return static_cast<Self &>(*this).decode_after_header(values, major, additional_info);
     }
 
     template <typename Value>
@@ -388,7 +388,7 @@ template <typename Self> struct samples : ct::codec::base<Self> {
         requires std::same_as<std::remove_cvref_t<Value>, app::samples>
     ct::status_code decode(ct::dynamic_bounded_size<Value> &bounded, ct::major_type major, std::byte additional_info) {
         auto values = ct::as_bounded_size(bounded.value().values, bounded.min_size(), bounded.max_size());
-        return static_cast<Self &>(*this).decode(values, major, additional_info);
+        return static_cast<Self &>(*this).decode_after_header(values, major, additional_info);
     }
 };
 
