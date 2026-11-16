@@ -22,6 +22,10 @@
 #include <vector>
 #include <version>
 
+#if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
+#include <cbor_tags/codec/std_expected.h>
+#endif
+
 #if defined(__cpp_lib_indirect) && __cpp_lib_indirect >= 202502L
 #include <cbor_tags/codec/std_indirect.h>
 #endif
@@ -62,6 +66,38 @@ template <std::uint64_t Tag> struct reading {
 // An encoder writes an enum as the number it is made of, through the codecs
 // for that number. Reading one has to go through them as well
 enum class level : std::uint32_t { low = 1007, high = 2000 };
+
+// These have no reflected payload; only their codec supplies a complete item.
+struct marker {
+    bool operator==(const marker &) const = default;
+};
+
+struct tagged_marker {
+    static constexpr std::uint64_t cbor_tag = 100;
+
+    bool operator==(const tagged_marker &) const = default;
+};
+
+template <typename Self> struct markers : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(marker &) {
+        unsigned   value{};
+        const auto status = static_cast<Self &>(*this).decode(value);
+        if (status != status_code::success)
+            return status;
+        return value == 7U ? status_code::success : status_code::error;
+    }
+
+    status_code decode(tagged_marker &) {
+        auto      &self   = static_cast<Self &>(*this);
+        const auto status = self.decode(static_tag<100>{});
+        if (status != status_code::success)
+            return status;
+        marker payload;
+        return decode(payload);
+    }
+};
 
 // The codecs down to marked_numbers only have decode(T &), the form for a
 // decoder that stands on the first byte of the value
@@ -146,6 +182,13 @@ template <typename Self> struct marked_numbers : codec::decoder_base<Self> {
 // All of them only write the value once they have it, so the resumable
 // decoder may run them again from the start
 namespace cbor::tags {
+
+template <typename Self> struct resumable_retry_traits<marker, markers<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<tagged_marker, markers<Self>> {
+    static constexpr bool decode = true;
+};
 
 template <typename Self> struct resumable_retry_traits<float, centi_degrees<Self>> {
     static constexpr bool decode = true;
@@ -266,6 +309,54 @@ template <typename Pointer> auto points_at(typename Pointer::element_type expect
 } // namespace
 
 TEST_SUITE("cbor_wire/codec_first_byte") {
+    TEST_CASE("a first-byte codec supplies the complete item after a header or tag") {
+        using decoder_type = decltype(make_decoder<markers>(std::declval<const std::vector<std::byte> &>()));
+        using core_type    = decltype(make_decoder(std::declval<const std::vector<std::byte> &>()));
+        using context      = detail::payload_decode_context;
+
+        CHECK(detail::codec_payload_encodes_one_item<decoder_type, marker>(detail::payload_context<context::header>{}));
+        CHECK(detail::codec_payload_encodes_one_item<decoder_type, tagged_marker>(detail::payload_context<context::tag>{}));
+        CHECK(detail::codec_payload_encodes_one_item<decoder_type, std::optional<marker>>());
+        CHECK(detail::codec_payload_encodes_one_item<decoder_type, std::vector<marker>>());
+        CHECK_FALSE(detail::codec_payload_encodes_one_item<core_type, marker>(detail::payload_context<context::header>{}));
+        CHECK_FALSE(detail::codec_payload_encodes_one_item<core_type, tagged_marker>(detail::payload_context<context::tag>{}));
+
+        check_reads<std::optional<marker>, markers>("07", marker{});
+        check_reads<std::vector<marker>, markers>("9f0707ff", {marker{}, marker{}});
+        check_reads<std::variant<tagged_marker, int>, markers>("d86407", tagged_marker{});
+    }
+
+#if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
+    TEST_CASE("std expected accepts nested payloads supplied by a first-byte codec") {
+        using optional_value = std::expected<std::optional<marker>, int>;
+        using array_value    = std::expected<std::vector<marker>, int>;
+        using variant_value  = std::expected<std::variant<tagged_marker, int>, int>;
+
+        check_one_shot_reads<optional_value, codec::std_expected, markers>("82f507", [](const optional_value &value) {
+            REQUIRE(value.has_value());
+            CHECK(value->has_value());
+        });
+        check_one_shot_reads<array_value, codec::std_expected, markers>("82f59f0707ff", [](const array_value &value) {
+            REQUIRE(value.has_value());
+            CHECK(value->size() == 2);
+        });
+        check_one_shot_reads<variant_value, codec::std_expected, markers>("82f5d86407", [](const variant_value &value) {
+            REQUIRE(value.has_value());
+            CHECK(std::holds_alternative<tagged_marker>(*value));
+        });
+
+        // The codec must still reject a different marker and an incomplete integer.
+        for (const auto hex : {"82f508", "82f51900"}) {
+            CAPTURE(hex);
+            const auto     bytes = to_bytes(hex);
+            optional_value value;
+            const auto     result = make_decoder<codec::std_expected, markers>(bytes)(value);
+            REQUIRE_FALSE(result);
+            CHECK(result.error() == (hex == std::string_view{"82f508"} ? status_code::error : status_code::incomplete));
+        }
+    }
+#endif
+
     TEST_CASE("a decode(T &) codec reads a number where the decoder starts on it") { check_reads<float, centi_degrees>("190866", 21.5F); }
 
     TEST_CASE("a decode(T &) codec reads a number right inside an optional") {
@@ -385,6 +476,12 @@ TEST_SUITE("cbor_wire/codec_first_byte") {
         using held = std::indirect<position>;
 
         check_one_shot_reads<held, codec::std_indirect, y_first>("820703", [](const held &value) { CHECK(*value == position{3, 7}); });
+    }
+
+    TEST_CASE("std indirect accepts a complete item supplied only by a first-byte codec") {
+        using held = std::indirect<marker>;
+        check_one_shot_reads<held, codec::std_indirect, markers>("07",
+                                                                 [](const held &value) { CHECK_FALSE(value.valueless_after_move()); });
     }
 #endif
 

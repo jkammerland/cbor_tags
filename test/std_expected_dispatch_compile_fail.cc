@@ -33,15 +33,6 @@ template <typename Self> struct header_codec : codec::base<Self> {
     }
 };
 
-template <typename Self> struct direct_codec : codec::base<Self> {
-    using codec::base<Self>::encode;
-    using codec::base<Self>::decode;
-    status_code decode(empty &) {
-        std::uint64_t value{};
-        return static_cast<Self &>(*this).decode(value);
-    }
-};
-
 template <typename Self> struct container_codec : codec::base<Self> {
     using codec::base<Self>::encode;
     using codec::base<Self>::decode;
@@ -60,10 +51,8 @@ template <typename Self> struct container_codec : codec::base<Self> {
 using payload = std::expected<empty, int>;
 #elif defined(CBOR_EXPECTED_HEADER_GROUP)
 using payload = std::expected<group, int>;
-#elif defined(CBOR_EXPECTED_HEADER_ARRAY) || defined(CBOR_EXPECTED_DIRECT_ARRAY)
+#elif defined(CBOR_EXPECTED_HEADER_ARRAY)
 using payload = std::expected<std::vector<empty>, int>;
-#elif defined(CBOR_EXPECTED_DIRECT_OPTIONAL)
-using payload = std::expected<std::optional<empty>, int>;
 #elif defined(CBOR_EXPECTED_TAG_VARIANT)
 using payload = std::expected<std::variant<tagged_empty, int>, int>;
 #elif defined(CBOR_EXPECTED_BOUNDED_CONTAINER)
@@ -82,8 +71,6 @@ int main() {
     payload value{};
 #if defined(CBOR_EXPECTED_BOUNDED_CONTAINER)
     return make_decoder<container_codec, codec::std_expected>(bytes)(value).has_value() ? 0 : 1;
-#elif defined(CBOR_EXPECTED_DIRECT_ARRAY) || defined(CBOR_EXPECTED_DIRECT_OPTIONAL)
-    return make_decoder<direct_codec, codec::std_expected>(bytes)(value).has_value() ? 0 : 1;
 #else
     return make_decoder<header_codec, codec::std_expected>(bytes)(value).has_value() ? 0 : 1;
 #endif

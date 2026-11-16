@@ -122,6 +122,19 @@ template <typename Self, typename T, payload_decode_context Context> consteval b
     }
 }
 
+// After a header or tag, item dispatch can return to a codec's first byte.
+// Keep this separate from the exact-form probes used to select an overload.
+template <typename Self, typename T, payload_decode_context Context> consteval bool codec_payload_has_item_customization() {
+    if constexpr (codec_payload_has_customization<Self, T, Context>()) {
+        return true;
+    } else if constexpr (payload_is_decoder<Self> &&
+                         (Context == payload_decode_context::header || Context == payload_decode_context::tag)) {
+        return codec_payload_mixin_customization<Self>::template accepts<T, payload_decode_context::direct>();
+    } else {
+        return false;
+    }
+}
+
 // This is a progress check, not the complete-item rule below. Only built-in
 // direct group decoding can succeed without reading a header or any fields.
 // Custom decoder bodies remain an application contract, not a structural proof.
@@ -198,7 +211,7 @@ consteval bool codec_payload_encodes_one_item(payload_context<Context>, std::boo
         return true;
     } else if constexpr (IsAnyHeader<type> || is_static_tag_t<type>::value || is_dynamic_tag_t<type>) {
         return false;
-    } else if constexpr (!CoreOnly && codec_payload_has_customization<Self, type, Context>()) {
+    } else if constexpr (!CoreOnly && codec_payload_has_item_customization<Self, type, Context>()) {
         // Application customizations own the item selected on this route.
         return true;
     } else if constexpr (IsOptional<type>) {
