@@ -95,11 +95,15 @@ struct codec_payload_mixin_customization<decoder<Buffer, Options, Codecs...>> {
         return (accepts_codec<T, Context, Codecs<self_type>>() || ...);
     }
 
-    // An installed codec decodes the type from its first byte and none takes
-    // what the decoder has read by the time it gets there, the header or the
-    // tag. Only asks for the second form when there is a first
+    // An installed codec decodes the type from its first byte
+    template <typename T> static consteval bool starts_on_first_byte() {
+        return (codec_overload_selected<T, payload_decode_context::direct, Codecs<self_type>>() || ...);
+    }
+
+    // And none takes what the decoder has read by the time it gets there, the
+    // header or the tag. Only asks for the second form when there is a first
     template <typename T, payload_decode_context Read> static consteval bool wants_first_byte() {
-        if constexpr ((codec_overload_selected<T, payload_decode_context::direct, Codecs<self_type>>() || ...))
+        if constexpr (starts_on_first_byte<T>())
             return !(codec_overload_selected<T, Read, Codecs<self_type>>() || ...);
         else
             return false;

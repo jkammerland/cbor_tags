@@ -4,18 +4,27 @@
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_resumable.h>
 #include <cbor_tags/codec.h>
+#include <cbor_tags/codec/shared_ptr.h>
+#include <cbor_tags/codec/unique_ptr.h>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
 #include <list>
 #include <map>
+#include <memory>
 #include <optional>
+#include <ostream>
 #include <span>
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
+#include <version>
+
+#if defined(__cpp_lib_indirect) && __cpp_lib_indirect >= 202502L
+#include <cbor_tags/codec/std_indirect.h>
+#endif
 
 using namespace cbor::tags;
 
@@ -27,6 +36,8 @@ struct position {
     int y{};
 
     friend bool operator==(const position &, const position &) = default;
+
+    friend std::ostream &operator<<(std::ostream &out, const position &value) { return out << "{x=" << value.x << " y=" << value.y << "}"; }
 };
 
 // One field, so a decoder that has read a header hands it on to that field
@@ -34,6 +45,8 @@ struct holder {
     position where;
 
     friend bool operator==(const holder &, const holder &) = default;
+
+    friend std::ostream &operator<<(std::ostream &out, const holder &value) { return out << "{where=" << value.where << "}"; }
 };
 
 // Tagged, a variant reads the tag before it knows which alternative it is
@@ -42,6 +55,8 @@ template <std::uint64_t Tag> struct reading {
     int                            value{};
 
     friend bool operator==(const reading &, const reading &) = default;
+
+    friend std::ostream &operator<<(std::ostream &out, const reading &value) { return out << "{value=" << value.value << "}"; }
 };
 
 // An encoder writes an enum as the number it is made of, through the codecs
@@ -148,6 +163,11 @@ template <typename Self> struct resumable_retry_traits<std::uint32_t, marked_num
     static constexpr bool decode = true;
 };
 
+// A unique pointer gets a new pointee on every run
+template <typename T, typename Self> struct resumable_retry_traits<std::unique_ptr<T>, codec::unique_ptr<Self>> {
+    static constexpr bool decode = true;
+};
+
 } // namespace cbor::tags
 
 namespace {
@@ -196,38 +216,57 @@ template <typename T, template <typename> typename... Codecs> T read_resumable(c
     return value;
 }
 
-// The same bytes through a one-shot decoder, from a vector and from a deque,
-// and through a resumable decoder, in one piece and a byte at a time. All four
-// have to come out as the value written here
-template <typename T, template <typename> typename... Codecs> void check_reads(std::string_view hex, const T &expected) {
+// The bytes through a one-shot decoder, from a vector and from a deque. Each
+// value that comes back is handed to look
+template <typename T, template <typename> typename... Codecs> void check_one_shot_reads(std::string_view hex, const auto &look) {
     CAPTURE(hex);
     const auto                  bytes = to_bytes(std::string(hex) + std::string(TRAILER_HEX));
     const std::deque<std::byte> segments(bytes.begin(), bytes.end());
 
     {
         INFO("one-shot");
-        CHECK(read_one_shot<T, std::vector<std::byte>, Codecs...>(bytes) == expected);
+        look(read_one_shot<T, std::vector<std::byte>, Codecs...>(bytes));
     }
     {
         INFO("one-shot, input that isn't contiguous");
-        CHECK(read_one_shot<T, std::deque<std::byte>, Codecs...>(segments) == expected);
+        look(read_one_shot<T, std::deque<std::byte>, Codecs...>(segments));
     }
+}
+
+// And through a resumable decoder as well, in one piece and a byte at a time
+template <typename T, template <typename> typename... Codecs> void check_reads_as(std::string_view hex, const auto &look) {
+    check_one_shot_reads<T, Codecs...>(hex, look);
+
+    CAPTURE(hex);
+    const auto bytes = to_bytes(std::string(hex) + std::string(TRAILER_HEX));
+
     {
         INFO("resumable");
-        CHECK(read_resumable<T, Codecs...>(bytes, bytes.size()) == expected);
+        look(read_resumable<T, Codecs...>(bytes, bytes.size()));
     }
     {
         INFO("resumable, a byte at a time");
-        CHECK(read_resumable<T, Codecs...>(bytes, 1) == expected);
+        look(read_resumable<T, Codecs...>(bytes, 1));
     }
+}
+
+// All four have to come out as the value written here
+template <typename T, template <typename> typename... Codecs> void check_reads(std::string_view hex, const T &expected) {
+    check_reads_as<T, Codecs...>(hex, [&](const T &value) { CHECK(value == expected); });
+}
+
+// For a pointer: it has to come back holding this
+template <typename Pointer> auto points_at(typename Pointer::element_type expected) {
+    return [expected](const Pointer &value) {
+        REQUIRE(value);
+        CHECK(*value == expected);
+    };
 }
 
 } // namespace
 
 TEST_SUITE("cbor_wire/codec_first_byte") {
-    TEST_CASE("a decode(T &) codec reads a number where the decoder starts on it") {
-        check_reads<float, centi_degrees>("190866", 21.5F);
-    }
+    TEST_CASE("a decode(T &) codec reads a number where the decoder starts on it") { check_reads<float, centi_degrees>("190866", 21.5F); }
 
     TEST_CASE("a decode(T &) codec reads a number right inside an optional") {
         check_reads<std::optional<float>, centi_degrees>("190866", 21.5F);
@@ -301,6 +340,53 @@ TEST_SUITE("cbor_wire/codec_first_byte") {
     TEST_CASE("the other alternative of that variant is read as before") {
         check_reads<std::variant<reading<100>, int>, offset_readings>("05", std::variant<reading<100>, int>{std::in_place_index<1>, 5});
     }
+
+    TEST_CASE("a decode(T &) codec reads what a unique pointer points at") {
+        using codec::unique_ptr;
+
+        check_reads_as<std::unique_ptr<std::uint32_t>, unique_ptr, offset_numbers>("07", points_at<std::unique_ptr<std::uint32_t>>(1007));
+        check_reads_as<std::unique_ptr<position>, unique_ptr, y_first>("820703", points_at<std::unique_ptr<position>>({3, 7}));
+
+        // The pointer hands the header on to the only field of the struct
+        check_reads_as<std::unique_ptr<holder>, unique_ptr, y_first>("820703", points_at<std::unique_ptr<holder>>({position{3, 7}}));
+    }
+
+    TEST_CASE("a decode(T &) codec reads the tagged struct a unique pointer points at") {
+        using codec::unique_ptr;
+        using pointer = std::unique_ptr<reading<100>>;
+
+        check_reads_as<pointer, unique_ptr, offset_readings>("d86405", points_at<pointer>({1005}));
+        check_reads_as<pointer, unique_ptr, offset_readings>("d9006405", points_at<pointer>({1005}));
+    }
+
+    TEST_CASE("a decode(T &) codec reads the unique pointers of an indefinite array") {
+        using pointers = std::vector<std::unique_ptr<position>>;
+
+        check_reads_as<pointers, codec::unique_ptr, y_first>("9f820703820905ff", [](const pointers &values) {
+            REQUIRE(values.size() == 2);
+            REQUIRE(values[0]);
+            REQUIRE(values[1]);
+            CHECK(*values[0] == position{3, 7});
+            CHECK(*values[1] == position{5, 9});
+        });
+    }
+
+    TEST_CASE("a decode(T &) codec reads what a shared pointer points at") {
+        using codec::shared_ptr;
+
+        // Tag 28 goes around what the pointer shares. No resumable side for this codec
+        check_one_shot_reads<std::shared_ptr<position>, shared_ptr, y_first>("d81c820703", points_at<std::shared_ptr<position>>({3, 7}));
+        check_one_shot_reads<std::shared_ptr<reading<100>>, shared_ptr, offset_readings>("d81cd86405",
+                                                                                         points_at<std::shared_ptr<reading<100>>>({1005}));
+    }
+
+#if defined(__cpp_lib_indirect) && __cpp_lib_indirect >= 202502L
+    TEST_CASE("a decode(T &) codec reads what a std::indirect holds") {
+        using held = std::indirect<position>;
+
+        check_one_shot_reads<held, codec::std_indirect, y_first>("820703", [](const held &value) { CHECK(*value == position{3, 7}); });
+    }
+#endif
 
     TEST_CASE("a codec with both forms gets the one for where the decoder stands") {
         // From the first byte

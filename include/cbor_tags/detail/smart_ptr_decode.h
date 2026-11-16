@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cbor_concepts_checking.h"
 #include "cbor_tags/detail/cbor_extension_decode.h"
+#include "cbor_tags/detail/cbor_item_shape.h"
 #include "cbor_tags/detail/cbor_variant_dispatch.h"
 #include "cbor_tags/detail/smart_ptr_traits.h"
 #include "cbor_tags/smart_ptr/types.h"
@@ -118,12 +119,23 @@ template <typename T, typename Decoder>
 inline constexpr bool extension_decodes_with_major_v =
     extension_decodes_with_major<std::remove_cvref_t<T>, std::remove_cvref_t<Decoder>>::value;
 
+// An installed codec only has decode(T &) for the type, nothing that takes
+// what was read. The decoder steps back for those
+template <typename Decoder, typename T, cbor::tags::detail::payload_decode_context Read> consteval bool codec_wants_first_byte() {
+    using customization = cbor::tags::detail::codec_payload_mixin_customization<std::remove_cvref_t<Decoder>>;
+    return customization::template wants_first_byte<std::remove_cvref_t<T>, Read>();
+}
+
 template <typename Decoder, typename T>
 [[nodiscard]] status_code decode_transparent_value(Decoder &dec, T &value, major_type major, std::byte additional_info) {
     static_assert(encodes_one_cbor_item<typename Decoder::options, T>(), "smart pointer pointee must encode exactly one CBOR item");
 
     if constexpr (IsClassWithDecodingOverload<Decoder, T> || extension_decodes_with_major_v<T, Decoder>) {
         return dec.decode(value, major, additional_info);
+    } else if constexpr (codec_wants_first_byte<Decoder, T, cbor::tags::detail::payload_decode_context::header>() &&
+                         (!IsTag<T> || codec_wants_first_byte<Decoder, T, cbor::tags::detail::payload_decode_context::tag>())) {
+        // The codec reads the header itself, and the tag too when there is one
+        return dec.decode_after_header(value, major, additional_info);
     } else if constexpr (IsTag<T>) {
         if (major != major_type::Tag) {
             return status_code::no_match_for_tag_on_buffer;
@@ -156,11 +168,11 @@ template <typename Decoder, typename T>
             }
             std::apply([&](auto &...members) { ((result == status_code::success ? result = dec.decode(members) : result), ...); }, tuple);
         } else {
-            result = dec.decode(std::get<0>(tuple), major, additional_info);
+            result = dec.decode_after_header(std::get<0>(tuple), major, additional_info);
         }
         return result;
     } else {
-        return dec.decode(value, major, additional_info);
+        return dec.decode_after_header(value, major, additional_info);
     }
 }
 
@@ -217,7 +229,9 @@ template <typename Decoder, typename T> consteval bool unique_variant_alternativ
     } else if constexpr (IsVariant<type>) {
         return cbor::tags::detail::with_variant_alternatives<type>(
             []<typename... Ts>() { return (unique_variant_alternative_supported<Decoder, Ts>() && ...); });
-    } else if constexpr (IsClassWithDecodingOverload<Decoder, type> || extension_decodes_with_major_v<type, Decoder>) {
+    } else if constexpr (IsClassWithDecodingOverload<Decoder, type> || extension_decodes_with_major_v<type, Decoder> ||
+                         cbor::tags::detail::codec_payload_mixin_customization<Decoder>::template starts_on_first_byte<type>()) {
+        // Also a codec that only has decode(T &), the decoder calls that one from here too
         return false;
     } else if constexpr ((IsAggregate<type> || IsUntaggedTuple<type>) && !IsTag<type>) {
         using tuple_type          = pointer_tuple_t<type>;
