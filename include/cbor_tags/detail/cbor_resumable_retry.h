@@ -36,21 +36,27 @@ template <typename Codec>
 concept RetryEncodeObserver = requires(Codec &codec) { codec.observe_encoded_cbor_tag(std::uint64_t{}); };
 
 // What a declaration says for one direction, a flag it leaves out is false.
-// Both flags get looked for either way: a declaration for a file-local type
-// that only ever goes one way would otherwise make Clang warn about the flag
-// nobody named. Only the one that was asked for gets its value read.
+// Only the flag that was asked for gets looked at.
 template <typename T, typename Codec, bool Encode> consteval bool resumable_retry_declared() {
     using traits = resumable_retry_traits<std::remove_cvref_t<T>, Codec>;
 
-    constexpr bool has_encode = requires { traits::encode; };
-    constexpr bool has_decode = requires { traits::decode; };
+#if defined(__clang__)
+    // A declaration for a file-local type that only ever goes one way makes
+    // Clang warn about the flag nobody named, so name both here. Not for the
+    // others: naming a flag can be enough to have it worked out, GCC 12 does
+    // that, and the flag for the other way may not have an answer
+    [[maybe_unused]] constexpr bool named = requires { traits::encode; } || requires { traits::decode; };
+#endif
 
-    if constexpr (Encode && has_encode)
-        return static_cast<bool>(traits::encode);
-    else if constexpr (!Encode && has_decode)
-        return static_cast<bool>(traits::decode);
-    else
-        return false;
+    if constexpr (Encode) {
+        if constexpr (requires { traits::encode; })
+            return static_cast<bool>(traits::encode);
+    } else {
+        if constexpr (requires { traits::decode; })
+            return static_cast<bool>(traits::decode);
+    }
+
+    return false;
 }
 
 // Probe each installed mixin separately. A value's declaration must never
