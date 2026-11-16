@@ -719,6 +719,12 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         co_return co_await payload(bytes);
     }
 
+    // One codec at a time. With the pack expanded in the requires' own parameter
+    // list MSVC makes an error of a codec that has no encode for the element
+    template <typename Codec, typename Element> static consteval bool one_shot_codec_encodes() {
+        return requires(Codec &codec, Element &item) { codec.encode(item); };
+    }
+
     template <typename Reference, typename Value> static consteval bool builtin_leaf_reference() {
         using reference = Reference;
         using element   = std::remove_reference_t<reference>;
@@ -734,7 +740,7 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             } else {
                 // Include mutable-only codec overloads, even though the one-shot
                 // array loop itself binds every source element as const.
-                constexpr bool one_shot_override = (requires(Codecs<one_shot_type> &codec, element &item) { codec.encode(item); } || ...);
+                constexpr bool one_shot_override = (one_shot_codec_encodes<Codecs<one_shot_type>, element>() || ...);
                 return !one_shot_override && !codec_payload_has_customization<one_shot_type, value, payload_decode_context::direct>();
             }
         }
