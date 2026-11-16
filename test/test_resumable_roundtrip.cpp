@@ -1,3 +1,5 @@
+#include "test_util.h"
+
 #include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
@@ -16,6 +18,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -35,12 +38,12 @@ struct string_pair {
     std::string second;
     bool        operator==(const string_pair &) const = default;
 
-    template <typename Encoder> auto                        encode(Encoder &encoder) const { return encoder(wrap_as_array{first, second}); }
-    template <typename Decoder> auto                        decode(Decoder &decoder) { return decoder(wrap_as_array{first, second}); }
-    template <typename Encoder> resumable_task<status_code> resumable_encode(Encoder &encoder) const {
+    template <typename Encoder> auto                   encode(Encoder &encoder) const { return encoder(wrap_as_array{first, second}); }
+    template <typename Decoder> auto                   decode(Decoder &decoder) { return decoder(wrap_as_array{first, second}); }
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const {
         co_return co_await encoder(wrap_as_array{first, second});
     }
-    template <typename Decoder> resumable_task<status_code> resumable_decode(Decoder &decoder) {
+    template <typename Decoder> resumable<status_code> resumable_decode(Decoder &decoder) {
         co_return co_await decoder(wrap_as_array{first, second});
     }
 };
@@ -231,13 +234,13 @@ template <typename Self> struct explicit_uint32_codec : codec::base<Self> {
 
     template <typename Value>
         requires std::same_as<std::remove_cvref_t<Value>, std::uint32_t>
-    resumable_task<status_code> resumable_encode(Value &value) {
+    resumable<status_code> resumable_encode(Value &value) {
         ++integer_codec_calls::encoded;
         const auto wire_value = static_cast<std::uint64_t>(value) + 2000;
         co_return co_await static_cast<Self &>(*this)(wire_value);
     }
 
-    resumable_task<status_code> resumable_decode(std::uint32_t &value) {
+    resumable<status_code> resumable_decode(std::uint32_t &value) {
         ++integer_codec_calls::decoded;
         std::uint64_t wire_value{};
         const auto    status = co_await static_cast<Self &>(*this)(wire_value);
@@ -271,13 +274,13 @@ template <typename Self> struct explicit_only_uint32_codec : codec::base<Self> {
 
     template <typename T>
         requires std::same_as<std::remove_cvref_t<T>, std::uint32_t>
-    resumable_task<status_code> resumable_encode(T &value) {
+    resumable<status_code> resumable_encode(T &value) {
         ++integer_codec_calls::encoded;
         const auto wire_value = static_cast<std::uint64_t>(value) + 4000;
         co_return co_await static_cast<Self &>(*this)(wire_value);
     }
 
-    resumable_task<status_code> resumable_decode(std::uint32_t &value) {
+    resumable<status_code> resumable_decode(std::uint32_t &value) {
         ++integer_codec_calls::decoded;
         std::uint64_t wire_value{};
         const auto    status = co_await static_cast<Self &>(*this)(wire_value);
@@ -313,7 +316,7 @@ template <typename T> void check_every_decode_split(const T &expected) {
         operation.resume();
         if (!operation.done()) {
             storage.emplace_back(input.subspan(cut));
-            operation.close_input();
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -433,12 +436,12 @@ struct explicitly_resumable_record {
     }
 };
 
-template <typename Context> resumable_task<status_code> resumable_decode(Context &context, explicitly_resumable_record &value) {
+template <typename Context> resumable<status_code> resumable_decode(Context &context, explicitly_resumable_record &value) {
     ++value.resumable_calls;
     co_return co_await context(wrap_as_array{value.number, value.text});
 }
 
-template <typename Context> resumable_task<status_code> resumable_encode(Context &context, const explicitly_resumable_record &value) {
+template <typename Context> resumable<status_code> resumable_encode(Context &context, const explicitly_resumable_record &value) {
     ++value.resumable_encode_calls;
     co_return co_await context(wrap_as_array{value.number, value.text});
 }
@@ -456,12 +459,12 @@ struct member_tagged_resumable_record : explicitly_resumable_record {
     member_tagged_resumable_record() = default;
     member_tagged_resumable_record(std::uint32_t number, std::string text) : explicitly_resumable_record{number, std::move(text)} {}
 
-    template <typename Context> resumable_task<status_code> resumable_encode(Context &context) const {
+    template <typename Context> resumable<status_code> resumable_encode(Context &context) const {
         ++resumable_encode_calls;
         co_return co_await context(wrap_as_array{number, text});
     }
 
-    template <typename Context> resumable_task<status_code> resumable_decode(Context &context) {
+    template <typename Context> resumable<status_code> resumable_decode(Context &context) {
         ++resumable_calls;
         co_return co_await context(wrap_as_array{number, text});
     }
@@ -529,9 +532,223 @@ struct explicitly_transcoded_record {
 
 template <typename Context, typename Value>
     requires std::same_as<std::remove_cvref_t<Value>, explicitly_transcoded_record>
-resumable_task<status_code> resumable_transcode(Context &context, Value &value) {
+resumable<status_code> resumable_transcode(Context &context, Value &value) {
     ++value.resumable_calls;
     co_return co_await context(wrap_as_array{value.number, value.text});
+}
+
+// Hooks for double only. They negate it, so the bytes show where they ran.
+template <typename Self> struct negated_double_encode_hook : codec::encoder_base<Self> {
+    using codec::encoder_base<Self>::encode;
+
+    resumable<status_code> resumable_encode(const double &value) {
+        const double negated = -value;
+        co_return co_await static_cast<Self &>(*this).one_shot(negated);
+    }
+};
+
+template <typename Self> struct negated_double_transcode_hook : codec::encoder_base<Self> {
+    using codec::encoder_base<Self>::encode;
+
+    resumable<status_code> resumable_transcode(double value) {
+        const double negated = -value;
+        co_return co_await static_cast<Self &>(*this).one_shot(negated);
+    }
+};
+
+// Has hooks of its own, and weight_doubling_codec has hooks for it too. The
+// mixin doubles the weight on the wire, so the bytes show which of them ran.
+struct weighted {
+    int id{};
+    int weight{};
+
+    bool operator==(const weighted &) const = default;
+
+    template <typename Encoder> auto encode(Encoder &encoder) const { return encoder(wrap_as_array{id, weight}); }
+    template <typename Decoder> auto decode(Decoder &decoder) { return decoder(wrap_as_array{id, weight}); }
+
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const {
+        co_return co_await encoder(wrap_as_array{id, weight});
+    }
+
+    template <typename Decoder> resumable<status_code> resumable_decode(Decoder &decoder) {
+        co_return co_await decoder(wrap_as_array{id, weight});
+    }
+};
+
+template <typename Self> struct weight_doubling_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    void encode(const weighted &value) { static_cast<Self &>(*this)(wrap_as_array{value.id, value.weight * 2}); }
+
+    status_code decode(weighted &value) {
+        int        id{};
+        int        doubled{};
+        const auto result = static_cast<Self &>(*this)(wrap_as_array{id, doubled});
+        if (!result)
+            return result.error();
+
+        value = {id, doubled / 2};
+        return status_code::success;
+    }
+
+    resumable<status_code> resumable_encode(const weighted &value) {
+        const int doubled = value.weight * 2;
+        co_return co_await static_cast<Self &>(*this)(wrap_as_array{value.id, doubled});
+    }
+
+    resumable<status_code> resumable_decode(weighted &value) {
+        int        id{};
+        int        doubled{};
+        const auto status = co_await static_cast<Self &>(*this)(wrap_as_array{id, doubled});
+        if (status == status_code::success)
+            value = {id, doubled / 2};
+        co_return status;
+    }
+};
+
+// Encodes and decodes weighted{1, 111} with a resumable encoder and decoder
+// that have Codecs installed, and expects these bytes in between
+template <template <typename> typename... Codecs> void check_weighted_wire(std::string_view expected_hex) {
+    const weighted         expected{1, 111};
+    std::vector<std::byte> wire;
+
+    // Encode
+    {
+        auto encoder   = make_resumable_encoder<Codecs...>(wire);
+        auto operation = encoder(expected);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(to_hex(wire) == expected_hex);
+    }
+
+    // Decode what the hex says, not what the encoder wrote
+    auto     input = to_bytes(expected_hex);
+    weighted actual;
+    auto     decoder   = make_resumable_decoder<Codecs...>(input);
+    auto     operation = decoder(actual);
+    REQUIRE(operation.done());
+    REQUIRE(operation.result());
+    CHECK(actual == expected);
+}
+
+// A mixin's hooks are for the type they name. A type derived from that one is
+// another type, and the one-shot encoder and decoder see it that way too
+struct int_list : std::vector<int> {
+    using std::vector<int>::vector;
+};
+
+// Reverses the ints on the wire, so the bytes and the values show whether it ran
+template <typename Self> struct reversed_ints_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    resumable<status_code> resumable_encode(const std::vector<int> &value) {
+        // Not a vector of int, that would come straight back here
+        const std::vector<long> reversed(value.rbegin(), value.rend());
+        co_return co_await static_cast<Self &>(*this)(reversed);
+    }
+
+    resumable<status_code> resumable_decode(std::vector<int> &value) {
+        std::vector<long> reversed;
+        const auto        status = co_await static_cast<Self &>(*this)(reversed);
+        if (status == status_code::success)
+            value.assign(reversed.rbegin(), reversed.rend());
+        co_return status;
+    }
+};
+
+// Has hooks of its own, and the mixin has hooks for its base
+struct shape {
+    int id{};
+};
+
+struct circle : shape {
+    int radius{};
+
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const {
+        co_return co_await encoder(wrap_as_array{id, radius});
+    }
+
+    template <typename Decoder> resumable<status_code> resumable_decode(Decoder &decoder) {
+        co_return co_await decoder(wrap_as_array{id, radius});
+    }
+};
+
+template <typename Self> struct shape_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    resumable<status_code> resumable_encode(const shape &value) { return static_cast<Self &>(*this)(value.id); }
+    resumable<status_code> resumable_decode(shape &value) { return static_cast<Self &>(*this)(value.id); }
+};
+
+// One function visits the fields in both directions, so it isn't const, and the
+// hook takes whatever it is given and gets its return type from it. With a
+// const point that body doesn't compile, so nothing may ask about one
+struct visited_point {
+    int x{};
+    int y{};
+
+    template <typename Transcoder> auto visit(Transcoder &transcoder) { return transcoder(y, x); }
+};
+
+template <typename Transcoder, typename Value>
+    requires std::same_as<std::remove_const_t<Value>, visited_point>
+auto resumable_transcode(Transcoder &transcoder, Value &value) {
+    return value.visit(transcoder);
+}
+
+// Same, with a hook that only encodes
+struct visited_encode_point {
+    int x{};
+    int y{};
+
+    template <typename Encoder> auto visit(Encoder &encoder) { return encoder(y, x); }
+};
+
+template <typename Encoder, typename Value>
+    requires std::same_as<std::remove_const_t<Value>, visited_encode_point>
+auto resumable_encode(Encoder &encoder, Value &value) {
+    return value.visit(encoder);
+}
+
+// Encodes value with Codec installed, expects these bytes, and decodes them back
+template <template <typename> typename Codec, typename T> T check_wire_with_codec(const T &value, std::string_view expected_hex) {
+    std::vector<std::byte> wire;
+
+    // Encode
+    {
+        auto encoder   = make_resumable_encoder<Codec>(wire);
+        auto operation = encoder(value);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(to_hex(wire) == expected_hex);
+    }
+
+    // Decode what the hex says, not what the encoder wrote
+    auto input = to_bytes(expected_hex);
+    T    actual;
+    auto decoder   = make_resumable_decoder<Codec>(input);
+    auto operation = decoder(actual);
+    REQUIRE(operation.done());
+    REQUIRE(operation.result());
+    return actual;
+}
+
+template <template <typename> typename Hook> void check_mixin_hook_ignores_conversions() {
+    std::vector<std::byte> output;
+    auto                   encoder   = make_resumable_encoder<Hook>(output);
+    auto                   operation = encoder(42, 1.5F, true, 2.5);
+
+    REQUIRE(operation.done());
+    REQUIRE(operation.result());
+    // int, float and bool keep their own encoding, only the double is negated
+    CHECK(to_hex(output) == "182a"
+                            "fa3fc00000"
+                            "f5"
+                            "fbc004000000000000");
 }
 
 } // namespace
@@ -591,7 +808,7 @@ TEST_SUITE("roundtrip/resumable") {
             auto              operation = make_resumable_decoder(source)(actual);
             if (!operation.done()) {
                 chunks.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
             REQUIRE(operation.result());
             CHECK(actual.number == expected.number);
@@ -861,7 +1078,7 @@ TEST_SUITE("roundtrip/resumable") {
                 }
                 if (!operation.done()) {
                     storage.emplace_back(input.subspan(second));
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.done());
@@ -911,7 +1128,7 @@ TEST_SUITE("roundtrip/resumable") {
             operation.resume();
             if (!operation.done()) {
                 storage.emplace_back(input.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
 
             REQUIRE(operation.result());
@@ -947,7 +1164,7 @@ TEST_SUITE("roundtrip/resumable") {
                 operation.resume();
                 if (!operation.done()) {
                     storage.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.result());
@@ -983,7 +1200,7 @@ TEST_SUITE("roundtrip/resumable") {
                 operation.resume();
                 if (!operation.done()) {
                     storage.emplace_back(std::span<const std::byte>{bytes}.subspan(cut));
-                    operation.close_input();
+                    operation.resume();
                 }
 
                 REQUIRE(operation.result());
@@ -1037,7 +1254,7 @@ TEST_SUITE("roundtrip/resumable") {
         resumable_message actual;
         auto              operation = make_resumable_decoder(source)(actual);
         storage.insert(storage.end(), chunks.begin(), chunks.end());
-        operation.close_input();
+        operation.resume();
 
         REQUIRE(operation.done());
         REQUIRE(operation.result());
@@ -1071,7 +1288,7 @@ TEST_SUITE("roundtrip/resumable") {
         CHECK(actual.completed.empty());
         CHECK(operation.committed_bytes() == 0);
         storage.emplace_back(std::span<const std::byte>{bytes}.last(1));
-        operation.close_input();
+        operation.resume();
 
         REQUIRE(operation.result());
         CHECK(*operation.result() == bytes.size());
@@ -1095,7 +1312,7 @@ TEST_SUITE("roundtrip/resumable") {
         auto              operation = make_resumable_decoder(source)(actual);
         const auto        attempts  = actual.attempts;
         storage.insert(storage.end(), chunks.begin(), chunks.end());
-        operation.close_input();
+        operation.resume();
 
         REQUIRE(operation.result());
         CHECK(actual.attempts == attempts + 1);
@@ -1205,7 +1422,7 @@ TEST_SUITE("roundtrip/resumable") {
                 decoder.resume();
                 if (!decoder.done()) {
                     inputs.emplace_back(std::span<const std::byte>{reference}.subspan(cut));
-                    decoder.close_input();
+                    decoder.resume();
                 }
 
                 REQUIRE(decoder.result());
@@ -1259,7 +1476,7 @@ TEST_SUITE("roundtrip/resumable") {
             decoder.resume();
             if (!decoder.done()) {
                 inputs.emplace_back(std::span<const std::byte>{reference}.subspan(cut));
-                decoder.close_input();
+                decoder.resume();
             }
 
             REQUIRE(decoder.result());
@@ -1442,11 +1659,10 @@ TEST_SUITE("roundtrip/resumable") {
         auto         generator = make_resumable_generator<int>(source);
         auto        &first     = generator.next();
         storage.emplace_back(bytes);
-        generator.close_input();
+        generator.resume();
 
         REQUIRE(first.done());
         REQUIRE(first.result());
-        CHECK_FALSE(generator.done());
         CHECK(generator.value() == expected[0]);
         CHECK(generator.value() == expected[0]);
         std::size_t consumed = *first.result();
@@ -1455,16 +1671,95 @@ TEST_SUITE("roundtrip/resumable") {
             auto &next = generator.next();
             REQUIRE(next.done());
             REQUIRE(next.result());
-            CHECK_FALSE(generator.done());
             CHECK(generator.value() == expected[index]);
             consumed += *next.result();
         }
 
-        auto &eof = generator.next();
-        REQUIRE(eof.done());
-        REQUIRE(eof.result());
-        CHECK(*eof.result() == 0U);
-        CHECK(generator.done());
+        // Nothing left, so the next item waits without having touched a byte
+        auto &after = generator.next();
+        REQUIRE_FALSE(after.done());
+        CHECK(after.committed_bytes() == 0U);
+        CHECK(std::ranges::empty(after.remaining_input()));
         CHECK(consumed == bytes.size());
+    }
+
+    TEST_CASE("a mixin encode hook leaves values it would only convert from alone") {
+        SUBCASE("encode hook") { check_mixin_hook_ignores_conversions<negated_double_encode_hook>(); }
+        SUBCASE("transcode hook") { check_mixin_hook_ignores_conversions<negated_double_transcode_hook>(); }
+    }
+
+    TEST_CASE("an installed mixin hook goes before the hooks a type has itself") {
+        const weighted expected{1, 111};
+
+        // The one-shot encoder and decoder let the installed codec go first
+        std::vector<std::byte> reference;
+        REQUIRE(make_encoder<weight_doubling_codec>(reference)(expected));
+        REQUIRE(to_hex(reference) == "820118de");
+
+        weighted one_shot;
+        REQUIRE(make_decoder<weight_doubling_codec>(reference)(one_shot));
+        REQUIRE(one_shot == expected);
+
+        SUBCASE("the mixin hook runs") { check_weighted_wire<weight_doubling_codec>("820118de"); }
+        SUBCASE("the type's hooks run without a mixin") { check_weighted_wire<>("8201186f"); }
+    }
+
+    TEST_CASE("a mutable value's hook is not tried on a const one") {
+        visited_point          value{1, 2};
+        std::vector<std::byte> wire;
+
+        // Encode
+        {
+            auto encoder   = make_resumable_encoder(wire);
+            auto operation = encoder(value);
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(to_hex(wire) == "0201");
+        }
+
+        // Decode
+        visited_point actual;
+        auto          decoder   = make_resumable_decoder(wire);
+        auto          operation = decoder(actual);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(actual.x == 1);
+        CHECK(actual.y == 2);
+
+        // An encode hook goes through the same checks
+        visited_encode_point   encode_only{1, 2};
+        std::vector<std::byte> encode_only_wire;
+        auto                   encode_only_encoder   = make_resumable_encoder(encode_only_wire);
+        auto                   encode_only_operation = encode_only_encoder(encode_only);
+        REQUIRE(encode_only_operation.done());
+        REQUIRE(encode_only_operation.result());
+        CHECK(to_hex(encode_only_wire) == "0201");
+    }
+
+    TEST_CASE("a mixin hook for a base type leaves derived values alone in both directions") {
+        SUBCASE("the type the hooks name") {
+            const std::vector<int> expected{1, 2, 3};
+            CHECK(check_wire_with_codec<reversed_ints_codec>(expected, "83030201") == expected);
+        }
+
+        SUBCASE("a type derived from it") {
+            // Same bytes as the one-shot encoder, which leaves the codec out too
+            const int_list         expected{1, 2, 3};
+            std::vector<std::byte> reference;
+            REQUIRE(make_encoder(reference)(expected));
+            REQUIRE(to_hex(reference) == "83010203");
+
+            CHECK(check_wire_with_codec<reversed_ints_codec>(expected, "83010203") == expected);
+        }
+
+        SUBCASE("a derived type with hooks of its own") {
+            circle expected;
+            expected.id     = 7;
+            expected.radius = 9;
+
+            const auto actual = check_wire_with_codec<shape_codec>(expected, "820709");
+            CHECK(actual.id == expected.id);
+            CHECK(actual.radius == expected.radius);
+        }
     }
 }

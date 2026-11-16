@@ -225,7 +225,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             chunks.back().push_back(wire[cut]);
             chunks.emplace_back();
             chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(cut + 1), wire.end());
-            REQUIRE(operation.resume() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(actual == expected);
             CHECK(operation.committed_bytes() == wire.size());
@@ -266,7 +266,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             chunks.back().push_back(std::byte{});
             chunks.emplace_back();
             chunks.emplace_back(encoded.size() - capacity - 1);
-            REQUIRE(operation.resume() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == encoded.size());
             CHECK(source.committed_position().offset() == encoded.size());
@@ -299,7 +299,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             CHECK(actual == 0);
 
             input.insert(input.end(), wire.begin() + 3, wire.end());
-            REQUIRE(operation.resume() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(actual == expected);
             CHECK(operation.committed_bytes() == wire.size());
@@ -333,11 +333,11 @@ TEST_SUITE("roundtrip/resumable_storage") {
                 input.reserve(input.capacity() + wire.size());
             }
             input.insert(input.end(), wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
-            REQUIRE(operation.resume() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == wire.size());
             CHECK(actual == expected);
-            CHECK(operation.resume() == resume_state::finished);
+            CHECK(operation.resume() == resume_state::done);
         }
     }
 
@@ -374,7 +374,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
 
             input.reserve(input.capacity() + wire.size());
             input.insert(input.end(), wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
-            REQUIRE(operation.close_input() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(operation.committed_bytes() == wire.size());
         }
@@ -395,7 +395,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
 
         tail.reserve(tail.capacity() + wire.size());
         tail.insert(tail.end(), wire.begin() + 7, wire.end());
-        REQUIRE(operation.resume() == resume_state::finished);
+        REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
         CHECK(actual == expected);
         CHECK(operation.committed_bytes() == wire.size());
@@ -421,7 +421,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         auto &tail = chunks.back();
         tail.reserve(tail.capacity() + wire.size());
         tail.insert(tail.end(), wire.begin() + 7, wire.end());
-        REQUIRE(operation.resume() == resume_state::finished);
+        REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
         CHECK(actual == expected);
         CHECK(operation.committed_bytes() == wire.size());
@@ -445,7 +445,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
             chunks.reserve(chunks.capacity() + 2);
             REQUIRE(chunks.data() != previous_data);
             chunks.emplace_back(wire.begin() + static_cast<std::ptrdiff_t>(cut), wire.end());
-            REQUIRE(operation.resume() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(actual == expected);
             CHECK(operation.committed_bytes() == wire.size());
@@ -462,7 +462,7 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(operation.committed_bytes() == 0);
 
         tail.resize(16);
-        REQUIRE(operation.resume() == resume_state::finished);
+        REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
         auto committed = std::span<const std::byte>{tail}.first(operation.committed_bytes());
         int  actual{};
@@ -470,29 +470,23 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(actual == 65536);
     }
 
-    TEST_CASE("committed byte counts survive cancellation and terminal truncation") {
+    TEST_CASE("committed byte counts survive cancellation") {
         const std::string      expected(32, 'c');
         std::vector<std::byte> wire;
         REQUIRE(make_encoder(wire)(expected));
 
-        for (const bool cancel : {false, true}) {
-            std::vector<std::byte> input(wire.begin(), wire.begin() + 5);
-            auto                   decoder = make_resumable_decoder(input);
-            std::string            actual;
-            auto                   operation = decoder(actual);
-            REQUIRE_FALSE(operation.done());
-            REQUIRE(operation.committed_bytes() == input.size());
+        std::vector<std::byte> input(wire.begin(), wire.begin() + 5);
+        auto                   decoder = make_resumable_decoder(input);
+        std::string            actual;
+        auto                   operation = decoder(actual);
+        REQUIRE_FALSE(operation.done());
+        REQUIRE(operation.committed_bytes() == input.size());
 
-            if (cancel) {
-                operation.cancel();
-            } else {
-                operation.close_input();
-            }
-            REQUIRE(operation.done());
-            REQUIRE_FALSE(operation.result());
-            CHECK(operation.result().error() == (cancel ? status_code::cancelled : status_code::incomplete));
-            CHECK(operation.committed_bytes() == input.size());
-        }
+        operation.cancel();
+        REQUIRE(operation.done());
+        REQUIRE_FALSE(operation.result());
+        CHECK(operation.result().error() == status_code::cancelled);
+        CHECK(operation.committed_bytes() == input.size());
     }
 
     TEST_CASE("exclusive acquisition precedes eager customization work") {
@@ -504,28 +498,9 @@ TEST_SUITE("roundtrip/resumable_storage") {
         REQUIRE_FALSE(operation.done());
         const auto before = calls;
 
-        CHECK_THROWS_AS(encoder(value), std::logic_error);
+        CHECK_THROWS_AS((void)encoder(value), std::logic_error);
         CHECK(calls == before);
         CHECK(operation.committed_bytes() == 0);
-    }
-
-    TEST_CASE("finishing a completed generator item closes its following request") {
-        std::vector<std::byte> input;
-        REQUIRE(make_encoder(input)(42));
-        auto  source = make_input_source(input);
-        auto  items  = make_resumable_generator<int>(source);
-        auto &first  = items.next();
-        REQUIRE(first.done());
-        REQUIRE(first.result());
-        CHECK(items.value() == 42);
-
-        CHECK(items.close_input() == resume_state::finished);
-        auto &end = items.next();
-        REQUIRE(end.done());
-        REQUIRE(end.result());
-        CHECK(*end.result() == 0);
-        CHECK(end.committed_bytes() == 0);
-        CHECK(items.done());
     }
 }
 

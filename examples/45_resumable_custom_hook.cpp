@@ -18,12 +18,12 @@ struct Report {
 
 // ADL hooks choose a wire field order independently of the aggregate member order.
 template <typename Encoder>
-ct::resumable_task<ct::status_code> resumable_encode(Encoder &encoder, const Report &value) {
+ct::resumable<ct::status_code> resumable_encode(Encoder &encoder, const Report &value) {
     co_return co_await encoder(ct::wrap_as_array{value.station, value.samples});
 }
 
 template <typename Decoder>
-ct::resumable_task<ct::status_code> resumable_decode(Decoder &decoder, Report &value) {
+ct::resumable<ct::status_code> resumable_decode(Decoder &decoder, Report &value) {
     co_return co_await decoder(ct::wrap_as_array{value.station, value.samples});
 }
 
@@ -65,7 +65,7 @@ int main() {
 
     input.insert(input.end(), produced.begin() + 2, produced.end());
     const auto final_input_state = decoding.resume();
-    assert(final_input_state == ct::resume_state::finished);
+    assert(final_input_state == ct::resume_state::done);
 
     // The hook resumes inside its fields, then reconstructs the application layout.
     const auto decoded = decoding.result();

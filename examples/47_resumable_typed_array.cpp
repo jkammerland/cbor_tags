@@ -43,7 +43,7 @@ int main() {
     // The rest of the bytes finish it
     input.push_back(bytes.subspan(9));
     const auto final_state = operation.resume();
-    assert(final_state == ct::resume_state::finished);
+    assert(final_state == ct::resume_state::done);
     const auto result = operation.result();
     assert(result);
     assert(*result == buffer.size());
@@ -79,7 +79,7 @@ int main() {
 
         received.insert(received.end(), buffer.begin() + 9, buffer.end());
         const auto view_state = viewing.resume();
-        assert(view_state == ct::resume_state::finished);
+        assert(view_state == ct::resume_state::done);
         assert(viewing.result());
     }
 

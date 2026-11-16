@@ -20,11 +20,11 @@ struct resumable_view_types<Context> {
     using encoded_map_view   = typename Context::encoded_map_view;
 };
 
+// Each factory makes one operation type, e.g. decltype(decoder)::operation
 template <typename Context> struct resumable_factory : resumable_view_types<Context> {
+    using operation = resume_operation<Context>;
     typename Context::source_type              &source;
-    template <typename... T> [[nodiscard]] auto operator()(T &&...values) const {
-        return resume_operation<Context>{source, std::forward<T>(values)...};
-    }
+    template <typename... T> [[nodiscard]] auto operator()(T &&...values) const { return operation{source, std::forward<T>(values)...}; }
 };
 
 // The adapter's cursors refer back to it. Keep it at the factory's address and
@@ -33,16 +33,15 @@ template <typename Context> class storage_resumable_factory : public resumable_v
     typename Context::source_type source_;
 
   public:
+    using operation = resume_operation<Context>;
     template <typename Storage> explicit storage_resumable_factory(Storage &storage) : source_(storage) {}
     storage_resumable_factory(const storage_resumable_factory &)            = delete;
     storage_resumable_factory &operator=(const storage_resumable_factory &) = delete;
     storage_resumable_factory(storage_resumable_factory &&)                 = delete;
     storage_resumable_factory &operator=(storage_resumable_factory &&)      = delete;
 
-    template <typename... T> [[nodiscard]] auto operator()(T &&...values) & {
-        return resume_operation<Context>{source_, std::forward<T>(values)...};
-    }
-    template <typename... T> auto operator()(T &&...) && = delete;
+    template <typename... T> [[nodiscard]] auto operator()(T &&...values) & { return operation{source_, std::forward<T>(values)...}; }
+    template <typename... T> auto               operator()(T &&...) && = delete;
 };
 } // namespace detail
 
@@ -94,21 +93,15 @@ namespace cbor::tags {
 template <ResumableInputSource Source>
 [[nodiscard]] auto make_resumable_validator(Source &source, std::size_t count = 1, validation_options options = {}) {
     return detail::resume_operation<detail::resumable_validation_context<Source>>{
-        source, detail::validation_request{.count = count, .until_eof = false, .options = options}};
-}
-template <ResumableInputSource Source>
-[[nodiscard]] auto make_resumable_validator(Source &source, until_closed_t, validation_options options = {}) {
-    return detail::resume_operation<detail::resumable_validation_context<Source>>{
-        source, detail::validation_request{.count = 0, .until_eof = true, .options = options}};
+        source, detail::validation_request{.count = count, .options = options}};
 }
 
 template <typename T, ResumableInputSource Source, typename Options = default_options, template <typename> typename... Codecs>
 class resumable_generator {
-    using context_type   = detail::resumable_generator_context<Source, T, Options, Codecs...>;
+    using context_type   = detail::resumable_decode_context<Source, Options, Codecs...>;
     using operation_type = detail::resume_operation<context_type>;
     Source                       &source_;
     T                             value_{};
-    bool                          ended_{};
     std::optional<operation_type> operation_;
 
   public:
@@ -120,7 +113,7 @@ class resumable_generator {
             throw std::logic_error("generator next is still pending");
         operation_.reset();
         value_ = T{};
-        operation_.emplace(source_, value_, ended_);
+        operation_.emplace(source_, value_);
         return *operation_;
     }
     resume_state resume() {
@@ -128,14 +121,13 @@ class resumable_generator {
             throw std::logic_error("call generator.next() before resuming");
         return operation_->resume();
     }
-    resume_state close_input() {
-        if (!operation_)
-            throw std::logic_error("call generator.next() before closing its input");
-        return operation_->close_input();
+    // Stops waiting for the next value, e.g. when the transport ends
+    void cancel() {
+        if (operation_)
+            operation_->cancel();
     }
     T       &value() noexcept { return value_; }
     const T &value() const noexcept { return value_; }
-    bool     done() const noexcept { return ended_; }
 };
 
 template <typename T, template <typename> typename... Codecs, ResumableInputSource Source> auto make_resumable_generator(Source &source) {

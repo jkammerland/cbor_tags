@@ -2,6 +2,9 @@
 
 #include "cbor_tags/detail/cbor_item_shape.h"
 
+#include <concepts>
+#include <type_traits>
+
 namespace cbor::tags {
 
 // A declaration covers the complete one-shot call, including nested calls and
@@ -32,6 +35,30 @@ concept RetryDecodeObserver = requires(Codec &codec) { codec.observe_decoded_cbo
 template <typename Codec>
 concept RetryEncodeObserver = requires(Codec &codec) { codec.observe_encoded_cbor_tag(std::uint64_t{}); };
 
+// What a declaration says for one direction, a flag it leaves out is false.
+// Only the flag that was asked for gets looked at.
+template <typename T, typename Codec, bool Encode> consteval bool resumable_retry_declared() {
+    using traits = resumable_retry_traits<std::remove_cvref_t<T>, Codec>;
+
+#if defined(__clang__)
+    // A declaration for a file-local type that only ever goes one way makes
+    // Clang warn about the flag nobody named, so name both here. Not for the
+    // others: naming a flag can be enough to have it worked out, GCC 12 does
+    // that, and the flag for the other way may not have an answer
+    [[maybe_unused]] constexpr bool named = requires { traits::encode; } || requires { traits::decode; };
+#endif
+
+    if constexpr (Encode) {
+        if constexpr (requires { traits::encode; })
+            return static_cast<bool>(traits::encode);
+    } else {
+        if constexpr (requires { traits::decode; })
+            return static_cast<bool>(traits::decode);
+    }
+
+    return false;
+}
+
 // Probe each installed mixin separately. A value's declaration must never
 // authorize an unrelated codec override, including overrides of built-in types.
 template <typename OneShot, typename T, typename Codec, payload_decode_context Context>
@@ -48,12 +75,12 @@ consteval bool resumable_codec_decode_retry_allowed() {
             return RetryDecodeDirect<Codec, T> || RetryDecodeHeader<Codec, T>;
         }
     }();
-    return (!custom && !RetryDecodeObserver<Codec>) || resumable_retry_traits<std::remove_cvref_t<T>, Codec>::decode;
+    return (!custom && !RetryDecodeObserver<Codec>) || resumable_retry_declared<T, Codec, false>();
 }
 
 template <typename OneShot, typename T, payload_decode_context Context, typename... Codecs>
 consteval bool resumable_decode_retry_allowed() {
-    return (!IsClassWithDecodingOverload<OneShot, T> || resumable_retry_traits<std::remove_cvref_t<T>>::decode) &&
+    return (!IsClassWithDecodingOverload<OneShot, T> || resumable_retry_declared<T, void, false>()) &&
            (resumable_codec_decode_retry_allowed<OneShot, T, Codecs, Context>() && ...);
 }
 
@@ -71,11 +98,11 @@ template <typename OneShot, typename T, typename Codec> consteval bool resumable
             return RetryEncodeDirect<Codec, T>;
         }
     }();
-    return (!custom && !RetryEncodeObserver<Codec>) || resumable_retry_traits<std::remove_cvref_t<T>, Codec>::encode;
+    return (!custom && !RetryEncodeObserver<Codec>) || resumable_retry_declared<T, Codec, true>();
 }
 
 template <typename OneShot, typename T, typename... Codecs> consteval bool resumable_encode_retry_allowed() {
-    return (!IsClassWithEncodingOverload<OneShot, T> || resumable_retry_traits<std::remove_cvref_t<T>>::encode) &&
+    return (!IsClassWithEncodingOverload<OneShot, T> || resumable_retry_declared<T, void, true>()) &&
            (resumable_codec_encode_retry_allowed<OneShot, T, Codecs>() && ...);
 }
 

@@ -294,6 +294,72 @@ foreach(CASE IN ITEMS NOT_NOEXCEPT NOT_CONST NOT_BOOL)
     "-DPASS_REGEX=at_capacity\\(\\) must be a const noexcept member returning bool" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
+foreach(CASE IN ITEMS VECTOR STRUCT)
+  string(TOLOWER "resumable_one_shot_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_one_shot_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_ONE_SHOT_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=one_shot\\(value\\) only takes values the decoder reads in one piece" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
+foreach(CASE IN ITEMS ADL_ENCODE ADL_TRANSCODE MEMBER_TRANSCODE MIXIN_ENCODE MIXIN_BEFORE_MEMBER MIXIN_CONST_ELEMENT)
+  string(TOLOWER "resumable_encode_hook_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_encode_hook_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_ENCODE_HOOK_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=resumable hook only takes a mutable value and would be skipped for a const one" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
+foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE PLAIN_ENCODE DECODE PLAIN_DECODE VARIANT_DECODE)
+  string(TOLOWER "resumable_one_shot_only_codec_${CASE}_compile_fails" TEST_NAME)
+  string(REGEX REPLACE "^.*_" "" DIRECTION "${CASE}")
+  string(TOLOWER "${DIRECTION}" DIRECTION)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_one_shot_only_codec_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_ONE_SHOT_ONLY_CODEC_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=an installed codec has a one-shot ${DIRECTION} for this type and no resumable hook" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
+
+# A mixin without the codec base. What has to keep compiling runs as a test,
+# each case is a value the resumable side would handle without asking the mixin.
+add_executable(resumable_plain_codec_compile resumable_plain_codec_compile.cc)
+target_link_libraries(resumable_plain_codec_compile PRIVATE cbor::tags)
+add_test(NAME resumable_plain_codec_compile COMMAND resumable_plain_codec_compile)
+
+foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE CONTAINER_ENCODE DECODE CONTAINER_DECODE HEADER_DECODE TAG_DECODE)
+  string(TOLOWER "resumable_plain_codec_${CASE}_compile_fails" TEST_NAME)
+  string(REGEX REPLACE "^.*_" "" DIRECTION "${CASE}")
+  string(TOLOWER "${DIRECTION}" DIRECTION)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_plain_codec_compile.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_PLAIN_CODEC_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=an installed codec without the codec base has a one-shot ${DIRECTION} for this type" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
+foreach(CASE IN ITEMS MEMBER_ENCODE RETURN_ENCODE RVALUE_ENCODE RVALUE_DECODE RVALUE_DECODE_OPTIONAL RETURN_DECODE RVALUE_TRANSCODE_DECODE RVALUE_TRANSCODE_ENCODE)
+  string(TOLOWER "resumable_hook_signature_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_hook_signature_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_HOOK_SIGNATURE_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  if(CASE MATCHES "ENCODE$")
+    set(DIAGNOSTIC "this type has a resumable encode hook that is never called")
+  else()
+    set(DIAGNOSTIC "this type has a resumable decode hook that is never called")
+  endif()
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=${DIAGNOSTIC}" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
 add_test(NAME integer_arguments_wire COMMAND tests "--test-suite=cbor_wire/integer_arguments")
 set_tests_properties(integer_arguments_wire PROPERTIES LABELS "cbor-wire")
 add_test(NAME traversal_wire COMMAND tests "--test-suite=cbor_wire/traversal")
@@ -1133,13 +1199,11 @@ if(MSVC)
 else()
   target_compile_options(test_resumable_source_preconditions PRIVATE -UNDEBUG)
 endif()
-foreach(CASE descriptor-removal tail-shrink closed-tail-growth closed-descriptor-growth)
+foreach(CASE descriptor-removal tail-shrink)
   if(CASE STREQUAL "descriptor-removal")
     set(DIAGNOSTIC "CBOR source descriptors cannot be removed")
-  elseif(CASE STREQUAL "tail-shrink")
-    set(DIAGNOSTIC "CBOR source tail cannot shrink")
   else()
-    set(DIAGNOSTIC "cannot grow a closed CBOR source")
+    set(DIAGNOSTIC "CBOR source tail cannot shrink")
   endif()
   add_test(NAME resumable_precondition_${CASE} COMMAND ${CMAKE_COMMAND}
     "-DPROGRAM=$<TARGET_FILE:test_resumable_source_preconditions>" "-DCASE=${CASE}"
@@ -1185,6 +1249,35 @@ foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG PLAIN OBSERVE
 endforeach()
 add_resumable_retry_failure(MEMBER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
 add_resumable_retry_failure(OBSERVER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
+
+# A declaration for a file-local type that is only used one way must not warn.
+# Clang is the one that does, about the flag nobody used. GCC with this flag
+# goes through the headers too and finds constants that have nothing to do with it.
+add_executable(resumable_one_way_retry_compile resumable_one_way_retry_compile.cc)
+target_link_libraries(resumable_one_way_retry_compile PRIVATE cbor::tags)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
+  target_compile_options(resumable_one_way_retry_compile PRIVATE -Werror=unused-const-variable)
+endif()
+add_test(NAME resumable_one_way_retry_compile COMMAND resumable_one_way_retry_compile)
+
+# The same with declarations that only have the flag they need.
+add_executable(resumable_one_flag_retry_compile resumable_one_way_retry_compile.cc)
+target_compile_definitions(resumable_one_flag_retry_compile PRIVATE CBOR_TAGS_RETRY_ONE_FLAG)
+target_link_libraries(resumable_one_flag_retry_compile PRIVATE cbor::tags)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
+  target_compile_options(resumable_one_flag_retry_compile PRIVATE -Werror=unused-const-variable)
+endif()
+add_test(NAME resumable_one_flag_retry_compile COMMAND resumable_one_flag_retry_compile)
+
+# A flag that was left out is false, so the other direction still needs its opt-in.
+add_executable(resumable_retry_missing_flag_compile_fails EXCLUDE_FROM_ALL resumable_one_way_retry_compile.cc)
+target_compile_definitions(resumable_retry_missing_flag_compile_fails PRIVATE CBOR_TAGS_RETRY_ONE_FLAG CBOR_TAGS_RETRY_MISSING_FLAG)
+target_link_libraries(resumable_retry_missing_flag_compile_fails PRIVATE cbor::tags)
+add_test(NAME resumable_retry_missing_flag_compile_fails COMMAND ${CMAKE_COMMAND}
+  "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=resumable_retry_missing_flag_compile_fails" "-DCONFIG=$<CONFIG>"
+  "-DPASS_REGEX=one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+set_tests_properties(resumable_retry_missing_flag_compile_fails PROPERTIES LABELS "compile-fail")
 add_resumable_retry_failure(NODISCARD "nodiscard" CBOR_RETRY_NODISCARD)
 
 foreach(DIRECTION ENCODE DECODE)

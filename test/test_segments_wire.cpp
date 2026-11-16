@@ -38,7 +38,7 @@ TEST_SUITE("cbor_wire/segments") {
                 REQUIRE(segments.front().size() == split);
                 REQUIRE(segments.back().size() == bytes.size() - split);
 
-                const auto item = check_item_segments_structure(std::move(segments));
+                const auto item = validate_item_segments(std::move(segments));
                 REQUIRE(item);
                 CHECK(item->flatten() == input);
             }

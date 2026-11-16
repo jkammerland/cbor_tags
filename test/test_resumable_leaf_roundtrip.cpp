@@ -32,7 +32,7 @@ template <typename Value, typename Wrapped> void check_leaf_splits(const Value &
         decoder.resume();
         if (!decoder.done()) {
             storage.emplace_back(std::span<const std::byte>{wire}.subspan(cut));
-            decoder.close_input();
+            decoder.resume();
         }
         REQUIRE(decoder.done());
         REQUIRE(decoder.result());
@@ -121,11 +121,11 @@ template <typename Self> struct explicit_float_codec : codec::base<Self> {
 
     template <typename T>
         requires std::same_as<std::remove_cv_t<T>, float>
-    resumable_task<status_code> resumable_encode(T &value) {
+    resumable<status_code> resumable_encode(T &value) {
         ++leaf_calls::encoded;
         co_return co_await static_cast<Self &>(*this)(static_cast<std::uint64_t>(value) + 1000);
     }
-    resumable_task<status_code> resumable_decode(float &value) {
+    resumable<status_code> resumable_decode(float &value) {
         ++leaf_calls::decoded;
         std::uint64_t encoded{};
         const auto    status = co_await static_cast<Self &>(*this)(encoded);
@@ -228,7 +228,7 @@ template <typename Self> struct bool_codec : codec::base<Self> {
 
     template <typename T>
         requires std::same_as<std::remove_cv_t<T>, bool>
-    resumable_task<status_code> resumable_encode(T &value) {
+    resumable<status_code> resumable_encode(T &value) {
         ++leaf_calls::encoded;
         co_return co_await static_cast<Self &>(*this)(value ? std::uint64_t{1001} : std::uint64_t{1000});
     }
@@ -389,7 +389,7 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<double>    actual;
         auto                   decoder = make_resumable_decoder(source)(actual);
         storage.emplace_back(input_chunk{input.cbegin(), input.cend()});
-        decoder.close_input();
+        decoder.resume();
         REQUIRE(decoder.result());
         CHECK(actual == expected);
 

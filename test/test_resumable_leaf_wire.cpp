@@ -27,11 +27,14 @@ void check_leaf_failure(const std::vector<std::byte> &bytes, const T &prefix, st
         auto                             source = make_input_source(storage);
         T                                actual;
         auto                             operation = make_resumable_decoder(source)(actual);
-        if (!operation.done())
-            operation.close_input();
-        REQUIRE(operation.done());
-        REQUIRE_FALSE(operation.result());
-        CHECK(operation.result().error() == expected_status);
+        // A truncated child isn't a failure, the drain waits for the rest of it
+        if (expected_status == status_code::incomplete) {
+            REQUIRE_FALSE(operation.done());
+        } else {
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == expected_status);
+        }
         CHECK(actual == prefix);
         CHECK(source.committed_position().offset() == committed);
 

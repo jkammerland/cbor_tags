@@ -47,21 +47,5 @@ int main(int argc, char **argv) {
         bytes.pop_back();
         return expect_assertion([&] { source.refresh(); });
     }
-    if (selected == "closed-tail-growth") {
-        auto source = ct::make_input_source(bytes);
-        source.close();
-
-        bytes.push_back(std::byte{3});
-        return expect_assertion([&] { source.refresh(); });
-    }
-    if (selected == "closed-descriptor-growth") {
-        std::vector<std::span<const std::byte>> storage{std::span<const std::byte>{bytes}};
-        auto                                    source = ct::make_input_source(storage);
-        source.close();
-
-        // Even an empty descriptor is an unsupported append after closure.
-        storage.emplace_back();
-        return expect_assertion([&] { source.refresh(); });
-    }
     return 2;
 }

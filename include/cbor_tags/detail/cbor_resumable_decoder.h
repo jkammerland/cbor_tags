@@ -93,6 +93,8 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     one_shot_type   one_shot_;
     std::size_t     committed_offset_;
 
+    friend struct resumable_context_access;
+
   public:
     using source_type                           = Source;
     using options                               = Options;
@@ -110,13 +112,33 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         one_shot_.reader_.current_offset_ = one_shot_.reader_.position_.offset();
         committed_offset_                 = one_shot_.reader_.current_offset_;
     }
+
+    // Hooks get these two, decode values resumably or one value one-shot
+    template <typename... T> resumable<status_code> operator()(T &&...value) {
+        return arguments(std::tuple<T...>{std::forward<T>(value)...});
+    }
+
+    // A complete normal call is the sole retry boundary, including its nested calls.
+    template <typename T> resumable<status_code> one_shot(T &value) {
+        // A retry decodes the value again on top of what the last try left, so
+        // a vector would get its elements twice. Tags are fine, the decoder
+        // reads a tagged struct's tag with this too
+        using U = std::remove_cvref_t<T>;
+        static_assert(read_in_one_piece<U>() || is_static_tag_t<U>::value || is_dynamic_tag_t<U>,
+                      "one_shot(value) only takes values the decoder reads in one piece, decode strings, containers, "
+                      "optionals, variants, tuples and structs with decoder(value)");
+        require_retry<T>();
+        return attempt_one_shot(value);
+    }
+
+  protected:
+    // The validator derives from this, other library code uses resumable_context_access
     Source        &source() noexcept { return source_; }
     std::size_t    offset() const noexcept { return committed_offset_; }
     auto           remaining_input() const { return source_.remaining(source_.committed_position()); }
     one_shot_type &one_shot() noexcept { return one_shot_; }
     auto           wait() noexcept { return control_.wait(); }
     bool           empty() const { return one_shot_.reader_.empty(source_); }
-    bool           closed() const { return source_.closed(); }
     void           commit() {
         // The source owns the checkpoint; retain only its scalar progress here.
         source_.commit(one_shot_.reader_.position_);
@@ -127,33 +149,27 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         one_shot_.reader_.current_offset_ = committed_offset_;
     }
 
-    // A complete normal call is the sole retry boundary, including its nested calls.
-    template <typename T> resumable_task<status_code> one_shot(T &value) {
-        require_retry<T>();
-        return attempt_one_shot(value);
-    }
-
-    template <typename T, payload_decode_context Context> resumable_task<status_code> one_shot(resume_context_value<T, Context> &value) {
+  private:
+    template <typename T, payload_decode_context Context> resumable<status_code> one_shot(resume_context_value<T, Context> &value) {
         require_retry<T, Context>();
         return attempt_one_shot(value);
     }
 
-    template <typename T> resumable_task<status_code> one_shot(resume_tag_wrapper<T> &value) {
+    template <typename T> resumable<status_code> one_shot(resume_tag_wrapper<T> &value) {
         require_retry<T>();
         return attempt_one_shot(value);
     }
 
     // This internal adapter only checks the group header; it publishes no
     // destination or codec state before completing that check.
-    resumable_task<status_code> one_shot(resume_group_header &value) { return attempt_one_shot(value); }
+    resumable<status_code> one_shot(resume_group_header &value) { return attempt_one_shot(value); }
 
-  private:
     template <typename T, payload_decode_context Context = payload_decode_context::direct> static consteval void require_retry() {
         static_assert(resumable_decode_retry_allowed<one_shot_type, T, Context, Codecs<one_shot_type>...>(),
                       "one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in");
     }
 
-    template <typename T> resumable_task<status_code> attempt_one_shot(T &value) {
+    template <typename T> resumable<status_code> attempt_one_shot(T &value) {
         const auto result = one_shot_(value);
         if (result) {
             commit();
@@ -162,27 +178,17 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         if (result.error() != status_code::incomplete)
             return result.error();
         rollback();
-        if (closed())
-            return status_code::incomplete;
         return retry(value);
     }
 
-  public:
-    template <typename... T> resumable_task<status_code> operator()(T &&...value) {
-        return arguments(std::tuple<T...>{std::forward<T>(value)...});
-    }
-
     // Bulk string transfer uses the same destination appender as one-shot decoding.
-    template <typename T> resumable_task<status_code> payload(T &value, std::uint64_t length, appender<T> &append) {
+    template <typename T> resumable<status_code> payload(T &value, std::uint64_t length, appender<T> &append) {
         drain_payload(value, length, append);
         if (length == 0)
             return status_code::success;
-        if (closed())
-            return status_code::incomplete;
         return await_payload(value, length, append);
     }
 
-  private:
     template <typename T> void drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
         while (length != 0 && !empty()) {
             if (const auto span = resumable_source_access::borrow_window(source_, one_shot_.reader_.position_); span && !span->empty()) {
@@ -210,18 +216,16 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     // Allocate a frame only when the current payload actually needs more input.
-    template <typename T> resumable_task<status_code> await_payload(T &value, std::uint64_t length, appender<T> &append) {
+    template <typename T> resumable<status_code> await_payload(T &value, std::uint64_t length, appender<T> &append) {
         while (length != 0) {
             co_await wait();
             drain_payload(value, length, append);
-            if (length != 0 && closed())
-                co_return status_code::incomplete;
         }
         co_return status_code::success;
     }
 
     // Sinks get the payload in pieces as it arrives, so nothing waits for the whole string
-    template <typename Sink> resumable_task<status_code> string_sink(Sink &sink) {
+    template <typename Sink> resumable<status_code> string_sink(Sink &sink) {
         using header_type = std::conditional_t<IsTstrSink<Sink>, as_text_any, as_bstr_any>;
         header_type header{};
         auto        status = co_await one_shot(header);
@@ -254,23 +258,19 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         }
     }
 
-    template <typename Sink> resumable_task<status_code> sink_payload(Sink &sink, std::uint64_t length) {
+    template <typename Sink> resumable<status_code> sink_payload(Sink &sink, std::uint64_t length) {
         const auto status = drain_sink(sink, length);
         if (status != status_code::success || length == 0)
             return status;
-        if (closed())
-            return status_code::incomplete;
         return await_sink_payload(sink, length);
     }
 
-    template <typename Sink> resumable_task<status_code> await_sink_payload(Sink &sink, std::uint64_t length) {
+    template <typename Sink> resumable<status_code> await_sink_payload(Sink &sink, std::uint64_t length) {
         while (length != 0) {
             co_await wait();
             const auto status = drain_sink(sink, length);
             if (status != status_code::success)
                 co_return status;
-            if (length != 0 && closed())
-                co_return status_code::incomplete;
         }
         co_return status_code::success;
     }
@@ -311,7 +311,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     // Elements and entries decode like container children, then go to the callback
-    template <typename Sink> resumable_task<status_code> array_sink(Sink &sink) {
+    template <typename Sink> resumable<status_code> array_sink(Sink &sink) {
         using element_type = typename Sink::value_type;
         static_assert(!consumes_zero_bytes<element_type>(), "as_array_sink elements must consume input, or a large count never ends");
 
@@ -341,7 +341,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         co_return status_code::success;
     }
 
-    template <typename Sink> resumable_task<status_code> map_sink(Sink &sink) {
+    template <typename Sink> resumable<status_code> map_sink(Sink &sink) {
         using key_type    = typename Sink::key_type;
         using mapped_type = typename Sink::mapped_type;
         static_assert(!consumes_zero_bytes<key_type>() || !consumes_zero_bytes<mapped_type>(),
@@ -387,7 +387,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         co_return status_code::success;
     }
 
-    template <typename T> resumable_task<status_code> retry(T &value) {
+    template <typename T> resumable<status_code> retry(T &value) {
         for (;;) {
             co_await wait();
             const auto result = one_shot_(value);
@@ -398,13 +398,11 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             if (result.error() != status_code::incomplete)
                 co_return result.error();
             rollback();
-            if (closed())
-                co_return status_code::incomplete;
         }
     }
 
-    template <typename Tuple> resumable_task<status_code> arguments(Tuple values) { co_return co_await arguments_at(values); }
-    template <std::size_t I = 0, typename Tuple> resumable_task<status_code> arguments_at(Tuple &values) {
+    template <typename Tuple> resumable<status_code>                    arguments(Tuple values) { co_return co_await arguments_at(values); }
+    template <std::size_t I = 0, typename Tuple> resumable<status_code> arguments_at(Tuple &values) {
         if constexpr (I < std::tuple_size_v<Tuple>) {
             auto current = item(std::get<I>(values));
             if (!current.done())
@@ -417,8 +415,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return status_code::success;
     }
     // Already complete primitive fields do not allocate sequencing frames.
-    template <std::size_t I, typename Tuple>
-    resumable_task<status_code> await_arguments(Tuple &values, resumable_task<status_code> current) {
+    template <std::size_t I, typename Tuple> resumable<status_code> await_arguments(Tuple &values, resumable<status_code> current) {
         const auto status = co_await std::move(current);
         if (status != status_code::success)
             co_return status;
@@ -428,18 +425,18 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     template <typename T, std::size_t I = 0> static consteval bool has_mixin() {
         if constexpr (I == sizeof...(Codecs))
             return false;
-        else if constexpr (HasResumableDecodeMixin<std::tuple_element_t<I, mixins>, T> ||
-                           HasResumableTranscodeMixin<std::tuple_element_t<I, mixins>, T>)
+        else if constexpr (HasDirectResumableDecodeMixin<std::tuple_element_t<I, mixins>, T> ||
+                           HasDirectResumableTranscodeMixin<std::tuple_element_t<I, mixins>, T>)
             return true;
         else
             return has_mixin<T, I + 1>();
     }
 
-    template <typename T, std::size_t I = 0> resumable_task<status_code> mixin(T &value) {
+    template <typename T, std::size_t I = 0> resumable<status_code> mixin(T &value) {
         using codec = std::tuple_element_t<I, mixins>;
-        if constexpr (HasResumableDecodeMixin<codec, T>)
+        if constexpr (HasDirectResumableDecodeMixin<codec, T>)
             return static_cast<codec &>(*this).resumable_decode(value);
-        else if constexpr (HasResumableTranscodeMixin<codec, T>)
+        else if constexpr (HasDirectResumableTranscodeMixin<codec, T>)
             return static_cast<codec &>(*this).resumable_transcode(value);
         else
             return mixin<T, I + 1>(value);
@@ -450,15 +447,100 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                HasResumableDecodeFreeFunction<self_type, T> || HasResumableTranscodeFreeFunction<self_type, T>;
     }
 
-    template <typename T> resumable_task<status_code> item(T &value) {
+    // item() decodes these with one one-shot call and everything else piece by
+    // piece. Same order as item(), explicit one-shot customizations come first
+    template <typename U> static consteval bool read_in_one_piece() {
+        if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::direct>())
+            return true;
+        else if constexpr (IsAnyBoundedSizeWrapper<U> && !IsSink<U>) {
+            using V = std::remove_cvref_t<decltype(std::declval<U &>().value())>;
+            return IsAnyHeader<V> || IsConstView<V>;
+        } else if constexpr (IsSink<U> || IsIndefiniteWrapper<U> || resumable_wrap_array<U> ||
+                             (CBOR_TAGS_HAS_NAMED_REFLECTION && IsNamedMapWrapper<U>))
+            return false;
+        else
+            return IsAnyHeader<U> || (IsTag<U> && !IsAggregate<U> && !IsTaggedTuple<U>) ||
+                   !((IsString<U> && !IsConstView<U>) || IsRangeOfCborValues<U> || IsOptional<U> || IsVariant<U> || IsTaggedTuple<U> ||
+                     IsUntaggedTuple<U> || IsAggregate<U>);
+    }
+
+    // The type's own hook would run, and an installed codec has a one-shot
+    // decode for the type in one of these forms. Only looks at the codecs when
+    // it has to, a hook must not make their one-shot overloads instantiate.
+    template <typename T, payload_decode_context... Forms> static consteval bool own_hook_beats_one_shot_codec() {
+        if constexpr (has_mixin<T>() || !has_explicit_hook<T>())
+            return false;
+        else
+            return (one_shot_codec_decodes<T, Forms>() || ...);
+    }
+
+    template <typename T, payload_decode_context Form> static consteval bool one_shot_codec_decodes() {
+        return codec_payload_mixin_customization<one_shot_type>::template accepts<T, Form>() ||
+               (plain_codec_decodes<T, Form, Codecs<one_shot_type>>() || ...);
+    }
+
+    // A mixin without the codec base. accepts() skips those, and a one-shot
+    // decoder calls their decode all the same. One with the base isn't asked
+    // anything here, asking it directly can be an error inside its decode.
+    template <typename T, payload_decode_context Form, typename Codec> static consteval bool plain_codec_decodes() {
+        if constexpr (std::is_base_of_v<cbor::tags::codec::decoder_base<one_shot_type>, Codec>)
+            return false;
+        else
+            return codec_decode_selected<T, Form, Codec>();
+    }
+
+    // The probe pulls decode in by name, so first see that the mixin has one
+    // for this value.
+    template <typename T, payload_decode_context Form, typename Codec> static consteval bool codec_decode_selected() {
+        if constexpr (RetryDecodeDirect<Codec, T> || RetryDecodeHeader<Codec, T> || RetryDecodeTag<Codec, T>)
+            return codec_payload_mixin_customization<one_shot_type>::template codec_overload_selected<T, Form, Codec>();
+        else
+            return false;
+    }
+
+    // No hook, and nobody asks the one-shot decoder either. A hook must not
+    // make the one-shot overloads instantiate, so it answers first
+    template <typename T> static consteval bool read_piece_by_piece() {
+        if constexpr (has_mixin<T>() || has_explicit_hook<T>())
+            return false;
+        else
+            return !read_in_one_piece<T>();
+    }
+
+    // The value is read piece by piece, and a one-shot decoder would give it
+    // to a mixin without the codec base. Nobody asks that mixin here, so the
+    // same bytes would give a different value. Asked is how the one-shot
+    // decoder gets to the value: from its first byte, with the header read,
+    // or with the tag read. It can only call the decode that fits.
+    template <typename T, payload_decode_context Asked> static consteval bool plain_codec_skipped() {
+        if constexpr (read_piece_by_piece<T>())
+            return (plain_codec_decodes<T, Asked, Codecs<one_shot_type>>() || ...);
+        else
+            return false;
+    }
+
+    template <typename T, payload_decode_context Asked = payload_decode_context::direct> resumable<status_code> item(T &value) {
         using U = std::remove_cvref_t<T>;
-        if constexpr (has_explicit_hook<U>())
-            return customization(value);
-        else if constexpr (has_mixin<U>())
+        static_assert(has_explicit_hook<U>() || has_mixin<U>() || !HasMismatchedResumableDecodeHook<self_type, U>,
+                      "this type has a resumable decode hook that is never called, every hook takes the value as T & and "
+                      "returns resumable<status_code>");
+
+        // Installed codecs first, like the one-shot decoder. One that only has a
+        // one-shot decode for the type would lose to the type's own hook here
+        // and win there, so the same bytes would give different values.
+        static_assert(!(own_hook_beats_one_shot_codec<U, payload_decode_context::direct, payload_decode_context::header>()),
+                      "an installed codec has a one-shot decode for this type and no resumable hook, so the type's own hook "
+                      "would run here and the codec in a one-shot decoder, give the codec a resumable_decode too");
+        static_assert(!(plain_codec_skipped<U, Asked>()),
+                      "an installed codec without the codec base has a one-shot decode for this type, a one-shot decoder would "
+                      "call it and this one reads the value itself, derive the codec from cbor::tags::codec::decoder_base<Self>");
+
+        if constexpr (has_mixin<U>())
             return mixin(value);
-        else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::direct>())
-            // Explicit one-shot customizations precede every structural category.
-            return one_shot(value); // NOLINT(bugprone-branch-clone)
+        else if constexpr (has_explicit_hook<U>())
+            return customization(value);
+        else if constexpr (read_in_one_piece<U>())
+            return one_shot(value);
         else if constexpr (IsStringSink<U>)
             return string_sink(value);
         else if constexpr (IsArraySink<U>)
@@ -466,11 +548,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else if constexpr (IsMapSink<U>)
             return map_sink(value);
         else if constexpr (IsAnyBoundedSizeWrapper<U>) {
-            using V = std::remove_cvref_t<decltype(value.value())>;
-            static_assert(!IsSink<V>, "sinks take no size bounds, return a status_code from the callback instead");
-            if constexpr (IsAnyHeader<V> || IsConstView<V>)
-                return one_shot(value);
-            else if constexpr (IsBoundedSizeWrapper<U>)
+            static_assert(!IsSink<std::remove_cvref_t<decltype(value.value())>>,
+                          "sinks take no size bounds, return a status_code from the callback instead");
+            if constexpr (IsBoundedSizeWrapper<U>)
                 return bounded_container(value.value(), U::min_size, U::max_size);
             else
                 return bounded_container(value.value(), value.min_size(), value.max_size());
@@ -483,8 +563,6 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else if constexpr (IsNamedMapWrapper<U>)
             return named_map(value.value_);
 #endif
-        else if constexpr (IsAnyHeader<U> || (IsTag<U> && !IsAggregate<U> && !IsTaggedTuple<U>))
-            return one_shot(value);
         else if constexpr (IsString<U> && !IsConstView<U>)
             return container(value);
         else if constexpr (IsRangeOfCborValues<U>) {
@@ -496,13 +574,11 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return variant(value);
         else if constexpr (IsTaggedTuple<U> || IsUntaggedTuple<U>)
             return tuple(value);
-        else if constexpr (IsAggregate<U>)
-            return aggregate(value);
         else
-            return one_shot(value);
+            return aggregate(value);
     }
 
-    template <typename T> resumable_task<status_code> customization(T &value) {
+    template <typename T> resumable<status_code> customization(T &value) {
         if constexpr (IsClassWithTagOverload<T>) {
             auto        tag = get_major_6_tag_from_class(value);
             status_code status;
@@ -539,23 +615,35 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             static_assert(!consumes_zero_bytes<typename T::value_type>(), "Zero-byte container entries require an explicit count bound");
         }
     }
-    template <typename T> resumable_task<status_code> bounded_container(T &value, std::uint64_t minimum, std::uint64_t maximum) {
+    template <typename T> resumable<status_code> bounded_container(T &value, std::uint64_t minimum, std::uint64_t maximum) {
         if constexpr (IsIndefiniteWrapper<T>)
             return container(value.value_, minimum, maximum, true);
         else
             return container(value, minimum, maximum);
     }
 
-    template <payload_decode_context Context, typename T> resumable_task<status_code> contextual_one_shot(T &value) {
+    template <payload_decode_context Context, typename T> resumable<status_code> contextual_one_shot(T &value) {
         resume_context_value<T, Context> wrapper{value};
         co_return co_await one_shot(wrapper);
     }
 
-    template <typename T> resumable_task<status_code> header_item(T &value) {
+    template <typename T> resumable<status_code> header_item(T &value) {
         using U = std::remove_cvref_t<T>;
+        // Same as in item(). A struct right inside an optional or a variant
+        // gets its fields read from here and never passes through there
+        static_assert(has_explicit_hook<U>() || has_mixin<U>() || !HasMismatchedResumableDecodeHook<self_type, U>,
+                      "this type has a resumable decode hook that is never called, every hook takes the value as T & and "
+                      "returns resumable<status_code>");
+
+        // A one-shot decoder has read the header by here, and only a decode
+        // that takes the header can still get the value
+        static_assert(!(plain_codec_skipped<U, payload_decode_context::header>()),
+                      "an installed codec without the codec base has a one-shot decode for this type, a one-shot decoder would "
+                      "call it and this one reads the value itself, derive the codec from cbor::tags::codec::decoder_base<Self>");
+
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())
             // Opt-in hooks own dispatch; the final branch handles ordinary direct-compatible items.
-            return item(value); // NOLINT(bugprone-branch-clone)
+            return item<T, payload_decode_context::header>(value); // NOLINT(bugprone-branch-clone)
         else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::header>())
             return contextual_one_shot<payload_decode_context::header>(value);
         else if constexpr (IsAggregate<U> && !IsTag<U>)
@@ -563,9 +651,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else if constexpr (IsUntaggedTuple<U>)
             return header_group(std::apply([](auto &...fields) { return std::tie(fields...); }, value));
         else
-            return item(value);
+            return item<T, payload_decode_context::header>(value);
     }
-    template <typename Tuple> resumable_task<status_code> header_group(Tuple values) {
+    template <typename Tuple> resumable<status_code> header_group(Tuple values) {
         constexpr auto count = std::tuple_size_v<Tuple>;
         if constexpr (count == 0) {
             const auto status = co_await available();
@@ -584,7 +672,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         }
     }
 
-    template <typename Tuple> resumable_task<status_code> group(Tuple values, bool force = false) {
+    template <typename Tuple> resumable<status_code> group(Tuple values, bool force = false) {
         constexpr auto count = std::tuple_size_v<std::remove_cvref_t<Tuple>>;
         if (force || (count > 1 && Options::wrap_groups)) {
             auto       header = as_array{count};
@@ -594,28 +682,28 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         }
         co_return co_await arguments(std::move(values));
     }
-    template <typename T> resumable_task<status_code> tuple(T &value) {
+    template <typename T> resumable<status_code> tuple(T &value) {
         if constexpr (IsTaggedTuple<T>)
             return tagged_tuple(value);
         else
             return group(std::apply([](auto &...fields) { return std::tie(fields...); }, value));
     }
 
-    template <typename T> resumable_task<status_code> tagged_tuple(T &value) {
+    template <typename T> resumable<status_code> tagged_tuple(T &value) {
         const auto status = co_await one_shot(std::get<0>(value));
         if (status != status_code::success)
             co_return status;
         co_return co_await group(tuple_tail(value));
     }
 
-    template <typename T> resumable_task<status_code> aggregate(T &value) {
+    template <typename T> resumable<status_code> aggregate(T &value) {
         if constexpr (HasInlineTag<T> || IsTag<T>)
             return tagged_aggregate(value);
         else
             return group(to_tuple(value));
     }
 
-    template <typename T> resumable_task<status_code> tagged_aggregate(T &value) {
+    template <typename T> resumable<status_code> tagged_aggregate(T &value) {
         auto values = to_tuple(value);
         if constexpr (HasInlineTag<T>) {
             auto       tag    = static_tag<T::cbor_tag>{};
@@ -637,7 +725,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     // Named maps resume per entry, like positional records. Every complete
     // key/value pair stays committed, so a suspension never repeats a field.
     // The rules mirror the one-shot decode_named_map.
-    template <typename Object> resumable_task<status_code> named_map(Object &object) {
+    template <typename Object> resumable<status_code> named_map(Object &object) {
         using object_type = std::remove_cvref_t<Object>;
         static_assert(named_fixed_member_keys_are_unique<object_type>(),
                       "as_named_map fixed field names must be unique after flattening as_named_group members");
@@ -671,7 +759,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         co_return validate_required_named_members(object, seen) ? status_code::success : status_code::unexpected_group_size;
     }
 
-    template <typename Object, typename Seen> resumable_task<status_code> named_map_entry(Object &object, Seen &seen) {
+    template <typename Object, typename Seen> resumable<status_code> named_map_entry(Object &object, Seen &seen) {
         using object_type = std::remove_cvref_t<Object>;
 
         // The key lives in this frame until its value has been decoded.
@@ -691,10 +779,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     // Matching is synchronous; only the matched value's decode can suspend.
-    template <typename Object, typename Seen>
-    resumable_task<status_code> named_map_value(Object &object, std::string_view key, Seen &seen) {
-        std::optional<resumable_task<status_code>> value;
-        auto                                       status = status_code::success;
+    template <typename Object, typename Seen> resumable<status_code> named_map_value(Object &object, std::string_view key, Seen &seen) {
+        std::optional<resumable<status_code>> value;
+        auto                                  status = status_code::success;
         if (!named_member_by_key(object, key, seen, status, value) && !named_extension_by_key(object, key, status, value))
             return status_code::unexpected_group_size;
         if (value)
@@ -704,15 +791,14 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     template <typename Object, typename Seen>
     bool named_member_by_key(Object &object, std::string_view key, Seen &seen, status_code &status,
-                             std::optional<resumable_task<status_code>> &value) {
+                             std::optional<resumable<status_code>> &value) {
         return [&]<std::size_t... I>(std::index_sequence<I...>) {
             return (named_member<I>(object, key, seen, status, value) || ...);
         }(std::make_index_sequence<aggregate_member_count<std::remove_cvref_t<Object>>()>{});
     }
 
     template <std::size_t I, typename Object, typename Seen>
-    bool named_member(Object &object, std::string_view key, Seen &seen, status_code &status,
-                      std::optional<resumable_task<status_code>> &value) {
+    bool named_member(Object &object, std::string_view key, Seen &seen, status_code &status, std::optional<resumable<status_code>> &value) {
         using object_type = std::remove_cvref_t<Object>;
         auto  fields      = to_tuple(object);
         auto &field       = std::get<I>(fields);
@@ -737,14 +823,14 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     // An optional field takes a value only once it has decoded completely.
-    template <typename Field> resumable_task<status_code> named_field(Field &field) {
+    template <typename Field> resumable<status_code> named_field(Field &field) {
         if constexpr (IsOptional<Field>)
             return named_optional_field(field);
         else
             return item(field);
     }
 
-    template <typename Field> resumable_task<status_code> named_optional_field(Field &field) {
+    template <typename Field> resumable<status_code> named_optional_field(Field &field) {
         typename Field::value_type decoded{};
         const auto                 status = co_await item(decoded);
         if (status == status_code::success)
@@ -753,15 +839,14 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     template <typename Object>
-    bool named_extension_by_key(Object &object, std::string_view key, status_code &status,
-                                std::optional<resumable_task<status_code>> &value) {
+    bool named_extension_by_key(Object &object, std::string_view key, status_code &status, std::optional<resumable<status_code>> &value) {
         return [&]<std::size_t... I>(std::index_sequence<I...>) {
             return (named_extension<I>(object, key, status, value) || ...);
         }(std::make_index_sequence<aggregate_member_count<std::remove_cvref_t<Object>>()>{});
     }
 
     template <std::size_t I, typename Object>
-    bool named_extension(Object &object, std::string_view key, status_code &status, std::optional<resumable_task<status_code>> &value) {
+    bool named_extension(Object &object, std::string_view key, status_code &status, std::optional<resumable<status_code>> &value) {
         auto  fields     = to_tuple(object);
         auto &field      = std::get<I>(fields);
         using field_type = std::remove_cvref_t<decltype(field)>;
@@ -795,7 +880,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return false;
     }
 
-    template <typename Map> resumable_task<status_code> named_extension_value(Map &map, typename Map::key_type key) {
+    template <typename Map> resumable<status_code> named_extension_value(Map &map, typename Map::key_type key) {
         auto       mapped = make_decode_value_for<typename Map::mapped_type>(map);
         const auto status = co_await item(mapped);
         if (status == status_code::success)
@@ -804,23 +889,20 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 #endif
 
-    resumable_task<status_code> available() {
+    resumable<status_code> available() {
         if (!empty())
             return status_code::success;
-        if (closed())
-            return status_code::incomplete;
         return await_available();
     }
 
-    resumable_task<status_code> await_available() {
-        do {
+    resumable<status_code> await_available() {
+        for (;;) {
             co_await wait();
             if (!empty())
                 co_return status_code::success;
-        } while (!closed());
-        co_return status_code::incomplete;
+        }
     }
-    template <typename T> resumable_task<status_code> optional(T &value) {
+    template <typename T> resumable<status_code> optional(T &value) {
         auto status = co_await available();
         if (status != status_code::success)
             co_return status;
@@ -846,18 +928,18 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         return result ? status_code::success : result.error();
     }
 
-    template <typename T> resumable_task<status_code> peek(T &value) {
+    template <typename T> resumable<status_code> peek(T &value) {
         const auto status = peek_once(value);
-        if (status != status_code::incomplete || closed())
+        if (status != status_code::incomplete)
             return status;
         return await_peek(value);
     }
 
-    template <typename T> resumable_task<status_code> await_peek(T &value) {
+    template <typename T> resumable<status_code> await_peek(T &value) {
         for (;;) {
             co_await wait();
             const auto status = peek_once(value);
-            if (status != status_code::incomplete || closed())
+            if (status != status_code::incomplete)
                 co_return status;
         }
     }
@@ -874,7 +956,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return false;
     }
 
-    template <typename T> resumable_task<status_code> variant(T &value) {
+    template <typename T> resumable<status_code> variant(T &value) {
         require_unambiguous_variant_dispatch<T>();
         auto status = co_await available();
         if (status != status_code::success)
@@ -898,7 +980,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         co_return status;
     }
     template <bool CatchAll, typename T, std::size_t I = 0>
-    resumable_task<status_code> variant_alternative(T &value, major_type major, std::byte info, std::uint64_t tag) {
+    resumable<status_code> variant_alternative(T &value, major_type major, std::byte info, std::uint64_t tag) {
         if constexpr (I == variant_size_v<T>)
             return status_code::no_match_in_variant_on_buffer;
         else {
@@ -914,8 +996,13 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
 
     // A selected alternative stays alive in its owning frame until decoding
     // finishes. Only metadata-only candidate selection can return eagerly.
-    template <std::size_t I, typename T> resumable_task<status_code> selected_alternative(T &value) {
+    template <std::size_t I, typename T> resumable<status_code> selected_alternative(T &value) {
         using U = variant_alternative_t<I, T>;
+        // A one-shot variant has read the tag by now and asks the codecs with it
+        static_assert(!IsTag<U> || !(own_hook_beats_one_shot_codec<U, payload_decode_context::tag>()),
+                      "an installed codec has a one-shot decode for this type and no resumable hook, so the type's own hook "
+                      "would run here and the codec in a one-shot decoder, give the codec a resumable_decode too");
+
         U           decoded{};
         status_code status;
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())
@@ -924,7 +1011,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::tag>())
                 status = co_await contextual_one_shot<payload_decode_context::tag>(decoded);
             else
-                status = co_await item(decoded);
+                status = co_await item<U, payload_decode_context::tag>(decoded);
         } else
             status = co_await header_item(decoded);
         if (status == status_code::success)
@@ -1126,14 +1213,14 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     template <bool Indefinite, typename T>
-    resumable_task<status_code> leaf_map(T &value, appender<T> &append, std::uint64_t minimum, std::uint64_t maximum) {
+    resumable<status_code> leaf_map(T &value, appender<T> &append, std::uint64_t minimum, std::uint64_t maximum) {
         std::optional<decoded_map_pair<T>> entry;
         bool                               key_complete{};
         bool                               ended{};
         std::uint64_t                      count{};
         while (!ended && (Indefinite || count != maximum)) {
             const auto status = leaf_map_elements<Indefinite>(value, append, entry, key_complete, count, ended, minimum, maximum);
-            if (status != status_code::incomplete || closed())
+            if (status != status_code::incomplete)
                 co_return status;
             co_await wait();
         }
@@ -1141,9 +1228,8 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     }
 
     template <typename T>
-    resumable_task<status_code> container(T &value, std::uint64_t minimum = 0,
-                                          std::uint64_t maximum            = std::numeric_limits<std::uint64_t>::max(),
-                                          bool          require_indefinite = false) {
+    resumable<status_code> container(T &value, std::uint64_t minimum = 0, std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max(),
+                                     bool require_indefinite = false) {
         using header_type =
             std::conditional_t<IsTextString<T>, as_text_any,
                                std::conditional_t<IsBinaryString<T>, as_bstr_any, std::conditional_t<IsMap<T>, as_map_any, as_array_any>>>;
@@ -1186,7 +1272,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 auto remaining = header.size;
                 while (remaining != 0) {
                     status = leaf_elements(value, append, remaining);
-                    if (status != status_code::incomplete || closed())
+                    if (status != status_code::incomplete)
                         co_return status;
                     co_await wait();
                 }
@@ -1196,7 +1282,7 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                 bool          ended{};
                 while (!ended) {
                     status = indefinite_leaf_elements(value, append, count, ended, minimum, maximum);
-                    if (status != status_code::incomplete || closed())
+                    if (status != status_code::incomplete)
                         co_return status;
                     co_await wait();
                 }

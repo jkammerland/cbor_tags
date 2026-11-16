@@ -5,6 +5,7 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <ranges>
 #include <span>
 #include <vector>
 
@@ -12,18 +13,22 @@ namespace ct = cbor::tags;
 
 template <typename Generator>
 example::consumer collect(Generator &items, std::vector<int> &received, std::size_t &consumed) {
-    // next() returns the generator-owned operation for the next value or the end of the sequence.
-    auto result = co_await items.next();
-    assert(result);
-    while (!items.done()) {
+    for (;;) {
+        // next() returns the generator-owned operation for the next value.
+        auto &item = items.next();
+        const auto result = co_await item;
+        if (!result) {
+            // The producer stopped waiting. It's a clean end if none of this item had arrived.
+            const bool clean = result.error() == ct::status_code::cancelled &&
+                               item.committed_bytes() == 0 &&
+                               std::ranges::empty(item.remaining_input());
+            co_return clean;
+        }
         consumed += *result;
-        received.push_back(items.value());
 
         // Copy the value before requesting the next one.
-        result = co_await items.next();
-        assert(result);
+        received.push_back(items.value());
     }
-    co_return result && *result == 0;
 }
 
 /**
@@ -49,19 +54,17 @@ int main() {
     input.push_back(bytes.front());
     items.resume();
     assert(!consumer.done());
-    assert(!items.done());
     assert(received == std::vector<int>{sent.front()});
 
-    // Buffered items drain inline; the consumer still waits for the end of the sequence.
+    // Buffered items drain inline; the consumer waits for another reading.
     input.insert(input.end(), bytes.begin() + 1, bytes.end());
     items.resume();
     assert(!consumer.done());
     assert(received == std::vector<int>(sent.begin(), sent.end()));
 
-    // Closing the input produces a successful zero-byte result, not another reading.
-    items.close_input();
+    // The transport ended, so stop waiting. The consumer checks where the sequence stopped.
+    items.cancel();
     assert(consumer.succeeded());
-    assert(items.done());
     assert(consumed == buffer.size());
     return 0;
 }

@@ -151,10 +151,11 @@ TEST_SUITE("cbor_wire/resumable") {
             CHECK(actual == expected);
 
             if (truncated) {
-                operation.close_input();
+                REQUIRE_FALSE(operation.done());
+                operation.cancel();
                 REQUIRE(operation.done());
                 REQUIRE_FALSE(operation.result());
-                CHECK(operation.result().error() == status_code::incomplete);
+                CHECK(operation.result().error() == status_code::cancelled);
             } else {
                 storage.emplace_back(end);
                 operation.resume();
@@ -230,10 +231,8 @@ TEST_SUITE("cbor_wire/resumable") {
             const auto bytes     = to_bytes(outer + major + "8");
             auto       operation = make_resumable_decoder(source)(actual);
             storage.emplace_back(bytes);
-            operation.close_input();
-            REQUIRE(operation.done());
-            REQUIRE_FALSE(operation.result());
-            CHECK(operation.result().error() == status_code::incomplete);
+            operation.resume();
+            REQUIRE_FALSE(operation.done());
             CHECK(resource.allocations == 0U);
         }
         SUBCASE("wrong child major") {
@@ -413,10 +412,10 @@ TEST_SUITE("cbor_wire/resumable") {
             REQUIRE_FALSE(operation.done());
             CHECK(actual == ordered_integer_map{{99, 100}});
             CHECK(to_hex(operation.remaining_input()) == "1901");
-            operation.close_input();
+            operation.cancel();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
-            CHECK(operation.result().error() == status_code::incomplete);
+            CHECK(operation.result().error() == status_code::cancelled);
             CHECK(actual == ordered_integer_map{{99, 100}});
             CHECK(to_hex(operation.remaining_input()) == "1901");
         }
@@ -466,10 +465,15 @@ TEST_SUITE("cbor_wire/resumable") {
             std::map<std::uint32_t, std::uint32_t> actual;
             auto operation = make_resumable_decoder_with_options<strict_integer_decoder_options>(source)(actual);
             storage.emplace_back(bytes);
-            operation.close_input();
-            REQUIRE(operation.done());
-            REQUIRE_FALSE(operation.result());
-            CHECK(operation.result().error() == test.status);
+            operation.resume();
+            // A map cut after a pair keeps that pair and waits for the next one
+            if (test.status == status_code::incomplete) {
+                REQUIRE_FALSE(operation.done());
+            } else {
+                REQUIRE(operation.done());
+                REQUIRE_FALSE(operation.result());
+                CHECK(operation.result().error() == test.status);
+            }
             CHECK(actual == std::map<std::uint32_t, std::uint32_t>{{1, 2}});
             CHECK(to_hex(operation.remaining_input()) == test.tail);
         }
@@ -499,7 +503,7 @@ TEST_SUITE("cbor_wire/resumable") {
             operation.resume();
             if (!operation.done()) {
                 storage.emplace_back(input.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
 
             REQUIRE(operation.done());
@@ -547,7 +551,7 @@ TEST_SUITE("cbor_wire/resumable") {
         CHECK(to_hex(operation.remaining_input()) == "09");
     }
 
-    TEST_CASE("indefinite integer eof retains completed elements and an incomplete item") {
+    TEST_CASE("cancelled indefinite integers retain completed elements and an incomplete item") {
         auto check = [](std::string_view hex, std::vector<int> expected, std::string_view tail) {
             const auto       bytes = to_bytes(hex);
             input_chunks     storage;
@@ -558,10 +562,10 @@ TEST_SUITE("cbor_wire/resumable") {
             operation.resume();
             REQUIRE_FALSE(operation.done());
             CHECK(actual == expected);
-            operation.close_input();
+            operation.cancel();
             REQUIRE(operation.done());
             REQUIRE_FALSE(operation.result());
-            CHECK(operation.result().error() == status_code::incomplete);
+            CHECK(operation.result().error() == status_code::cancelled);
             CHECK(actual == expected);
             CHECK(to_hex(operation.remaining_input()) == tail);
         };

@@ -110,7 +110,7 @@ template <typename Array, typename EncodeValue> void check_typed_array_encode_sp
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(std::span{bytes}.subspan(cut));
-            operation.close_output();
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -138,7 +138,7 @@ template <typename Array> void check_typed_array_splits(const Array &expected) {
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(input.subspan(cut));
-            operation.close_input();
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -187,7 +187,7 @@ void check_destination_splits(const std::vector<std::uint32_t> &expected, const 
         operation.resume();
         if (!operation.done()) {
             chunks.emplace_back(input.subspan(cut));
-            operation.close_input();
+            operation.resume();
         }
 
         REQUIRE(operation.done());
@@ -221,7 +221,7 @@ void check_view_splits(const std::vector<std::uint32_t> &expected, MakeValue mak
             if (!operation.done()) {
                 CHECK(operation.committed_bytes() == 0);
                 chunks.emplace_back(input.subspan(cut));
-                operation.close_input();
+                operation.resume();
             }
 
             REQUIRE(operation.done());
@@ -241,7 +241,7 @@ void check_view_splits(const std::vector<std::uint32_t> &expected, MakeValue mak
                 CHECK(operation.committed_bytes() == 0);
             }
             storage.insert(storage.end(), input.begin() + static_cast<std::ptrdiff_t>(cut), input.end());
-            REQUIRE(operation.close_input() == resume_state::finished);
+            REQUIRE(operation.resume() == resume_state::done);
             REQUIRE(operation.result());
             CHECK(*operation.result() == bytes.size());
         }
@@ -255,7 +255,7 @@ template <typename Self> struct typed_array_override : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    resumable_task<status_code> resumable_decode(rfc8746::typed_array<std::uint32_t> &array) {
+    resumable<status_code> resumable_decode(rfc8746::typed_array<std::uint32_t> &array) {
         std::uint32_t value{};
         const auto    status = co_await static_cast<Self &>(*this)(value);
         if (status == status_code::success) {
@@ -264,7 +264,7 @@ template <typename Self> struct typed_array_override : codec::base<Self> {
         co_return status;
     }
 
-    resumable_task<status_code> resumable_encode(const rfc8746::typed_array<std::uint32_t> &array) {
+    resumable<status_code> resumable_encode(const rfc8746::typed_array<std::uint32_t> &array) {
         co_return co_await static_cast<Self &>(*this)(array.values().front());
     }
 };
@@ -285,8 +285,8 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
                 auto                                                operation = decoder(actual);
 
                 input.insert(input.end(), bytes.begin() + static_cast<std::ptrdiff_t>(cut), bytes.end());
-                const auto state = operation.close_input();
-                REQUIRE(state == resume_state::finished);
+                const auto state = operation.resume();
+                REQUIRE(state == resume_state::done);
                 REQUIRE(operation.result());
                 CHECK(*operation.result() == bytes.size());
                 REQUIRE(actual.values().size() == expected.values().size());
@@ -566,7 +566,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         auto                   sink    = make_output_buffer(output_storage);
         auto                   encoder = make_resumable_encoder<typed_array_override, codec::typed_array>(sink)(expected);
         output_storage.emplace_back(std::span{output});
-        encoder.close_output();
+        encoder.resume();
         REQUIRE(encoder.result());
         CHECK(*encoder.result() == reference.size());
 
@@ -575,7 +575,7 @@ TEST_SUITE("roundtrip/resumable_typed_array") {
         rfc8746::typed_array<std::uint32_t> actual;
         auto                                decoder = make_resumable_decoder<typed_array_override, codec::typed_array>(source)(actual);
         input_storage.emplace_back(std::span<const std::byte>{output});
-        decoder.close_input();
+        decoder.resume();
         REQUIRE(decoder.result());
         CHECK(*decoder.result() == reference.size());
         check_typed_array_values(actual, expected);

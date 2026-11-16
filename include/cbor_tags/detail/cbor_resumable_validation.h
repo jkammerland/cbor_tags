@@ -76,7 +76,6 @@ template <bool Map = false> struct resumable_scalar_batch {
 
 struct validation_request {
     std::size_t        count{1};
-    bool               until_eof{};
     validation_options options{};
 };
 
@@ -84,56 +83,63 @@ template <typename Source> class resumable_validation_context : public resumable
     using base           = resumable_decode_context<Source, default_options>;
     using window_decoder = decoder<std::span<const std::byte>, default_options, cbor_header_decoder, cbor_indefinite_decoder>;
 
+    // Borrowed from the source. Every wait flushes first, the caller may
+    // relocate or reclaim the storage while the operation is suspended
     std::span<const std::byte> window_;
     std::size_t                pending_{};
 
     // Publish complete tokens and consumed payload bytes on every exit,
     // including allocation failure after decoding a nested item's header.
+    // A normal return has flushed already. What is left here is an exception on
+    // its way out, and that one ends the operation whatever commit() does
     struct window_guard {
         resumable_validation_context &context;
-        ~window_guard() { context.flush_window(); }
+        ~window_guard() {
+            try {
+                context.flush_window();
+            } catch (...) {} // NOLINT(bugprone-empty-catch)
+        }
     };
 
   public:
     using base::base;
-    void suspend() { flush_window(); }
 
-    resumable_task<status_code> operator()(validation_request request) {
+    resumable<status_code> operator()(validation_request request) {
         const window_guard       guard{*this};
-        resumable_scalar_batch<> batch{.remaining = request.count, .indefinite = request.until_eof};
-        while (!batch.finished()) {
-            while (this->empty()) {
-                if (this->closed())
-                    co_return request.until_eof ? status_code::success : status_code::incomplete;
+        resumable_scalar_batch<> batch{.remaining = request.count};
+        auto                     status = status_code::success;
+        while (status == status_code::success && !batch.finished()) {
+            while (this->empty())
                 co_await this->wait();
-            }
 
-            auto status = read_scalars(batch);
-            if (status != status_code::success)
-                co_return status;
-            if (batch.finished())
+            status = read_scalars(batch);
+            if (status != status_code::success || batch.finished())
                 break;
             if (batch.accepted != 0 && !batch.deferred && window_.empty())
                 continue;
 
             status = batch.deferred ? co_await start_item(batch.token.value, 0, request.options) : co_await read_item(0, request.options);
-            if (status != status_code::success)
-                co_return status;
-            batch.complete_item();
+            if (status == status_code::success)
+                batch.complete_item();
         }
-        co_return status_code::success;
+
+        // A commit that throws here ends the operation with status_code::error
+        flush_window();
+        co_return status;
     }
 
   private:
     void flush_window() {
-        if (pending_ != 0) {
-            auto &reader = this->one_shot().reader_;
-            resumable_source_access::consume_window(this->source(), reader.position_, pending_);
-            reader.current_offset_ += pending_;
-            this->commit();
-        }
-        window_  = {};
-        pending_ = 0;
+        // Forget the window first, a throwing commit must not get flushed twice
+        const auto pending = std::exchange(pending_, 0);
+        window_            = {};
+        if (pending == 0)
+            return;
+
+        auto &reader = this->one_shot().reader_;
+        resumable_source_access::consume_window(this->source(), reader.position_, pending);
+        reader.current_offset_ += pending;
+        this->commit();
     }
 
     bool empty() {
@@ -172,7 +178,7 @@ template <typename Source> class resumable_validation_context : public resumable
         return result ? status_code::success : result.error();
     }
 
-    resumable_task<status_code> read_token(resumable_walk_token &token) {
+    resumable<status_code> read_token(resumable_walk_token &token) {
         if (window_.size() < 9)
             refresh_window();
 
@@ -194,16 +200,16 @@ template <typename Source> class resumable_validation_context : public resumable
         return this->one_shot(token);
     }
 
-    resumable_task<status_code> read_item(std::size_t depth, validation_options options) {
+    resumable<status_code> read_item(std::size_t depth, validation_options options) {
         resumable_walk_token token;
         const auto           status = co_await read_token(token);
         if (status != status_code::success)
             co_return status;
         co_return co_await start_item(token.value, depth, options);
     }
-    resumable_task<status_code> start_item(const catch_all_variant &token, std::size_t depth, validation_options options) {
+    resumable<status_code> start_item(const catch_all_variant &token, std::size_t depth, validation_options options) {
         return std::visit(
-            [&](const auto &item) -> resumable_task<status_code> {
+            [&](const auto &item) -> resumable<status_code> {
                 using T = std::remove_cvref_t<decltype(item)>;
                 if constexpr (std::same_as<T, indefinite_break>)
                     return status_code::malformed_structure;
@@ -223,7 +229,7 @@ template <typename Source> class resumable_validation_context : public resumable
             },
             token);
     }
-    template <bool Text> resumable_task<status_code> string_payload(std::uint64_t length) {
+    template <bool Text> resumable<status_code> string_payload(std::uint64_t length) {
         if (length == 0)
             return status_code::success;
         if (window_.empty())
@@ -252,7 +258,7 @@ template <typename Source> class resumable_validation_context : public resumable
         return valid;
     }
 
-    template <bool Text> resumable_task<status_code> await_string_payload(std::uint64_t length) {
+    template <bool Text> resumable<status_code> await_string_payload(std::uint64_t length) {
         utf8_state utf8;
         bool       valid  = true;
         auto      &reader = this->one_shot().reader_;
@@ -262,8 +268,6 @@ template <typename Source> class resumable_validation_context : public resumable
             if (window_.empty()) {
                 refresh_window();
                 if (window_.empty() && base::empty()) {
-                    if (this->closed())
-                        co_return status_code::incomplete;
                     co_await this->wait();
                     continue;
                 }
@@ -289,7 +293,7 @@ template <typename Source> class resumable_validation_context : public resumable
         }
         co_return Text && (!valid || !utf8.complete()) ? status_code::invalid_utf8_sequence : status_code::success;
     }
-    template <typename Header> resumable_task<status_code> sequence(Header header, std::size_t depth, validation_options options) {
+    template <typename Header> resumable<status_code> sequence(Header header, std::size_t depth, validation_options options) {
         resumable_scalar_batch<IsMapHeader<Header>> batch{.remaining = header.size, .indefinite = header.indefinite};
         while (!batch.finished()) {
             auto status = status_code::success;
@@ -319,25 +323,6 @@ template <typename Source> class resumable_validation_context : public resumable
             batch.complete_item();
         }
         co_return status_code::success;
-    }
-};
-
-// A sequence consumer requests one value at a time. No value is prefetched.
-template <typename Source, typename T, typename Options, template <typename> typename... Codecs>
-class resumable_generator_context : public resumable_decode_context<Source, Options, Codecs...> {
-    using base = resumable_decode_context<Source, Options, Codecs...>;
-
-  public:
-    using base::base;
-    resumable_task<status_code> operator()(T &value, bool &ended) {
-        while (this->empty()) {
-            if (this->closed()) {
-                ended = true;
-                co_return status_code::success;
-            }
-            co_await this->wait();
-        }
-        co_return co_await base::operator()(value);
     }
 };
 } // namespace cbor::tags::detail

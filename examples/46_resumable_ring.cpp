@@ -82,13 +82,6 @@ template <bool Output, std::size_t Capacity> class ring_source {
     iterator committed_position() const noexcept {
         return {this, committed_};
     }
-    bool closed() const {
-        return closed_;
-    }
-    void close() {
-        closed_ = true;
-    }
-
     // Availability is read directly; no cached pointers need refreshing.
     void refresh() {
     }
@@ -135,7 +128,6 @@ template <bool Output, std::size_t Capacity> class ring_source {
     std::size_t write(std::span<const std::byte> bytes)
         requires(Output)
     {
-        assert(!closed_);
         return copy_in(bytes, working_);
     }
 
@@ -143,7 +135,6 @@ template <bool Output, std::size_t Capacity> class ring_source {
     std::size_t append(std::span<const std::byte> bytes)
         requires(!Output)
     {
-        assert(!closed_);
         return copy_in(bytes, available_);
     }
 
@@ -226,7 +217,6 @@ template <bool Output, std::size_t Capacity> class ring_source {
     std::size_t available_;
     std::size_t working_;
     std::size_t committed_;
-    bool closed_{};
     bool active_{};
 };
 
@@ -285,7 +275,7 @@ int main() {
         assert(transport.size() > published_before);
 
         const auto state = encoding.resume();
-        assert(state == ct::resume_state::need_output || state == ct::resume_state::finished);
+        assert(state == ct::resume_state::need_output || state == ct::resume_state::done);
         ++output_resumptions;
     }
     publish(output, transport);
@@ -323,7 +313,7 @@ int main() {
         supplied += admitted;
 
         const auto state = decoding.resume();
-        assert(state == ct::resume_state::need_input || state == ct::resume_state::finished);
+        assert(state == ct::resume_state::need_input || state == ct::resume_state::done);
         ++input_resumptions;
     }
 
