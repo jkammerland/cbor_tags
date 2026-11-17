@@ -38,7 +38,7 @@ template <typename Self> struct doubled : ct::codec::encoder_base<Self> {
     void encode(std::uint32_t value) { static_cast<Self &>(*this).encode(std::uint64_t{value} * 2); }
 };
 
-// The decode flag asks the one-shot decoder for a type the encoder doesn't
+// The decode flag asks the ordinary decoder for a type the encoder doesn't
 // have. Nothing decodes here, so nothing may read that flag. MSVC works out
 // every flag as soon as the declaration is used at all, whoever asks, so it
 // gets a flag that can always be worked out

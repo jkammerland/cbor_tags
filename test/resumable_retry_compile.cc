@@ -38,7 +38,7 @@ struct tagged_record {
 
 enum class retry_level : std::uint32_t { low = 7 };
 
-// The same codec is legal one-shot but has no replay declaration.
+// The same codec is legal ordinary but has no replay declaration.
 template <typename Self> struct undeclared_encoder : codec::encoder_base<Self> {
     using codec::encoder_base<Self>::encode;
     void encode(std::uint32_t value) { static_cast<Self &>(*this).encode(std::uint64_t{value}); }
@@ -46,7 +46,7 @@ template <typename Self> struct undeclared_encoder : codec::encoder_base<Self> {
 
 template <typename T> struct replay {
     T                                                  value;
-    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const { return encoder.one_shot(value); }
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const { return encoder.retry(value); }
 };
 
 struct integer_record {

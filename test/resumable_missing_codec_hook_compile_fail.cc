@@ -8,7 +8,7 @@
 
 namespace ct = cbor::tags;
 
-// point has hooks of its own, and the codec only handles it in a one-shot
+// point has hooks of its own, and the codec only handles it in an ordinary
 // encoder or decoder. That one runs the codec, a resumable one would run
 // point's hook and write x, y instead
 struct point {
@@ -22,8 +22,8 @@ struct point {
     template <typename Decoder> ct::resumable<ct::status_code> resumable_decode(Decoder &decoder) { return decoder(x, y); }
 };
 
-#if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_PLAIN_ENCODE) || defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_PLAIN_DECODE)
-// Without the codec base, a one-shot encoder or decoder calls these all the same
+#if defined(CBOR_TAGS_MISSING_CODEC_HOOK_PLAIN_ENCODE) || defined(CBOR_TAGS_MISSING_CODEC_HOOK_PLAIN_DECODE)
+// Without the codec base, an ordinary encoder or decoder calls these all the same
 template <typename Self> struct swapped_points {
 #else
 template <typename Self> struct swapped_points : ct::codec::base<Self> {
@@ -31,8 +31,8 @@ template <typename Self> struct swapped_points : ct::codec::base<Self> {
     using ct::codec::base<Self>::encode;
 #endif
 
-#if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_MUTABLE_ENCODE)
-    // Only for a point that isn't const, a one-shot encoder still picks it for one
+#if defined(CBOR_TAGS_MISSING_CODEC_HOOK_MUTABLE_ENCODE)
+    // Only for a point that isn't const, an ordinary encoder still picks it for one
     void encode(point &value) { static_cast<Self &>(*this)(value.y, value.x); }
 #else
     void encode(const point &value) { static_cast<Self &>(*this)(value.y, value.x); }
@@ -44,7 +44,7 @@ template <typename Self> struct swapped_points : ct::codec::base<Self> {
     }
 };
 
-// Tagged, so a one-shot variant reads the tag and then asks the codec with it.
+// Tagged, so an ordinary variant reads the tag and then asks the codec with it.
 // Decoded on its own nobody asks the codec, and that still compiles
 struct reading {
     static constexpr std::uint64_t cbor_tag = 100;
@@ -81,14 +81,14 @@ int main() {
     auto    plain         = plain_decoder(alone);
     (void)plain;
 
-#if defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_ENCODE) || defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_MUTABLE_ENCODE) ||                              \
-    defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_PLAIN_ENCODE)
+#if defined(CBOR_TAGS_MISSING_CODEC_HOOK_ENCODE) || defined(CBOR_TAGS_MISSING_CODEC_HOOK_MUTABLE_ENCODE) ||                                \
+    defined(CBOR_TAGS_MISSING_CODEC_HOOK_PLAIN_ENCODE)
     auto encoder   = ct::make_resumable_encoder<swapped_points>(bytes);
     auto operation = encoder(value);
-#elif defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_DECODE) || defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_PLAIN_DECODE)
+#elif defined(CBOR_TAGS_MISSING_CODEC_HOOK_DECODE) || defined(CBOR_TAGS_MISSING_CODEC_HOOK_PLAIN_DECODE)
     auto decoder   = ct::make_resumable_decoder<swapped_points>(bytes);
     auto operation = decoder(value);
-#elif defined(CBOR_TAGS_ONE_SHOT_ONLY_CODEC_VARIANT_DECODE)
+#elif defined(CBOR_TAGS_MISSING_CODEC_HOOK_VARIANT_DECODE)
     std::variant<reading, int> either;
     auto                       decoder   = ct::make_resumable_decoder<offset_readings>(bytes);
     auto                       operation = decoder(either);

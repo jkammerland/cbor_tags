@@ -58,7 +58,7 @@ bool same_extended(const named_extended &lhs, const named_extended &rhs) {
     return lhs.id == rhs.id && lhs.extra.value_ == rhs.extra.value_;
 }
 
-// The one-shot decoder is the reference: every input split must give its
+// The ordinary decoder is the reference: every input split must give its
 // status, and on success the same value.
 template <typename T, typename Equal> void check_named_map_splits(std::span<const std::byte> wire, Equal equal) {
     T          expected{};
@@ -167,7 +167,7 @@ TEST_SUITE("cbor_wire/resumable") {
         check_named_map_splits<named_extended>(encode_named(extended), same_extended);
     }
 
-    TEST_CASE("named maps report the one-shot status for malformed entries at every split") {
+    TEST_CASE("named maps report the ordinary status for malformed entries at every split") {
         // Entries reused below: "name": "a", "values": [], "id": 1.
         // clang-format off
         const std::string name_a    = "646e616d65" "6161";
@@ -205,7 +205,7 @@ TEST_SUITE("cbor_wire/resumable") {
         CHECK(operation.result().error() == status_code::unexpected_group_size);
     }
 
-    TEST_CASE("named maps encode per entry with the one-shot bytes at every output split") {
+    TEST_CASE("named maps encode per entry with the ordinary bytes at every output split") {
         named_station  station{.name = std::string(100, 'n'), .values = {1, 10, 1000}, .note = std::nullopt, .id = 7};
         named_extended extended{.id = "device"};
         extended.extra.value_ = {{"k1", "v1"}, {"k2", std::string(30, 'v')}};
@@ -255,8 +255,8 @@ TEST_SUITE("cbor_wire/resumable") {
         named_extended extended{.id = "device"};
         extended.extra.value_ = {{"id", "shadow"}};
 
-        std::vector<std::byte> one_shot;
-        const auto             expected = make_encoder(one_shot)(as_named_map{extended});
+        std::vector<std::byte> ordinary;
+        const auto             expected = make_encoder(ordinary)(as_named_map{extended});
         REQUIRE_FALSE(expected);
 
         std::vector<std::byte> output;

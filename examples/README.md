@@ -58,7 +58,7 @@ example is standalone and uses standard-library storage.
 | [37_experimental_cwt_confirmation.cpp](37_experimental_cwt_confirmation.cpp) | Bind a token to a public key | A confirmation claim identifies the presenter's key. |
 | [38_experimental_cwt_key_thumbprint.cpp](38_experimental_cwt_key_thumbprint.cpp) | Identify public key material | Hash the deterministically encoded required public-key parameters. |
 | [39_experimental_cwt_confirmation_token.cpp](39_experimental_cwt_confirmation_token.cpp) | Verify token and presenter possession | Authenticate the issuer assertion, then verify the presenter's challenge signature. |
-| [40_a_resumable.cpp](40_a_resumable.cpp) | Continue a truncated record | A failed one-shot decode is terminal; a resumable decode keeps its progress and finishes once the missing bytes are appended. |
+| [40_a_resumable.cpp](40_a_resumable.cpp) | Continue a truncated record | A failed ordinary decode is terminal; a resumable decode keeps its progress and finishes once the missing bytes are appended. |
 | [40_resumable.cpp](40_resumable.cpp) | Decode items as input grows | Append bytes to a deque, resume, and inspect the completed values. |
 | [41_resumable_encoding.cpp](41_resumable_encoding.cpp) | Encode into a growable container | Let a deque grow and inspect its committed encoded prefix. |
 | [42_resumable_validation.cpp](42_resumable_validation.cpp) | Validate without constructing values | Validate CBOR structure and UTF-8 one item at a time across chunks; check that no item was cut off when the input stops. |
@@ -67,6 +67,7 @@ example is standalone and uses standard-library storage.
 | [45_resumable_custom_hook.cpp](45_resumable_custom_hook.cpp) | Customize resumable encoding and decoding | ADL hooks retain progress while choosing an application-specific wire layout. |
 | [46_resumable_ring.cpp](46_resumable_ring.cpp) | Reuse bounded storage through a custom source and output buffer | Absolute positions survive wraparound; reclaim only committed bytes after releasing external borrows; a sink hashes a byte string larger than the ring. |
 | [47_resumable_typed_array.cpp](47_resumable_typed_array.cpp) | Resume typed arrays | Decode into reused, bounded storage as bytes arrive, one whole element at a time; a bound fails on the header, before the payload; a view waits for the whole array, then outlives its operation. |
+| [48_resumable_retry.cpp](48_resumable_retry.cpp) | Delegate from a resumable hook | Retry ordinary double decoding across input deliveries, then reject non-finite values. |
 
 ## CDDL
 

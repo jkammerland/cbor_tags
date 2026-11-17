@@ -7,9 +7,9 @@
 
 namespace cbor::tags {
 
-// A declaration covers the complete one-shot call, including nested calls and
-// external effects. Codec is void for member/ADL customizations; mixins use the
-// actual one-shot Codec<Transcoder> specialization selected by the factory.
+// A declaration covers the complete encode or decode call, including nested calls
+// and external effects. Codec is void for member/ADL customizations; mixins use
+// the Codec<Transcoder> specialization that performs the retried call.
 template <typename T, typename Codec = void> struct resumable_retry_traits {
     static constexpr bool encode = false;
     static constexpr bool decode = false;
@@ -61,11 +61,11 @@ template <typename T, typename Codec, bool Encode> consteval bool resumable_retr
 
 // Probe each installed mixin separately. A value's declaration must never
 // authorize an unrelated codec override, including overrides of built-in types.
-template <typename OneShot, typename T, typename Codec, payload_decode_context Context>
+template <typename Transcoder, typename T, typename Codec, payload_decode_context Context>
 consteval bool resumable_codec_decode_retry_allowed() {
     constexpr bool custom = [] {
-        if constexpr (std::is_base_of_v<codec::decoder_base<OneShot>, Codec>) {
-            return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Context, Codec>() ||
+        if constexpr (std::is_base_of_v<codec::decoder_base<Transcoder>, Codec>) {
+            return codec_payload_mixin_customization<Transcoder>::template accepts_codec<T, Context, Codec>() ||
                    (Context == payload_decode_context::direct && RetryDecodeRvalue<Codec, T>);
         } else if constexpr (Context == payload_decode_context::tag) {
             return RetryDecodeTag<Codec, T>;
@@ -78,13 +78,13 @@ consteval bool resumable_codec_decode_retry_allowed() {
     return (!custom && !RetryDecodeObserver<Codec>) || resumable_retry_declared<T, Codec, false>();
 }
 
-template <typename OneShot, typename T, payload_decode_context Context, typename... Codecs>
+template <typename Transcoder, typename T, payload_decode_context Context, typename... Codecs>
 consteval bool resumable_decode_retry_allowed() {
-    constexpr bool allowed = (!IsClassWithDecodingOverload<OneShot, T> || resumable_retry_declared<T, void, false>()) &&
-                             (resumable_codec_decode_retry_allowed<OneShot, T, Codecs, Context>() && ...);
+    constexpr bool allowed = (!IsClassWithDecodingOverload<Transcoder, T> || resumable_retry_declared<T, void, false>()) &&
+                             (resumable_codec_decode_retry_allowed<Transcoder, T, Codecs, Context>() && ...);
     if constexpr (IsEnum<T>) {
-        using customization = codec_payload_mixin_customization<OneShot>;
-        if constexpr (!IsClassWithDecodingOverload<OneShot, T> && !customization::template starts_on_first_byte<T>()) {
+        using customization = codec_payload_mixin_customization<Transcoder>;
+        if constexpr (!IsClassWithDecodingOverload<Transcoder, T> && !customization::template starts_on_first_byte<T>()) {
             // Built-in enum decoding calls the underlying integer's codec.
             // A whole-enum override instead owns its complete retry contract.
             using underlying    = std::underlying_type_t<T>;
@@ -99,22 +99,22 @@ consteval bool resumable_decode_retry_allowed() {
     return allowed;
 }
 
-template <typename OneShot, typename T, typename Codec> consteval bool resumable_codec_encode_customized() {
-    if constexpr (std::is_base_of_v<codec::encoder_base<OneShot>, Codec>) {
-        using probe = payload_encoder_overload_probe<OneShot, Codec>;
+template <typename Transcoder, typename T, typename Codec> consteval bool resumable_codec_encode_customized() {
+    if constexpr (std::is_base_of_v<codec::encoder_base<Transcoder>, Codec>) {
+        using probe = payload_encoder_overload_probe<Transcoder, Codec>;
         if constexpr (RetryEncodeRvalue<probe, T>) {
-            return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Codec>() ||
+            return codec_payload_mixin_customization<Transcoder>::template accepts_codec<T, Codec>() ||
                    !std::same_as<decltype(std::declval<probe &>().encode(std::declval<T &&>())), core_payload_overload>;
         } else {
-            return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Codec>();
+            return codec_payload_mixin_customization<Transcoder>::template accepts_codec<T, Codec>();
         }
     } else {
         return RetryEncodeDirect<Codec, T>;
     }
 }
 
-template <typename OneShot, typename T, typename Codec> consteval bool resumable_codec_encode_retry_allowed() {
-    return (!resumable_codec_encode_customized<OneShot, T, Codec>() && !RetryEncodeObserver<Codec>) ||
+template <typename Transcoder, typename T, typename Codec> consteval bool resumable_codec_encode_retry_allowed() {
+    return (!resumable_codec_encode_customized<Transcoder, T, Codec>() && !RetryEncodeObserver<Codec>) ||
            resumable_retry_declared<T, Codec, true>();
 }
 
@@ -124,7 +124,7 @@ template <typename... T> inline constexpr bool resumable_retry_wrap_array<wrap_a
 // Built-in delegation does not establish a customization's whole-call contract.
 // Follow its children until a declared customization takes ownership. Remember
 // visited types so recursive application schemas remain finite at compile time.
-template <typename OneShot, typename... Codecs> struct resumable_encode_retry {
+template <typename Transcoder, typename... Codecs> struct resumable_encode_retry {
     template <typename Object, typename... Parents> static consteval bool named_fields() {
         using tuple = std::remove_cvref_t<decltype(to_tuple(std::declval<const Object &>()))>;
         return []<std::size_t... I>(std::index_sequence<I...>) {
@@ -160,16 +160,16 @@ template <typename OneShot, typename... Codecs> struct resumable_encode_retry {
     }
 
     template <typename T, bool CoreOnly = false, typename... Parents> static consteval bool allowed() {
-        using U     = std::remove_cvref_t<T>;
-        using visit = std::pair<T, std::bool_constant<CoreOnly>>;
-        constexpr bool custom =
-            !CoreOnly && (IsClassWithEncodingOverload<OneShot, T> || (resumable_codec_encode_customized<OneShot, T, Codecs>() || ...));
+        using U               = std::remove_cvref_t<T>;
+        using visit           = std::pair<T, std::bool_constant<CoreOnly>>;
+        constexpr bool custom = !CoreOnly && (IsClassWithEncodingOverload<Transcoder, T> ||
+                                              (resumable_codec_encode_customized<Transcoder, T, Codecs>() || ...));
         // Distinct dispatch boundaries intentionally share the same retry verdict.
         // NOLINTNEXTLINE(bugprone-branch-clone)
         if constexpr ((std::same_as<visit, Parents> || ...)) {
             return true;
-        } else if constexpr (!CoreOnly && ((!resumable_codec_encode_retry_allowed<OneShot, T, Codecs>() || ...) ||
-                                           (IsClassWithEncodingOverload<OneShot, T> && !resumable_retry_declared<T, void, true>()))) {
+        } else if constexpr (!CoreOnly && ((!resumable_codec_encode_retry_allowed<Transcoder, T, Codecs>() || ...) ||
+                                           (IsClassWithEncodingOverload<Transcoder, T> && !resumable_retry_declared<T, void, true>()))) {
             return false;
         } else if constexpr (custom) {
             // Its declaration includes every call made by the customization.
@@ -220,8 +220,8 @@ template <typename OneShot, typename... Codecs> struct resumable_encode_retry {
     }
 };
 
-template <typename OneShot, typename T, typename... Codecs> consteval bool resumable_encode_retry_allowed() {
-    return resumable_encode_retry<OneShot, Codecs...>::template allowed<T>();
+template <typename Transcoder, typename T, typename... Codecs> consteval bool resumable_encode_retry_allowed() {
+    return resumable_encode_retry<Transcoder, Codecs...>::template allowed<T>();
 }
 
 } // namespace detail

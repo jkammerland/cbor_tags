@@ -37,7 +37,7 @@ template <typename Self> struct point_hook : ct::codec::encoder_base<Self> {
     // without looking at each, and the ones in a const container are const
     ct::resumable<ct::status_code> resumable_encode(double &value) {
         const double negated = -value;
-        co_return co_await static_cast<Self &>(*this).one_shot(negated);
+        co_return co_await static_cast<Self &>(*this).retry(negated);
     }
 #endif
 };

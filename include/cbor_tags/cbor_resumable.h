@@ -7,7 +7,7 @@
 namespace cbor::tags {
 
 namespace detail {
-// Decoders name their borrowed view types like the one-shot decoder,
+// Decoders name their borrowed view types like the ordinary decoder,
 // e.g. decltype(decoder)::tstr_view_t. Encoders have none.
 template <typename Context> struct resumable_view_types {};
 template <typename Context>

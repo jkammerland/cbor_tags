@@ -106,10 +106,10 @@ concept HasResumableTranscodeMixin = requires(Codec &codec, T &value) {
 };
 
 // A built-in match must beat a mixin hook that only fits through a
-// conversion, like the one-shot overload probe. An encode hook for double
+// conversion, like the ordinary overload probe. An encode hook for double
 // would otherwise take every int, and keep a reference to the converted
 // temporary. A hook for a base type fits a derived value the same way, in both
-// directions, and the one-shot encoder and decoder leave that one alone too.
+// directions, and the ordinary encoder and decoder leave that one alone too.
 struct builtin_resumable_overload {};
 
 template <typename Codec> struct resumable_encode_overload_probe : Codec {
