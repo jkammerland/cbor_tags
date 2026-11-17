@@ -139,6 +139,11 @@ such as `std::unique_ptr` and `std::indirect` also dispatch to the payload's cod
 Each wrapper's type restrictions still apply; for example, unique-pointer variant
 alternatives require codec-independent wire shapes.
 
+Nested variants select their alternatives recursively in both one-shot and
+resumable decoding. A codec for an inner variant applies when that variant is
+decoded directly or through an optional, but not when it is itself an outer
+variant's alternative. Explicit resumable hooks still own their dispatch.
+
 For example, a sensor codec can read integer centi-degrees into a `float`:
 
 ```cpp

@@ -163,6 +163,44 @@ template <typename Storage> void check_output_windows(Storage &storage, std::spa
 
 TEST_SUITE("resumable/source") {
 
+    TEST_CASE("const owning chunks preserve input references across growth") {
+        const std::uint32_t    expected = 1000;
+        std::vector<std::byte> encoded;
+        REQUIRE(ct::make_encoder(encoded)(expected));
+        REQUIRE(encoded.size() > 1);
+
+        // Cover indexed and node-based outer and inner storage independently.
+        auto check = [&]<typename Storage>() {
+            using chunk = typename Storage::value_type;
+            for (std::size_t split = 0; split <= encoded.size(); ++split) {
+                CAPTURE(split);
+                Storage     storage{chunk(encoded.begin(), encoded.begin() + static_cast<std::ptrdiff_t>(split))};
+                const auto &input  = storage;
+                auto        source = ct::make_input_source(input);
+                static_assert(ct::ResumableInputSource<decltype(source)>);
+                static_assert(std::same_as<std::ranges::range_reference_t<decltype(source)>, const std::byte &>);
+                static_assert(!ct::detail::ResumableOutputStorage<const Storage>);
+                auto          decoder = ct::make_resumable_decoder(source);
+                std::uint32_t decoded{};
+                auto          operation = decoder(decoded);
+                if (split != encoded.size()) {
+                    REQUIRE_FALSE(operation.done());
+                    storage.back().insert(storage.back().end(), encoded.begin() + static_cast<std::ptrdiff_t>(split), encoded.end());
+                    operation.resume();
+                }
+                REQUIRE(operation.done());
+                REQUIRE(operation.result());
+                CHECK(decoded == expected);
+                auto end = source.end();
+                CHECK(*--end == encoded.back());
+            }
+        };
+        check.template operator()<std::vector<std::vector<std::byte>>>();
+        check.template operator()<std::vector<std::list<std::byte>>>();
+        check.template operator()<std::list<std::vector<std::byte>>>();
+        check.template operator()<std::list<std::list<std::byte>>>();
+    }
+
     TEST_CASE("zero consumption preserves uninitialized empty input and output cursors") {
         std::vector<std::span<std::byte>> storage;
         auto                              input      = ct::make_input_source(storage);

@@ -7,6 +7,45 @@
 
 namespace cbor::tags::detail {
 
+// Make all hook names available for a pack-expanded using declaration without
+// adding callable overloads to codecs that omit a direction. Ambiguous lookup
+// against the fallback detects names, including overloaded function templates.
+struct resumable_hook_names {
+    void resumable_encode();
+    void resumable_decode();
+    void resumable_transcode();
+};
+
+template <typename Codec> struct resumable_hook_name_probe : Codec, resumable_hook_names {};
+
+template <typename Codec>
+concept NamesResumableEncode = !requires { &resumable_hook_name_probe<Codec>::resumable_encode; };
+template <typename Codec>
+concept NamesResumableDecode = !requires { &resumable_hook_name_probe<Codec>::resumable_decode; };
+template <typename Codec>
+concept NamesResumableTranscode = !requires { &resumable_hook_name_probe<Codec>::resumable_transcode; };
+
+template <typename Codec, bool = NamesResumableEncode<Codec>> struct resumable_encode_mixin : Codec {
+    void resumable_encode() = delete;
+};
+template <typename Codec> struct resumable_encode_mixin<Codec, true> : Codec {
+    using Codec::resumable_encode;
+};
+
+template <typename Codec, bool = NamesResumableDecode<Codec>> struct resumable_decode_mixin : resumable_encode_mixin<Codec> {
+    void resumable_decode() = delete;
+};
+template <typename Codec> struct resumable_decode_mixin<Codec, true> : resumable_encode_mixin<Codec> {
+    using Codec::resumable_decode;
+};
+
+template <typename Codec, bool = NamesResumableTranscode<Codec>> struct resumable_codec_mixin : resumable_decode_mixin<Codec> {
+    void resumable_transcode() = delete;
+};
+template <typename Codec> struct resumable_codec_mixin<Codec, true> : resumable_decode_mixin<Codec> {
+    using Codec::resumable_transcode;
+};
+
 // Access preserves private member hooks and the const encode-member contract.
 template <typename Context, typename T>
 concept HasResumableEncodeMethod = requires(Context &context, T &value) {
@@ -38,6 +77,18 @@ template <typename Context, typename T>
 concept HasResumableTranscodeFreeFunction = requires(Context &context, T &value) {
     { resumable_transcode(context, value) } -> std::same_as<resumable<status_code>>;
 };
+
+// Keep ADL outside the context class, whose installed mixins have hook members
+// with the same names and would suppress argument-dependent lookup.
+template <typename Context, typename T> resumable<status_code> invoke_resumable_encode(Context &context, T &value) {
+    return resumable_encode(context, value);
+}
+template <typename Context, typename T> resumable<status_code> invoke_resumable_decode(Context &context, T &value) {
+    return resumable_decode(context, value);
+}
+template <typename Context, typename T> resumable<status_code> invoke_resumable_transcode(Context &context, T &value) {
+    return resumable_transcode(context, value);
+}
 
 template <typename Codec, typename T>
 concept HasResumableEncodeMixin = requires(Codec &codec, T &value) {

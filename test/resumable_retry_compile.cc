@@ -1,10 +1,15 @@
+#include <array>
 #include <cbor_tags/cbor_resumable.h>
 #include <cbor_tags/codec/shared_ptr.h>
 #include <cbor_tags/codec/typed_array.h>
 #include <cstdint>
+#include <list>
+#include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -33,6 +38,22 @@ struct tagged_record {
 
 enum class retry_level : std::uint32_t { low = 7 };
 
+// The same codec is legal one-shot but has no replay declaration.
+template <typename Self> struct undeclared_encoder : codec::encoder_base<Self> {
+    using codec::encoder_base<Self>::encode;
+    void encode(std::uint32_t value) { static_cast<Self &>(*this).encode(std::uint64_t{value}); }
+};
+
+template <typename T> struct replay {
+    T                                                  value;
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const { return encoder.one_shot(value); }
+};
+
+struct integer_record {
+    std::uint32_t value{};
+    bool          operator==(const integer_record &) const = default;
+};
+
 template <typename Self> struct unsafe_integer_codec : codec::decoder_base<Self> {
     using codec::decoder_base<Self>::decode;
     std::size_t calls{};
@@ -49,8 +70,11 @@ template <typename Self> struct unsafe_integer_codec : codec::decoder_base<Self>
 };
 
 // A whole-enum codec does not call the installed uint32 codec.
-template <typename Self> struct enum_codec : codec::decoder_base<Self> {
-    using codec::decoder_base<Self>::decode;
+template <typename Self> struct enum_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    void encode(retry_level value) { static_cast<Self &>(*this).encode(static_cast<std::uint64_t>(value)); }
 
     status_code decode(retry_level &value) {
         std::uint64_t next{};
@@ -63,8 +87,11 @@ template <typename Self> struct enum_codec : codec::decoder_base<Self> {
 };
 
 // The core IsEnum overload hides this same-signature template.
-template <typename Self> struct hidden_enum_codec : codec::decoder_base<Self> {
-    using codec::decoder_base<Self>::decode;
+template <typename Self> struct hidden_enum_codec : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    template <IsEnum T> void encode(T value) { static_cast<Self &>(*this).encode(static_cast<std::uint64_t>(value)); }
 
     template <IsEnum T> status_code decode(T &value) {
         std::uint64_t next{};
@@ -126,9 +153,11 @@ template <typename Self> struct view_override : codec::base<Self> {
 // cannot authorize that codec's decoding direction.
 namespace cbor::tags {
 template <typename Self> struct resumable_retry_traits<retry_level, enum_codec<Self>> {
+    static constexpr bool encode = true;
     static constexpr bool decode = true;
 };
 template <typename Self> struct resumable_retry_traits<retry_level, hidden_enum_codec<Self>> {
+    static constexpr bool encode = true;
     static constexpr bool decode = true;
 };
 template <> struct resumable_retry_traits<std::uint32_t> {
@@ -140,6 +169,33 @@ template <typename Self> struct resumable_retry_traits<std::uint32_t, unsafe_cod
     static constexpr bool decode = false;
 };
 } // namespace cbor::tags
+
+// Positive controls execute the same nested routes as the rejection cases.
+// Decode into typed values so the check is independent of the retry machinery.
+template <typename T> bool check_declared_replay(const T &expected) {
+    std::vector<std::byte> reference;
+    if (!make_encoder<unsafe_codec>(reference)(expected))
+        return false;
+    for (std::size_t split = 0; split <= reference.size(); ++split) {
+        std::vector<std::byte>          output(reference.size());
+        std::list<std::span<std::byte>> chunks{std::span{output}.first(split)};
+        auto                            encoder = make_resumable_encoder<unsafe_codec>(chunks);
+        const replay<T>                 values{expected};
+        auto                            operation = encoder(values);
+        if (split != output.size()) {
+            if (operation.done())
+                return false;
+            chunks.push_back(std::span{output}.subspan(split));
+            operation.resume();
+        }
+        if (!operation.done() || !operation.result())
+            return false;
+        T decoded{};
+        if (!make_decoder(output)(decoded) || decoded != expected)
+            return false;
+    }
+    return true;
+}
 
 int main() {
     std::vector<std::byte> bytes;
@@ -204,6 +260,30 @@ int main() {
     retry_level value{};
     auto        factory   = make_resumable_decoder<hidden_enum_codec, unsafe_integer_codec>(bytes);
     auto        operation = factory(value);
+#elif defined(CBOR_RETRY_ENUM_ENCODE)
+    auto factory   = make_resumable_encoder<undeclared_encoder>(bytes);
+    auto operation = factory(retry_level::low);
+#elif defined(CBOR_RETRY_ENUM_HIDDEN_ENCODE)
+    auto factory   = make_resumable_encoder<hidden_enum_codec, undeclared_encoder>(bytes);
+    auto operation = factory(retry_level::low);
+#elif defined(CBOR_RETRY_NESTED_ENCODE)
+    auto factory = make_resumable_encoder<undeclared_encoder>(bytes);
+#if CBOR_RETRY_NESTED_ENCODE == 1
+    replay<std::vector<std::uint32_t>> value;
+#elif CBOR_RETRY_NESTED_ENCODE == 2
+    replay<std::optional<std::uint32_t>> value;
+#elif CBOR_RETRY_NESTED_ENCODE == 3
+    replay<std::variant<std::uint32_t, bool>> value;
+#elif CBOR_RETRY_NESTED_ENCODE == 4
+    replay<std::tuple<std::uint32_t>> value;
+#elif CBOR_RETRY_NESTED_ENCODE == 5
+    replay<integer_record> value;
+#elif CBOR_RETRY_NESTED_ENCODE == 6
+    replay<std::map<std::uint32_t, bool>> value;
+#elif CBOR_RETRY_NESTED_ENCODE == 7
+    replay<std::map<bool, std::uint32_t>> value;
+#endif
+    auto operation = factory(value);
 #elif defined(CBOR_RETRY_MIXIN_HEADER)
     std::optional<std::uint32_t> value;
     auto                         factory   = make_resumable_decoder<unsafe_codec>(bytes);
@@ -239,6 +319,19 @@ int main() {
     auto        enum_operation = enum_factory(enum_value);
     if (!enum_operation.done() || !enum_operation.result() || static_cast<std::uint32_t>(enum_value) != 42)
         return 3;
+    // Whole-enum customization owns its body; the unused integer codec is irrelevant.
+    std::vector<std::byte> enum_bytes;
+    auto                   enum_encoder = make_resumable_encoder<enum_codec, undeclared_encoder>(enum_bytes);
+    auto                   enum_encoded = enum_encoder(retry_level::low);
+    if (!enum_encoded.done() || !enum_encoded.result())
+        return 4;
+
+    if (!check_declared_replay(retry_level::low) || !check_declared_replay(std::vector<std::uint32_t>{42}) ||
+        !check_declared_replay(std::optional<std::uint32_t>{42}) || !check_declared_replay(std::variant<std::uint32_t, bool>{42U}) ||
+        !check_declared_replay(std::tuple<std::uint32_t>{42}) || !check_declared_replay(integer_record{42}) ||
+        !check_declared_replay(std::map<std::uint32_t, bool>{{42, true}}) ||
+        !check_declared_replay(std::map<bool, std::uint32_t>{{true, 42}}))
+        return 5;
     (void)factory(std::uint32_t{1});
 #endif
 }

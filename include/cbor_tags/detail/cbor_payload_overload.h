@@ -22,6 +22,7 @@ template <typename Self, typename Codec> struct payload_encoder_overload_probe :
     template <IsTaggedTuple T> core_payload_overload   encode(const T &);
     template <IsUntaggedTuple T> core_payload_overload encode(const T &);
     template <IsVariant T> core_payload_overload       encode(const T &);
+    template <IsEnum T> core_payload_overload          encode(T);
     template <typename T>
         requires(IsAggregate<T> && !IsClassWithEncodingOverload<Self, T> && !HasIncompatibleEncodingCustomization<Self, T>)
     core_payload_overload encode(const T &);

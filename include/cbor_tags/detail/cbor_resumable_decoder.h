@@ -84,7 +84,7 @@ template <typename T> struct resume_tag_wrapper {
 };
 
 template <typename Source, typename Options, template <typename> typename... Codecs>
-class resumable_decode_context : public Codecs<resumable_decode_context<Source, Options, Codecs...>>... {
+class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_decode_context<Source, Options, Codecs...>>>... {
     using self_type     = resumable_decode_context;
     using one_shot_type = decoder<Source, Options, cbor_header_decoder, cbor_indefinite_decoder, Codecs...>;
     using mixins        = std::tuple<Codecs<self_type>...>;
@@ -96,6 +96,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     friend struct resumable_context_access;
 
   public:
+    using resumable_codec_mixin<Codecs<self_type>>::resumable_decode...;
+    using resumable_codec_mixin<Codecs<self_type>>::resumable_transcode...;
+
     using source_type                           = Source;
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_input;
@@ -432,14 +435,12 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return has_mixin<T, I + 1>();
     }
 
-    template <typename T, std::size_t I = 0> resumable<status_code> mixin(T &value) {
-        using codec = std::tuple_element_t<I, mixins>;
-        if constexpr (HasDirectResumableDecodeMixin<codec, T>)
-            return static_cast<codec &>(*this).resumable_decode(value);
-        else if constexpr (HasDirectResumableTranscodeMixin<codec, T>)
-            return static_cast<codec &>(*this).resumable_transcode(value);
+    template <typename T> resumable<status_code> mixin(T &value) {
+        // Resolve all installed overloads together, independently of pack order.
+        if constexpr ((HasDirectResumableDecodeMixin<Codecs<self_type>, T> || ...))
+            return this->resumable_decode(value);
         else
-            return mixin<T, I + 1>(value);
+            return this->resumable_transcode(value);
     }
 
     template <typename T> static consteval bool has_explicit_hook() {
@@ -600,9 +601,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         else if constexpr (HasResumableTranscodeMethod<self_type, T>)
             co_return co_await Access::resumable_transcode(*this, value);
         else if constexpr (HasResumableDecodeFreeFunction<self_type, T>)
-            co_return co_await resumable_decode(*this, value);
+            co_return co_await invoke_resumable_decode(*this, value);
         else
-            co_return co_await resumable_transcode(*this, value);
+            co_return co_await invoke_resumable_transcode(*this, value);
     }
     template <typename T> static consteval bool consumes_zero_bytes() {
         if constexpr (has_explicit_hook<T>() || has_mixin<T>())
@@ -1014,6 +1015,10 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
         status_code status;
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())
             status = co_await item(decoded);
+        else if constexpr (IsVariant<U>)
+            // One-shot variant selection recurses directly into nested alternatives.
+            // An inner variant's one-shot codec is not part of that route.
+            status = co_await variant(decoded);
         else if constexpr (IsTag<U> && !IsVariant<U> && !IsOptional<U>) {
             if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::tag>())
                 status = co_await contextual_one_shot<payload_decode_context::tag>(decoded);

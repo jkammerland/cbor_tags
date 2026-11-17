@@ -77,13 +77,13 @@ template <typename Storage>
 concept GrowableOutputStorage = ResumableByteChunk<Storage> && CborAppendOutputBuffer<Storage> && std::ranges::sized_range<Storage>;
 
 template <typename Storage>
-concept ResumableChunkStorage =
-    std::ranges::bidirectional_range<Storage> && std::ranges::common_range<Storage> &&
-    std::is_lvalue_reference_v<std::ranges::range_reference_t<Storage>> && ResumableByteChunk<std::ranges::range_value_t<Storage>>;
+concept ResumableChunkStorage = std::ranges::bidirectional_range<Storage> && std::ranges::common_range<Storage> &&
+                                std::is_lvalue_reference_v<std::ranges::range_reference_t<Storage>> &&
+                                ResumableByteChunk<std::remove_reference_t<std::ranges::range_reference_t<Storage>>>;
 
 template <typename Storage>
 concept ResumableOutputChunkStorage =
-    ResumableChunkStorage<Storage> && std::indirectly_writable<std::ranges::iterator_t<std::ranges::range_value_t<Storage>>,
+    ResumableChunkStorage<Storage> && std::indirectly_writable<std::ranges::iterator_t<std::ranges::range_reference_t<Storage>>,
                                                                std::ranges::range_value_t<std::ranges::range_value_t<Storage>>>;
 
 template <typename Storage>
@@ -103,7 +103,7 @@ concept ResumableOutputStorage =
 // The caller owns descriptors and bytes. Only append and final-chunk growth are
 // permitted. Node-based ranges preserve their existing element iterators.
 template <ResumableChunkStorage Storage> class chunk_source {
-    using chunk_type     = std::ranges::range_value_t<Storage>;
+    using chunk_type     = std::remove_reference_t<std::ranges::range_reference_t<Storage>>;
     using chunk_pointer  = std::add_pointer_t<std::remove_reference_t<std::ranges::range_reference_t<Storage>>>;
     using outer_iterator = std::ranges::iterator_t<Storage>;
     using inner_iterator = std::ranges::iterator_t<chunk_type>;

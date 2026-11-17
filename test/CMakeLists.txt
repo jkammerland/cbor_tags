@@ -1271,6 +1271,17 @@ endforeach()
 add_resumable_retry_failure(MEMBER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
 add_resumable_retry_failure(OBSERVER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
 
+# Built-in delegation cannot authorize a nested custom encoder.
+foreach(CASE ENUM_ENCODE ENUM_HIDDEN_ENCODE)
+  add_resumable_retry_failure(${CASE} "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_${CASE})
+endforeach()
+set(NESTED_RETRY_CASES RANGE OPTIONAL VARIANT TUPLE RECORD MAP_KEY MAP_VALUE)
+set(NESTED_RETRY_INDEX 0)
+foreach(CASE IN LISTS NESTED_RETRY_CASES)
+  math(EXPR NESTED_RETRY_INDEX "${NESTED_RETRY_INDEX} + 1")
+  add_resumable_retry_failure(NESTED_${CASE}_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_NESTED_ENCODE=${NESTED_RETRY_INDEX})
+endforeach()
+
 # A declaration for a file-local type that is only used one way must not warn.
 # Clang is the one that does, about the flag nobody used. GCC with this flag
 # goes through the headers too and finds constants that have nothing to do with it.
