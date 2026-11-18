@@ -225,8 +225,10 @@ position between operation kinds. Encoders and decoders borrow them; validators
 and generators require a source.
 
 Default adapters support flat and nested byte ranges, including owning inner
-containers and borrowed spans. Between resumptions, append chunks or grow
-the last inner range while preserving earlier contents and order:
+containers and borrowed spans. Input may bind through a const reference to the
+storage while a producer appends through a mutable reference. Output requires
+writable bytes. Between resumptions, append chunks or grow the last inner range
+while preserving earlier contents and order:
 
 - Indexable storage may reallocate; positions are logical indexes. Node-based
   storage must preserve element iterators, including inner iterators when an
@@ -570,6 +572,12 @@ doesn't compile, because the one-shot side would use the mixin and the
 resumable side the type's hook. Give the mixin a `resumable_encode` or
 `resumable_decode` for that type too.
 
+Overloads from all installed mixins participate in normal C++ overload
+resolution, independently of installation order. A matching `resumable_encode`
+or `resumable_decode` takes precedence over `resumable_transcode`. Keep the
+overload signatures and constraints consistent with the one-shot codecs so
+both modes select the same behavior.
+
 Derive a mixin that has a one-shot `encode` or `decode` from
 `codec::encoder_base<Self>`, `codec::decoder_base<Self>`, or
 `codec::base<Self>`, as [codec extensions](codec_extensions.md) describes. One
@@ -694,6 +702,10 @@ must declare its direction, including header/tag dispatch inside optionals and
 variants. Tag-observer mixins also need a declaration for one-shot retry units:
 a complete tag can be observed before the rest of a tagged header suspends.
 Calling `one_shot(value)` from a hook uses the same declaration checks.
+Built-in encoding also checks customizations reached through enums, container
+elements, variant alternatives, and record fields. A declared customization
+owns its whole call; the library does not inspect its body or independently
+authorize the calls it makes.
 
 A retry runs the one-shot call again from the start, including the members it
 already read. A `decode` that reads straight into a string or container member

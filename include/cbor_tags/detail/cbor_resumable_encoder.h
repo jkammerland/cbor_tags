@@ -70,7 +70,7 @@ template <typename Options> struct resumable_leaf_encoder : encoder<std::span<st
 };
 
 template <typename Source, typename Options, template <typename> typename... Codecs>
-class resumable_encode_context : public Codecs<resumable_encode_context<Source, Options, Codecs...>>... {
+class resumable_encode_context : public resumable_codec_mixin<Codecs<resumable_encode_context<Source, Options, Codecs...>>>... {
     using self_type = resumable_encode_context;
     using one_shot_type =
         encoder<Source, Options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder, cbor_variant_encoder, Codecs...>;
@@ -83,6 +83,9 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
     friend struct resumable_context_access;
 
   public:
+    using resumable_codec_mixin<Codecs<self_type>>::resumable_encode...;
+    using resumable_codec_mixin<Codecs<self_type>>::resumable_transcode...;
+
     using source_type                           = Source;
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_output;
@@ -297,14 +300,12 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
             return has_mixin<T, I + 1>();
     }
 
-    template <typename T, std::size_t I = 0> resumable<status_code> mixin(T &value) {
-        using codec = std::tuple_element_t<I, mixins>;
-        if constexpr (HasDirectResumableEncodeMixin<codec, T>)
-            return static_cast<codec &>(*this).resumable_encode(value);
-        else if constexpr (HasDirectResumableTranscodeMixin<codec, T>)
-            return static_cast<codec &>(*this).resumable_transcode(value);
+    template <typename T> resumable<status_code> mixin(T &value) {
+        // Resolve all installed overloads together, independently of pack order.
+        if constexpr ((HasDirectResumableEncodeMixin<Codecs<self_type>, T> || ...))
+            return this->resumable_encode(value);
         else
-            return mixin<T, I + 1>(value);
+            return this->resumable_transcode(value);
     }
 
     enum class explicit_hook_type { none, encode_method, transcode_method, encode_free_function, transcode_free_function };
@@ -348,9 +349,9 @@ class resumable_encode_context : public Codecs<resumable_encode_context<Source, 
         else if constexpr (Kind == explicit_hook_type::transcode_method)
             co_return co_await Access::resumable_transcode(*this, value);
         else if constexpr (Kind == explicit_hook_type::encode_free_function)
-            co_return co_await resumable_encode(*this, value);
+            co_return co_await invoke_resumable_encode(*this, value);
         else
-            co_return co_await resumable_transcode(*this, value);
+            co_return co_await invoke_resumable_transcode(*this, value);
     }
 
     template <typename T> static consteval bool hooked() { return explicit_hook_kind<T>() != explicit_hook_type::none || has_mixin<T>(); }

@@ -99,26 +99,129 @@ consteval bool resumable_decode_retry_allowed() {
     return allowed;
 }
 
-template <typename OneShot, typename T, typename Codec> consteval bool resumable_codec_encode_retry_allowed() {
-    constexpr bool custom = [] {
-        if constexpr (std::is_base_of_v<codec::encoder_base<OneShot>, Codec>) {
-            using probe = payload_encoder_overload_probe<OneShot, Codec>;
-            if constexpr (RetryEncodeRvalue<probe, T>) {
-                return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Codec>() ||
-                       !std::same_as<decltype(std::declval<probe &>().encode(std::declval<T &&>())), core_payload_overload>;
-            } else {
-                return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Codec>();
-            }
+template <typename OneShot, typename T, typename Codec> consteval bool resumable_codec_encode_customized() {
+    if constexpr (std::is_base_of_v<codec::encoder_base<OneShot>, Codec>) {
+        using probe = payload_encoder_overload_probe<OneShot, Codec>;
+        if constexpr (RetryEncodeRvalue<probe, T>) {
+            return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Codec>() ||
+                   !std::same_as<decltype(std::declval<probe &>().encode(std::declval<T &&>())), core_payload_overload>;
         } else {
-            return RetryEncodeDirect<Codec, T>;
+            return codec_payload_mixin_customization<OneShot>::template accepts_codec<T, Codec>();
         }
-    }();
-    return (!custom && !RetryEncodeObserver<Codec>) || resumable_retry_declared<T, Codec, true>();
+    } else {
+        return RetryEncodeDirect<Codec, T>;
+    }
 }
 
+template <typename OneShot, typename T, typename Codec> consteval bool resumable_codec_encode_retry_allowed() {
+    return (!resumable_codec_encode_customized<OneShot, T, Codec>() && !RetryEncodeObserver<Codec>) ||
+           resumable_retry_declared<T, Codec, true>();
+}
+
+template <typename T> inline constexpr bool    resumable_retry_wrap_array                      = false;
+template <typename... T> inline constexpr bool resumable_retry_wrap_array<wrap_as_array<T...>> = true;
+
+// Built-in delegation does not establish a customization's whole-call contract.
+// Follow its children until a declared customization takes ownership. Remember
+// visited types so recursive application schemas remain finite at compile time.
+template <typename OneShot, typename... Codecs> struct resumable_encode_retry {
+    template <typename Object, typename... Parents> static consteval bool named_fields() {
+        using tuple = std::remove_cvref_t<decltype(to_tuple(std::declval<const Object &>()))>;
+        return []<std::size_t... I>(std::index_sequence<I...>) {
+            return (named_field<std::remove_cvref_t<std::tuple_element_t<I, tuple>>, Parents...>() && ...);
+        }(std::make_index_sequence<std::tuple_size_v<tuple>>{});
+    }
+
+    template <typename Field, typename... Parents> static consteval bool named_field() {
+        if constexpr (IsNamedGroupWrapper<Field>)
+            return named_fields<named_group_value_t<Field>, Parents...>();
+        else if constexpr (IsNamedExtensionWrapper<Field>)
+            return elements<const named_extension_value_t<Field>, true, Parents...>();
+        else if constexpr (IsOptional<Field>)
+            return allowed<std::string_view, false, Parents...>() && allowed<const typename Field::value_type, false, Parents...>();
+        else
+            return allowed<std::string_view, false, Parents...>() && allowed<const Field, false, Parents...>();
+    }
+
+    template <typename Tuple, typename... Parents> static consteval bool fields() {
+        return []<std::size_t... I>(std::index_sequence<I...>) {
+            return (allowed<const std::remove_reference_t<std::tuple_element_t<I, Tuple>>, false, Parents...>() && ...);
+        }(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+    }
+
+    template <typename Range, bool Map, typename... Parents> static consteval bool elements() {
+        using element = const std::remove_reference_t<std::ranges::range_reference_t<Range>> &;
+        if constexpr (Map) {
+            return allowed<std::remove_reference_t<decltype(pair_first(std::declval<element>()))>, false, Parents...>() &&
+                   allowed<std::remove_reference_t<decltype(pair_second(std::declval<element>()))>, false, Parents...>();
+        } else {
+            return allowed<std::remove_reference_t<element>, false, Parents...>();
+        }
+    }
+
+    template <typename T, bool CoreOnly = false, typename... Parents> static consteval bool allowed() {
+        using U     = std::remove_cvref_t<T>;
+        using visit = std::pair<T, std::bool_constant<CoreOnly>>;
+        constexpr bool custom =
+            !CoreOnly && (IsClassWithEncodingOverload<OneShot, T> || (resumable_codec_encode_customized<OneShot, T, Codecs>() || ...));
+        // Distinct dispatch boundaries intentionally share the same retry verdict.
+        // NOLINTNEXTLINE(bugprone-branch-clone)
+        if constexpr ((std::same_as<visit, Parents> || ...)) {
+            return true;
+        } else if constexpr (!CoreOnly && ((!resumable_codec_encode_retry_allowed<OneShot, T, Codecs>() || ...) ||
+                                           (IsClassWithEncodingOverload<OneShot, T> && !resumable_retry_declared<T, void, true>()))) {
+            return false;
+        } else if constexpr (custom) {
+            // Its declaration includes every call made by the customization.
+            return true;
+        } else if constexpr (IsEnum<U>) {
+            return allowed<std::underlying_type_t<U>, false, Parents..., visit>();
+        } else if constexpr (std::same_as<U, integer>) {
+            return allowed<positive, false, Parents..., visit>() && allowed<negative, false, Parents..., visit>();
+        } else if constexpr (IsAnyBoundedSizeWrapper<U>) {
+            return allowed<std::remove_reference_t<decltype(std::declval<const U &>().value())>, false, Parents..., visit>();
+        } else if constexpr (IsIndefiniteWrapper<U>) {
+            // Indefinite containers iterate directly; strings dispatch the wrapped value.
+            using wrapped = indefinite_value_t<U>;
+            return allowed<wrapped, !IsString<wrapped>, Parents..., visit>();
+        } else if constexpr (resumable_retry_wrap_array<U>) {
+            return fields<std::remove_cvref_t<decltype(std::declval<U>().values_)>, Parents..., visit>();
+        } else if constexpr (IsNamedMapWrapper<U>) {
+            return named_fields<named_map_value_t<U>, Parents..., visit>();
+        } else if constexpr (IsArrayRangeWrapper<U> || IsMapRangeWrapper<U>) {
+            using range   = decltype((std::declval<T &>().range_));
+            using element = std::ranges::range_reference_t<range>;
+            if constexpr (IsMapRangeWrapper<U>) {
+                return allowed<std::remove_reference_t<decltype(pair_first(std::declval<element &>()))>, false, Parents..., visit>() &&
+                       allowed<std::remove_reference_t<decltype(pair_second(std::declval<element &>()))>, false, Parents..., visit>();
+            } else if constexpr (CborRangeComponent<element>) {
+                return allowed<std::remove_reference_t<element>, false, Parents..., visit>();
+            } else {
+                return allowed<std::ranges::range_value_t<range>, false, Parents..., visit>();
+            }
+        } else if constexpr (IsString<U> || IsStringRangeWrapper<U> || IsEncodedItemView<U> || IsAnyHeader<U> ||
+                             is_static_tag_t<U>::value || is_dynamic_tag_t<U>) {
+            // Payload bytes and headers are written without child codec dispatch.
+            return true;
+        } else if constexpr (IsOptional<U>) {
+            return allowed<const typename U::value_type, false, Parents..., visit>();
+        } else if constexpr (IsVariant<U>) {
+            return with_variant_alternatives<U>([]<typename... V>() { return (allowed<const V, false, Parents..., visit>() && ...); });
+        } else if constexpr (IsArray<U> || IsMap<U>) {
+            return elements<const U, IsMap<U>, Parents..., visit>();
+        } else if constexpr (IsTaggedTuple<U> || IsUntaggedTuple<U>) {
+            return fields<U, Parents..., visit>();
+        } else if constexpr (IsAggregate<U>) {
+            using tuple = std::remove_cvref_t<decltype(to_tuple(std::declval<const U &>()))>;
+            return fields<tuple, Parents..., visit>();
+        } else {
+            return true;
+        }
+    }
+};
+
 template <typename OneShot, typename T, typename... Codecs> consteval bool resumable_encode_retry_allowed() {
-    return (!IsClassWithEncodingOverload<OneShot, T> || resumable_retry_declared<T, void, true>()) &&
-           (resumable_codec_encode_retry_allowed<OneShot, T, Codecs>() && ...);
+    return resumable_encode_retry<OneShot, Codecs...>::template allowed<T>();
 }
 
 } // namespace detail
