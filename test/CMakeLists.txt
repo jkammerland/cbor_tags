@@ -298,13 +298,13 @@ foreach(CASE IN ITEMS NOT_NOEXCEPT NOT_CONST NOT_BOOL)
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
 foreach(CASE IN ITEMS VECTOR STRUCT)
-  string(TOLOWER "resumable_one_shot_${CASE}_compile_fails" TEST_NAME)
-  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_one_shot_compile_fail.cc)
-  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_ONE_SHOT_${CASE})
+  string(TOLOWER "resumable_retry_composite_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_retry_composite_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_RETRY_${CASE})
   target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=one_shot\\(value\\) only takes values the decoder reads in one piece" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+    "-DPASS_REGEX=retry\\(value\\) only takes values the decoder reads in one piece" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
 foreach(CASE IN ITEMS ADL_ENCODE ADL_TRANSCODE MEMBER_TRANSCODE MIXIN_ENCODE MIXIN_BEFORE_MEMBER MIXIN_CONST_ELEMENT)
@@ -318,15 +318,15 @@ foreach(CASE IN ITEMS ADL_ENCODE ADL_TRANSCODE MEMBER_TRANSCODE MIXIN_ENCODE MIX
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
 foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE PLAIN_ENCODE DECODE PLAIN_DECODE VARIANT_DECODE)
-  string(TOLOWER "resumable_one_shot_only_codec_${CASE}_compile_fails" TEST_NAME)
+  string(TOLOWER "resumable_missing_codec_hook_${CASE}_compile_fails" TEST_NAME)
   string(REGEX REPLACE "^.*_" "" DIRECTION "${CASE}")
   string(TOLOWER "${DIRECTION}" DIRECTION)
-  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_one_shot_only_codec_compile_fail.cc)
-  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_ONE_SHOT_ONLY_CODEC_${CASE})
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_missing_codec_hook_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_MISSING_CODEC_HOOK_${CASE})
   target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=an installed codec has a one-shot ${DIRECTION} for this type and no resumable hook" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+    "-DPASS_REGEX=an installed codec defines ${DIRECTION} for this type and has no resumable hook" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
 
@@ -346,7 +346,7 @@ foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE CONTAINER_ENCODE DECODE CONTAINER_DE
   target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=an installed codec without the codec base has a one-shot ${DIRECTION} for this type" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+    "-DPASS_REGEX=an installed codec without the codec base defines ${DIRECTION} for this type" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
 foreach(CASE IN ITEMS MEMBER_ENCODE RETURN_ENCODE RVALUE_ENCODE RVALUE_DECODE RVALUE_DECODE_OPTIONAL RETURN_DECODE RVALUE_TRANSCODE_DECODE RVALUE_TRANSCODE_ENCODE)
@@ -1266,20 +1266,20 @@ function(add_resumable_retry_failure CASE DIAGNOSTIC)
 endfunction()
 
 foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG ENUM_DIRECT ENUM_HEADER ENUM_HIDDEN PLAIN OBSERVER_DECODE VIEW_OVERRIDE)
-  add_resumable_retry_failure(${CASE} "one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_${CASE})
+  add_resumable_retry_failure(${CASE} "retrying a decode customization requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_${CASE})
 endforeach()
-add_resumable_retry_failure(MEMBER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
-add_resumable_retry_failure(OBSERVER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
+add_resumable_retry_failure(MEMBER_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
+add_resumable_retry_failure(OBSERVER_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
 
 # Built-in delegation cannot authorize a nested custom encoder.
 foreach(CASE ENUM_ENCODE ENUM_HIDDEN_ENCODE)
-  add_resumable_retry_failure(${CASE} "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_${CASE})
+  add_resumable_retry_failure(${CASE} "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_${CASE})
 endforeach()
 set(NESTED_RETRY_CASES RANGE OPTIONAL VARIANT TUPLE RECORD MAP_KEY MAP_VALUE)
 set(NESTED_RETRY_INDEX 0)
 foreach(CASE IN LISTS NESTED_RETRY_CASES)
   math(EXPR NESTED_RETRY_INDEX "${NESTED_RETRY_INDEX} + 1")
-  add_resumable_retry_failure(NESTED_${CASE}_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_NESTED_ENCODE=${NESTED_RETRY_INDEX})
+  add_resumable_retry_failure(NESTED_${CASE}_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_NESTED_ENCODE=${NESTED_RETRY_INDEX})
 endforeach()
 
 # A declaration for a file-local type that is only used one way must not warn.
@@ -1307,7 +1307,7 @@ target_compile_definitions(resumable_retry_missing_flag_compile_fails PRIVATE CB
 target_link_libraries(resumable_retry_missing_flag_compile_fails PRIVATE cbor::tags)
 add_test(NAME resumable_retry_missing_flag_compile_fails COMMAND ${CMAKE_COMMAND}
   "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=resumable_retry_missing_flag_compile_fails" "-DCONFIG=$<CONFIG>"
-  "-DPASS_REGEX=one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in"
+  "-DPASS_REGEX=retrying a decode customization requires a resumable hook or resumable_retry_traits decode opt-in"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 set_tests_properties(resumable_retry_missing_flag_compile_fails PROPERTIES LABELS "compile-fail")
 add_resumable_retry_failure(NODISCARD "nodiscard" CBOR_RETRY_NODISCARD)

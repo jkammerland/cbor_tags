@@ -24,7 +24,7 @@ struct record {
 };
 
 #if defined(CBOR_TAGS_HOOK_SIGNATURE_RVALUE_DECODE) || defined(CBOR_TAGS_HOOK_SIGNATURE_RVALUE_DECODE_OPTIONAL)
-// The one-shot decode(Decoder &, T &&) shape
+// The ordinary decode(Decoder &, T &&) shape
 template <typename D> ct::resumable<ct::status_code> resumable_decode(D &decoder, record &&value) { return decoder(value.size, value.id); }
 #elif defined(CBOR_TAGS_HOOK_SIGNATURE_RVALUE_ENCODE)
 template <typename E> ct::resumable<ct::status_code> resumable_encode(E &encoder, record &&value) { return encoder(value.size, value.id); }

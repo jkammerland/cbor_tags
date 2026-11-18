@@ -19,8 +19,8 @@ int main() {
     const std::vector<float> sent{0.5F, -1.25F, 20.0F, 1000.0F};
     std::vector<std::byte> buffer;
     auto encoder = ct::make_encoder<ct::codec::typed_array>(buffer);
-    const auto encoded = encoder(ct::rfc8746::as_typed_array(sent));
-    assert(encoded);
+    const auto encode_result = encoder(ct::rfc8746::as_typed_array(sent));
+    assert(encode_result);
     assert(buffer.size() == 19); // d8 55 50, then the floats
 
     // The receiver reuses its own vector and takes at most 8 samples

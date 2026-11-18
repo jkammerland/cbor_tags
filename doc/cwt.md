@@ -31,7 +31,8 @@ cwt::claims_set claims{
 auto bytes = cwt::encode_to_bytes(claims);
 if (bytes) {
     cwt::claims_set decoded{};
-    auto result = make_decoder<codec::cwt>(*bytes)(decoded);
+    auto decoder = make_decoder<codec::cwt>(*bytes);
+    auto result = decoder(decoded);
     // Check result before using decoded.
 }
 ```
@@ -106,7 +107,8 @@ Decode a view directly from contiguous input:
 ```cpp
 if (bytes) {
     cwt::claims_view decoded;
-    auto result = make_decoder<codec::cwt>(*bytes)(decoded);
+    auto decoder = make_decoder<codec::cwt>(*bytes);
+    auto result = decoder(decoded);
     // On success, decoded borrows from *bytes. Keep that buffer alive and stable.
 }
 ```

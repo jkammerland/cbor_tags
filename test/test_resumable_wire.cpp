@@ -108,7 +108,7 @@ template <typename Self> struct resumable_bool_codec : codec::base<Self> {
 
     resumable<status_code> resumable_decode(bool &value) {
         ++bool_hook_calls::count;
-        const auto status = co_await static_cast<Self &>(*this).one_shot(value);
+        const auto status = co_await static_cast<Self &>(*this).retry(value);
         if (status == status_code::success)
             value = !value;
         co_return status;
@@ -131,7 +131,7 @@ template <typename Self> struct committed_rejecting_bool_codec : codec::base<Sel
 
     resumable<status_code> resumable_decode(bool &value) {
         ++bool_hook_calls::count;
-        const auto status = co_await static_cast<Self &>(*this).one_shot(value);
+        const auto status = co_await static_cast<Self &>(*this).retry(value);
         co_return status == status_code::success ? status_code::no_match_for_tag_simple_on_buffer : status;
     }
 };
@@ -146,14 +146,14 @@ template <typename Self> struct finite_double_codec : codec::base<Self> {
 
     resumable<status_code> resumable_decode(double &value) {
         ++double_hook_calls::count;
-        const auto status = co_await static_cast<Self &>(*this).one_shot(value);
+        const auto status = co_await static_cast<Self &>(*this).retry(value);
         if (status == status_code::success && !std::isfinite(value))
             co_return status_code::error;
         co_return status;
     }
 };
 
-struct one_shot_record {
+struct retried_record {
     std::string      name;
     std::vector<int> values;
 };
@@ -162,18 +162,18 @@ struct container_hook_calls {
     static inline int count{};
 };
 
-template <typename Self> struct one_shot_container_codec : codec::base<Self> {
+template <typename Self> struct retry_container_codec : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
     resumable<status_code> resumable_encode(const std::vector<int> &value) {
         ++container_hook_calls::count;
-        co_return co_await static_cast<Self &>(*this).one_shot(value);
+        co_return co_await static_cast<Self &>(*this).retry(value);
     }
 
-    resumable<status_code> resumable_encode(const one_shot_record &value) {
+    resumable<status_code> resumable_encode(const retried_record &value) {
         ++container_hook_calls::count;
-        co_return co_await static_cast<Self &>(*this).one_shot(value);
+        co_return co_await static_cast<Self &>(*this).retry(value);
     }
 };
 
@@ -976,7 +976,7 @@ TEST_SUITE("cbor_wire/resumable") {
         check(std::variant<std::optional<bool>, simple>{std::optional<bool>{false}});
     }
 
-    TEST_CASE("an encoder hook's one_shot writes containers again until they fit") {
+    TEST_CASE("an encoder hook's retry writes containers again until they fit") {
         auto encode_bytewise = [](const auto &sent) {
             std::vector<std::byte> expected;
             REQUIRE(make_encoder(expected)(sent));
@@ -986,7 +986,7 @@ TEST_SUITE("cbor_wire/resumable") {
             output_chunks          storage;
             auto                   sink      = make_output_buffer(storage);
             const auto             calls     = container_hook_calls::count;
-            auto                   operation = make_resumable_encoder<one_shot_container_codec>(sink)(sent);
+            auto                   operation = make_resumable_encoder<retry_container_codec>(sink)(sent);
             for (auto &byte : bytes) {
                 REQUIRE_FALSE(operation.done());
                 storage.emplace_back(std::span{&byte, 1});
@@ -1002,10 +1002,10 @@ TEST_SUITE("cbor_wire/resumable") {
         };
 
         encode_bytewise(std::vector<int>{1, -24, 65536, 7, -1000});
-        encode_bytewise(one_shot_record{"a record", {1, -24, 65536}});
+        encode_bytewise(retried_record{"a record", {1, -24, 65536}});
     }
 
-    TEST_CASE("a hook's one_shot starts the value over until all of it arrives") {
+    TEST_CASE("a hook's retry starts the value over until all of it arrives") {
         auto decode_bytewise = [](double sent, double &actual) {
             std::vector<std::byte> wire;
             REQUIRE(make_encoder(wire)(sent));
@@ -1021,7 +1021,7 @@ TEST_SUITE("cbor_wire/resumable") {
                 operation.resume();
             }
 
-            // The hook ran once, one_shot did the retries
+            // The hook ran once; only its delegated decode was repeated.
             REQUIRE(operation.done());
             CHECK(double_hook_calls::count == calls + 1);
             return operation.result();
@@ -1465,14 +1465,14 @@ TEST_SUITE("cbor_wire/resumable") {
         CHECK(to_hex(output) == "07820102d86409");
     }
 
-    TEST_CASE("validation matches one-shot status at every split and truncation") {
+    TEST_CASE("validation matches ordinary status at every split and truncation") {
         for (const auto *hex : {"01", "1a01020304", "826268694200ff", "9fa101d864826268694200ffff", "7f62c3a9ff", "7f61c361a9ff",
                                 "63e282ac", "62c0af", "f800", "ff", "bf01ff", "5f6161ff", "1c", "5a7fffffff"}) {
             CAPTURE(hex);
             const auto                       bytes = to_bytes(hex);
             const std::span<const std::byte> input{bytes};
 
-            // Where one-shot validation says incomplete, the validator is still waiting
+            // Where ordinary validation says incomplete, the validator is still waiting
             auto check = [](auto &operation, std::span<const std::byte> seen) {
                 const auto expected = validation_status(seen);
                 if (expected == status_code::incomplete) {
@@ -1567,7 +1567,7 @@ TEST_SUITE("cbor_wire/resumable") {
         }
     }
 
-    TEST_CASE("validation depth limits agree with one-shot traversal") {
+    TEST_CASE("validation depth limits agree with ordinary traversal") {
         const auto                       bytes = to_bytes("81818100");
         const std::span<const std::byte> input{bytes};
         const validation_options         options{.max_depth = 2};

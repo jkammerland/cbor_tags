@@ -72,7 +72,7 @@ struct public_handle {
 static_assert(exposes_handle<public_handle>);
 static_assert(!exposes_handle<resumable<status_code>>);
 
-// Hooks get the context and one_shot(value), the rest stays with the library
+// Hooks get the context and retry(value), the rest stays with the library
 template <typename Operation> struct context_of;
 template <typename Context> struct context_of<detail::resume_operation<Context>> {
     using type = Context;
@@ -83,7 +83,7 @@ using encode_context = context_of<encode_operation>::type;
 template <typename Context, typename T>
 concept hook_callable = requires(Context &context, T &value) {
     { context(value) } -> std::same_as<resumable<status_code>>;
-    { context.one_shot(value) } -> std::same_as<resumable<status_code>>;
+    { context.retry(value) } -> std::same_as<resumable<status_code>>;
 };
 static_assert(hook_callable<decode_context, int>);
 static_assert(hook_callable<encode_context, const int>);
@@ -93,7 +93,9 @@ concept exposes_source = requires(Context &context) { context.source(); };
 template <typename Context>
 concept exposes_offset = requires(Context &context) { context.offset(); };
 template <typename Context>
-concept exposes_one_shot_codec = requires(Context &context) { context.one_shot(); };
+concept exposes_encoder = requires(Context &context) { context.encoder(); };
+template <typename Context>
+concept exposes_decoder = requires(Context &context) { context.decoder(); };
 template <typename Context>
 concept exposes_wait = requires(Context &context) { context.wait(); };
 template <typename Context>
@@ -117,7 +119,8 @@ concept exposes_encode_payload = requires(Context &context, std::vector<std::byt
 struct exposed_context {
     void source();
     void offset();
-    void one_shot();
+    void encoder();
+    void decoder();
     void wait();
     void commit();
     void rollback();
@@ -127,14 +130,15 @@ struct exposed_context {
     void payload(std::string &, std::uint64_t, detail::appender<std::string> &);
     void payload(std::vector<std::byte> &);
 };
-static_assert(exposes_source<exposed_context> && exposes_offset<exposed_context> && exposes_one_shot_codec<exposed_context> &&
-              exposes_wait<exposed_context> && exposes_commit<exposed_context> && exposes_rollback<exposed_context> &&
-              exposes_empty<exposed_context> && exposes_remaining_input<exposed_context> && exposes_remaining_output<exposed_context> &&
-              exposes_decode_payload<exposed_context> && exposes_encode_payload<exposed_context>);
+static_assert(exposes_source<exposed_context> && exposes_offset<exposed_context> && exposes_encoder<exposed_context> &&
+              exposes_decoder<exposed_context> && exposes_wait<exposed_context> && exposes_commit<exposed_context> &&
+              exposes_rollback<exposed_context> && exposes_empty<exposed_context> && exposes_remaining_input<exposed_context> &&
+              exposes_remaining_output<exposed_context> && exposes_decode_payload<exposed_context> &&
+              exposes_encode_payload<exposed_context>);
 
 static_assert(!exposes_source<decode_context> && !exposes_source<encode_context>);
 static_assert(!exposes_offset<decode_context> && !exposes_offset<encode_context>);
-static_assert(!exposes_one_shot_codec<decode_context> && !exposes_one_shot_codec<encode_context>);
+static_assert(!exposes_encoder<encode_context> && !exposes_decoder<decode_context>);
 static_assert(!exposes_wait<decode_context> && !exposes_wait<encode_context>);
 static_assert(!exposes_commit<decode_context> && !exposes_commit<encode_context>);
 static_assert(!exposes_rollback<decode_context> && !exposes_rollback<encode_context>);

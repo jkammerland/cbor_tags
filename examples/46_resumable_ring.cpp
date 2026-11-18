@@ -280,9 +280,9 @@ int main() {
     }
     publish(output, transport);
 
-    const auto encoded = encoding.result();
-    assert(encoded);
-    assert(*encoded == transport.size());
+    const auto encode_result = encoding.result();
+    assert(encode_result);
+    assert(*encode_result == transport.size());
     assert(encoding.committed_bytes() == transport.size());
     assert(output.committed_position().offset() == initial_offset + transport.size());
     assert(output.size() == 0);
@@ -318,9 +318,9 @@ int main() {
     }
 
     // Owning decoded values retain no borrows into the reclaimed ring bytes.
-    const auto decoded = decoding.result();
-    assert(decoded);
-    assert(*decoded == transport.size());
+    const auto decode_result = decoding.result();
+    assert(decode_result);
+    assert(*decode_result == transport.size());
     assert(decoding.committed_bytes() == transport.size());
     assert(received == sent);
     assert(image_hash == fnv1a(fnv1a_basis, image));

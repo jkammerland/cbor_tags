@@ -19,7 +19,7 @@ struct packet {
     explicit packet(int n) : value(n) {}
 };
 
-// Each native hook has exactly the behavior of its matching one-shot overload.
+// Each native hook has exactly the behavior of its matching ordinary overload.
 template <typename Self> struct broad_codec : ct::codec::base<Self> {
     using ct::codec::base<Self>::encode;
     using ct::codec::base<Self>::decode;
@@ -160,7 +160,7 @@ TEST_SUITE("cbor_wire/resumable") {
         check_overloads<exact_codec, broad_codec>();
     }
 
-    TEST_CASE("nested variant selection preserves the one-shot codec route") {
+    TEST_CASE("nested variant selection preserves the ordinary codec route") {
         const std::array input{std::byte{0x19}, std::byte{0x01}, std::byte{0x00}, std::byte{0x07}};
         inner            direct;
         REQUIRE(ct::make_decoder<inner_codec>(input)(direct));

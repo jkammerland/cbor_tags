@@ -38,8 +38,9 @@ int main() {
     // Encode three top-level readings, without an enclosing CBOR array.
     const std::array sent{7, 24, 1000};
     std::vector<std::byte> buffer;
-    const auto encoded = ct::make_encoder(buffer)(sent[0], sent[1], sent[2]);
-    assert(encoded);
+    auto encoder = ct::make_encoder(buffer);
+    const auto encode_result = encoder(sent[0], sent[1], sent[2]);
+    assert(encode_result);
 
     // The consumer outlives no borrowed object: it is declared last and destroyed first.
     const auto bytes = std::span<const std::byte>{buffer};

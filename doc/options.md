@@ -205,8 +205,9 @@ decoder call:
 
 ```cpp
 std::vector<std::byte> buffer;
-auto written = make_encoder(buffer)(1U, 24U);
-assert(written);
+auto encoder = make_encoder(buffer);
+auto encode_result = encoder(1U, 24U);
+assert(encode_result);
 
 auto dec = make_decoder_with_options<consumed_bytes_decoder_options>(buffer);
 unsigned first{}, second{};

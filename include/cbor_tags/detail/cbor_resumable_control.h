@@ -16,7 +16,7 @@ namespace detail {
 struct resumable_access;
 }
 
-// Small one-shot items return inline. Only a suspended computation owns a frame.
+// Ready results return inline. Only a suspended computation owns a frame.
 template <typename T> class [[nodiscard]] resumable {
   public:
     struct promise_type;
@@ -94,10 +94,11 @@ struct resumable_access {
     template <typename T> static auto handle(const resumable<T> &value) noexcept { return value.handle_; }
 };
 
-// Hooks only call the context and one_shot(value). Library code gets the rest here
+// Hooks only call the context and retry(value). Library code gets the rest here
 struct resumable_context_access {
     template <typename Context> static auto       &source(Context &context) noexcept { return context.source(); }
-    template <typename Context> static auto       &one_shot(Context &context) noexcept { return context.one_shot(); }
+    template <typename Context> static auto       &encoder(Context &context) noexcept { return context.encoder(); }
+    template <typename Context> static auto       &decoder(Context &context) noexcept { return context.decoder(); }
     template <typename Context> static std::size_t offset(const Context &context) { return context.offset(); }
     template <typename Context> static auto        remaining_input(const Context &context) { return context.remaining_input(); }
     template <typename Context> static auto        remaining_output(const Context &context) { return context.remaining_output(); }
@@ -188,7 +189,7 @@ template <typename Context> class [[nodiscard]] resume_operation {
 
   public:
     template <typename... Args> resume_operation(typename Context::source_type &source, Args &&...args) {
-        // Acquire before constructing a context: a one-shot codec can finish
+        // Acquire before constructing a context: an ordinary codec can finish
         // eagerly while the operation state is being constructed.
         source.acquire();
         try {

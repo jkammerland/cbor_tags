@@ -1486,7 +1486,7 @@ template <typename Self> struct typed_array : base<Self> {
     }
 
   private:
-    // Owning arrays take any length, like one-shot decoding. Other destinations
+    // Owning arrays take any length, like ordinary decoding. Other destinations
     // must fit the payload before anything is written.
     template <rfc8746::typed_array_byte_order ByteOrder, bool CheckDestination, typename R>
     resumable<status_code> resumable_decode_values(R &values, std::uint64_t min, std::uint64_t max) {
@@ -1825,7 +1825,7 @@ template <typename Self> struct typed_array : base<Self> {
 
 namespace cbor::tags {
 
-// One-shot view decoding only assigns the view once the whole payload is there,
+// Ordinary view decoding only assigns the view once the whole payload is there,
 // so retrying it is safe. Views don't encode.
 template <typename T, rfc8746::detail::TypedArrayPayloadRange ByteRange, rfc8746::typed_array_byte_order ByteOrder, typename Self>
 struct resumable_retry_traits<rfc8746::typed_array_view<T, ByteRange, ByteOrder>, codec::typed_array<Self>> {

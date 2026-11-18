@@ -80,15 +80,15 @@ template <typename Storage> const auto &stored_values(const Storage &storage) {
     }
 }
 
-// Rejects at every split with the one-shot status, before committing input or
+// Rejects at every split with the ordinary status, before committing input or
 // touching the destination. make_value wraps a fresh copy of initial.
 template <typename Storage, typename MakeValue>
 void check_rejected_destination(std::span<const std::byte> bytes, const Storage &initial, MakeValue make_value, status_code expected) {
-    Storage one_shot_storage = initial;
-    auto    one_shot_value   = make_value(one_shot_storage);
-    auto    one_shot         = make_decoder<codec::typed_array>(bytes)(one_shot_value);
-    REQUIRE_FALSE(one_shot);
-    CHECK(one_shot.error() == expected);
+    Storage ordinary_storage = initial;
+    auto    ordinary_value   = make_value(ordinary_storage);
+    auto    ordinary         = make_decoder<codec::typed_array>(bytes)(ordinary_value);
+    REQUIRE_FALSE(ordinary);
+    CHECK(ordinary.error() == expected);
 
     for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
         CAPTURE(cut);
@@ -111,14 +111,14 @@ void check_rejected_destination(std::span<const std::byte> bytes, const Storage 
     }
 }
 
-// Same for views. One-shot decoding over contiguous bytes needs a span view,
+// Same for views. Ordinary decoding over contiguous bytes needs a span view,
 // but checks in the same order.
 template <typename MakeValue> void check_rejected_view(std::span<const std::byte> bytes, MakeValue make_value, status_code expected) {
-    rfc8746::typed_array_view<std::uint16_t> one_shot_view;
-    decltype(auto)                           one_shot_value = make_value(one_shot_view);
-    auto                                     one_shot       = make_decoder<codec::typed_array>(bytes)(one_shot_value);
-    REQUIRE_FALSE(one_shot);
-    CHECK(one_shot.error() == expected);
+    rfc8746::typed_array_view<std::uint16_t> ordinary_view;
+    decltype(auto)                           ordinary_value = make_value(ordinary_view);
+    auto                                     ordinary       = make_decoder<codec::typed_array>(bytes)(ordinary_value);
+    REQUIRE_FALSE(ordinary);
+    CHECK(ordinary.error() == expected);
 
     for (std::size_t cut = 0; cut <= bytes.size(); ++cut) {
         CAPTURE(cut);
@@ -308,7 +308,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         CHECK(actual.values().empty());
     }
 
-    TEST_CASE("typed array bounds reject lengths like one-shot decoding") {
+    TEST_CASE("typed array bounds reject lengths like ordinary decoding") {
         const std::array two{std::byte{0xd8}, std::byte{0x45}, std::byte{0x44}, std::byte{0x34},
                              std::byte{0x12}, std::byte{0xcd}, std::byte{0xab}};
         const std::array odd{std::byte{0xd8}, std::byte{0x45}, std::byte{0x43}, std::byte{0x34}, std::byte{0x12}, std::byte{0xcd}};
@@ -361,7 +361,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         check(values, as_bounded_size(rfc8746::as_typed_array(values), 0, 16));
     }
 
-    TEST_CASE("borrowed destinations reject counts they can't hold like one-shot decoding") {
+    TEST_CASE("borrowed destinations reject counts they can't hold like ordinary decoding") {
         std::array<std::uint16_t, 3> fixed{97, 98, 99};
         check_rejected_destination(
             std::span{encoded}, fixed, [](auto &array) { return rfc8746::as_typed_array(std::span{array}); },
@@ -377,7 +377,7 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
             std::span{encoded}, capped, [](auto &values) { return rfc8746::as_typed_array(values); }, status_code::size_limit_exceeded);
     }
 
-    TEST_CASE("typed array views reject lengths like one-shot decoding") {
+    TEST_CASE("typed array views reject lengths like ordinary decoding") {
         const std::array odd{std::byte{0xd8}, std::byte{0x45}, std::byte{0x43}, std::byte{0x34}, std::byte{0x12}, std::byte{0xcd}};
         const auto bounded = [](std::size_t min, std::size_t max) { return [=](auto &view) { return as_bounded_size(view, min, max); }; };
 
@@ -409,10 +409,10 @@ TEST_SUITE("cbor_wire/resumable_typed_array") {
         const array_type                 expected{0x1234, 0xabcd};
         const std::vector<std::uint16_t> values{0x1234, 0xabcd};
         auto                             check = [](const auto &value) {
-            std::vector<std::byte> one_shot_bytes;
-            const auto             one_shot = make_encoder<codec::typed_array>(one_shot_bytes)(value);
-            REQUIRE_FALSE(one_shot);
-            CHECK(one_shot.error() == status_code::size_limit_exceeded);
+            std::vector<std::byte> ordinary_bytes;
+            const auto             ordinary = make_encoder<codec::typed_array>(ordinary_bytes)(value);
+            REQUIRE_FALSE(ordinary);
+            CHECK(ordinary.error() == status_code::size_limit_exceeded);
 
             std::array<std::byte, encoded.size()> output{};
             output_chunks                         chunks{std::span{output}};

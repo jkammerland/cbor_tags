@@ -47,12 +47,12 @@ using namespace cbor::tags;
 namespace cc1 = cbor::tags::custom_1;
 
 Message message{.id = 7, .label = "ready"};
-auto    enc     = make_encoder<codec::custom_1>(out);
-auto    encoded = enc(cc1::as_ref(message));
+auto enc = make_encoder<codec::custom_1>(out);
+auto encode_result = enc(cc1::as_ref(message));
 
 Message decoded{};
-auto    dec        = make_decoder<codec::custom_1>(out);
-auto    decoded_ok = dec(cc1::as_ref(decoded));
+auto dec = make_decoder<codec::custom_1>(out);
+auto decode_result = dec(cc1::as_ref(decoded));
 ```
 
 `as_ref(value)` requires the type to provide a CBOR tag, using the same tag

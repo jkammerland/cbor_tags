@@ -20,7 +20,7 @@
 
 namespace cbor::tags::detail {
 
-// Retry only the small tagged header through the one-shot codec machinery.
+// Retry only the small tagged header through the ordinary codec machinery.
 // Lengths get checked here too, so a rejected array commits nothing.
 template <std::uint64_t Tag, std::size_t ElementSize, typename Destination = void> struct resumable_typed_array_header {
     std::uint64_t byte_count{};
@@ -53,7 +53,7 @@ template <std::uint64_t Tag, std::size_t ElementSize, typename Destination = voi
         return {};
     }
 
-    // Compares bytes like one-shot decoding, so an odd length past a bound reports the bound
+    // Compares bytes like ordinary decoding, so an odd length past a bound reports the bound
     [[nodiscard]] constexpr bool within_bounds() const noexcept {
         constexpr auto max_elements = std::numeric_limits<std::uint64_t>::max() / ElementSize;
         if (min_count > max_elements || byte_count < min_count * ElementSize) {
@@ -154,7 +154,7 @@ template <typename R> class typed_array_writer {
     std::size_t                                                            written_{};
 };
 
-// Destination ranges are checked against the count first, like one-shot
+// Destination ranges are checked against the count first, like ordinary
 // decoding. Owning arrays aren't.
 template <std::uint64_t Tag, bool NativeOrder, bool CheckDestination, typename Context, typename R, typename Convert>
 resumable<status_code> resumable_decode_typed_array(Context &context, R &range, std::uint64_t min_count, std::uint64_t max_count,
@@ -167,7 +167,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, R &range, 
     if constexpr (CheckDestination) {
         header.destination = &range;
     }
-    const auto header_status = co_await context.one_shot(header);
+    const auto header_status = co_await context.retry(header);
     if (header_status != status_code::success) {
         co_return header_status;
     }
@@ -177,7 +177,7 @@ resumable<status_code> resumable_decode_typed_array(Context &context, R &range, 
     typed_array_writer<R> values{range, element_count};
 
     auto                               &source = resumable_context_access::source(context);
-    auto                               &reader = resumable_context_access::one_shot(context).reader_;
+    auto                               &reader = resumable_context_access::decoder(context).reader_;
     std::array<std::byte, element_size> boundary{};
     std::size_t                         boundary_size{};
     while (values.size() != element_count) {
@@ -257,7 +257,7 @@ resumable<status_code> resumable_encode_typed_array(Context &context, Range &val
         co_return status_code::size_limit_exceeded;
     }
     resumable_typed_array_header<Tag, element_size> header{count * element_size};
-    const auto                                      header_status = co_await context.one_shot(header);
+    const auto                                      header_status = co_await context.retry(header);
     if (header_status != status_code::success) {
         co_return header_status;
     }

@@ -521,13 +521,13 @@ without flattening first.
 
 ```cpp
 std::vector<int> values{1, 2};
-auto encoded = encode_item_segments(values);
+auto encode_result = encode_item_segments(values);
 
 std::vector<std::byte> output;
 auto enc = make_encoder(output);
 
-if (encoded) {
-    enc(as_bstr(*encoded));
+if (encode_result) {
+    enc(as_bstr(*encode_result));
 }
 ```
 

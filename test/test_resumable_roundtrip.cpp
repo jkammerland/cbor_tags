@@ -543,7 +543,7 @@ template <typename Self> struct negated_double_encode_hook : codec::encoder_base
 
     resumable<status_code> resumable_encode(const double &value) {
         const double negated = -value;
-        co_return co_await static_cast<Self &>(*this).one_shot(negated);
+        co_return co_await static_cast<Self &>(*this).retry(negated);
     }
 };
 
@@ -552,7 +552,7 @@ template <typename Self> struct negated_double_transcode_hook : codec::encoder_b
 
     resumable<status_code> resumable_transcode(double value) {
         const double negated = -value;
-        co_return co_await static_cast<Self &>(*this).one_shot(negated);
+        co_return co_await static_cast<Self &>(*this).retry(negated);
     }
 };
 
@@ -634,7 +634,7 @@ template <template <typename> typename... Codecs> void check_weighted_wire(std::
 }
 
 // A mixin's hooks are for the type they name. A type derived from that one is
-// another type, and the one-shot encoder and decoder see it that way too
+// another type, and the ordinary encoder and decoder see it that way too
 struct int_list : std::vector<int> {
     using std::vector<int>::vector;
 };
@@ -1691,14 +1691,14 @@ TEST_SUITE("roundtrip/resumable") {
     TEST_CASE("an installed mixin hook goes before the hooks a type has itself") {
         const weighted expected{1, 111};
 
-        // The one-shot encoder and decoder let the installed codec go first
+        // The ordinary encoder and decoder let the installed codec go first
         std::vector<std::byte> reference;
         REQUIRE(make_encoder<weight_doubling_codec>(reference)(expected));
         REQUIRE(to_hex(reference) == "820118de");
 
-        weighted one_shot;
-        REQUIRE(make_decoder<weight_doubling_codec>(reference)(one_shot));
-        REQUIRE(one_shot == expected);
+        weighted ordinary;
+        REQUIRE(make_decoder<weight_doubling_codec>(reference)(ordinary));
+        REQUIRE(ordinary == expected);
 
         SUBCASE("the mixin hook runs") { check_weighted_wire<weight_doubling_codec>("820118de"); }
         SUBCASE("the type's hooks run without a mixin") { check_weighted_wire<>("8201186f"); }
@@ -1743,7 +1743,7 @@ TEST_SUITE("roundtrip/resumable") {
         }
 
         SUBCASE("a type derived from it") {
-            // Same bytes as the one-shot encoder, which leaves the codec out too
+            // Same bytes as the ordinary encoder, which leaves the codec out too
             const int_list         expected{1, 2, 3};
             std::vector<std::byte> reference;
             REQUIRE(make_encoder(reference)(expected));
