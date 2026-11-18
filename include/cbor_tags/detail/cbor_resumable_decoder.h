@@ -511,10 +511,13 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
     // to a mixin without the codec base. Nobody asks that mixin here, so the
     // same bytes would give a different value. Asked is how the one-shot
     // decoder gets to the value: from its first byte, with the header read,
-    // or with the tag read. It can only call the decode that fits.
+    // or with the tag read. It calls the decode that fits, and one that
+    // starts on the first byte from anywhere, it steps back for that.
     template <typename T, payload_decode_context Asked> static consteval bool plain_codec_skipped() {
         if constexpr (read_piece_by_piece<T>())
-            return (plain_codec_decodes<T, Asked, Codecs<one_shot_type>>() || ...);
+            return ((plain_codec_decodes<T, Asked, Codecs<one_shot_type>>() ||
+                     plain_codec_decodes<T, payload_decode_context::direct, Codecs<one_shot_type>>()) ||
+                    ...);
         else
             return false;
     }
@@ -635,8 +638,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
                       "this type has a resumable decode hook that is never called, every hook takes the value as T & and "
                       "returns resumable<status_code>");
 
-        // A one-shot decoder has read the header by here, and only a decode
-        // that takes the header can still get the value
+        // A one-shot decoder has read the header by here. It calls a decode
+        // that takes the header, or steps back for one that starts on the
+        // first byte
         static_assert(!(plain_codec_skipped<U, payload_decode_context::header>()),
                       "an installed codec without the codec base has a one-shot decode for this type, a one-shot decoder would "
                       "call it and this one reads the value itself, derive the codec from cbor::tags::codec::decoder_base<Self>");
@@ -646,6 +650,9 @@ class resumable_decode_context : public Codecs<resumable_decode_context<Source, 
             return item<T, payload_decode_context::header>(value); // NOLINT(bugprone-branch-clone)
         else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::header>())
             return contextual_one_shot<payload_decode_context::header>(value);
+        else if constexpr (codec_payload_has_customization<one_shot_type, U, payload_decode_context::direct>())
+            // An installed codec reads it from the first byte, and item() still stands there
+            return item<T, payload_decode_context::header>(value); // NOLINT(bugprone-branch-clone)
         else if constexpr (IsAggregate<U> && !IsTag<U>)
             return header_group(to_tuple(value));
         else if constexpr (IsUntaggedTuple<U>)

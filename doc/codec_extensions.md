@@ -34,6 +34,8 @@ auto enc = make_encoder<codec::unique_ptr, codec::shared_ptr>(bytes);
 auto dec = make_decoder<codec::unique_ptr, codec::shared_ptr>(bytes);
 ```
 
+## Codec mixins
+
 Extension codecs are class-template mixins over the final encoder or decoder
 type. Encoder-only mixins should inherit `cbor::tags::codec::encoder_base<Self>`,
 decoder-only mixins should inherit `cbor::tags::codec::decoder_base<Self>`, and
@@ -49,10 +51,10 @@ There are two layers to keep separate:
 
 - User-facing customization functions should compose normal CBOR items through
   the public call operator, for example `return enc(wrap_as_array{a, b});`.
-- Codec implementations may call `enc.encode(...)`, `dec.decode(...)`, and
-  `dec.decode(value, major, additional_info)` directly. These are the internal
-  dispatch primitives, especially after the initial byte has already been
-  consumed and split into `major` and `additional_info`.
+- Codec implementations may call `enc.encode(...)` and `dec.decode(...)`
+  directly. When passing an already-read header to another value, use
+  `dec.decode_after_header(value, major, additional_info)` so that value's codec
+  can receive the header or read it itself.
 
 Do not add sequencing APIs such as `encode_all`; use `operator()(...)` for
 normal public composition and direct dispatch only inside codec internals.
@@ -112,12 +114,65 @@ struct my_type_decoder : ct::codec::decoder_base<Self> {
 
     [[nodiscard]] ct::status_code
     decode(::my_type& value, ct::major_type major, std::byte additional_info) {
-        return static_cast<Self&>(*this).decode(value.payload, major, additional_info);
+        return static_cast<Self&>(*this).decode_after_header(value.payload, major, additional_info);
     }
 };
 
 } // namespace app::codec
 ```
+
+## Decoder entry points
+
+A decode mixin can take a value at three points:
+
+- `decode(T& value)`: the decoder stands on the value's first byte.
+- `decode(T& value, major_type major, std::byte additional_info)`: the first byte
+  has been read and split into its major type and additional information.
+- `decode(T& value, std::uint64_t tag)`: the tag has been read, as for a tagged
+  alternative of a variant.
+
+`decode(T&)` is enough on its own. Inside an optional or a variant, and for the
+elements of an indefinite-length container, the decoder has read the first byte
+or tag by the time it selects a value. It calls the codec's form for that point
+when available, or steps back and calls `decode(T&)`. Transparent owning wrappers
+such as `std::unique_ptr` and `std::indirect` also dispatch to the payload's codec.
+Each wrapper's type restrictions still apply; for example, unique-pointer variant
+alternatives require codec-independent wire shapes.
+
+For example, a sensor codec can read integer centi-degrees into a `float`:
+
+```cpp
+template <typename Self>
+struct centi_degrees : cbor::tags::codec::decoder_base<Self> {
+    using cbor::tags::codec::decoder_base<Self>::decode;
+
+    cbor::tags::status_code decode(float& degrees) {
+        std::int64_t centi{};
+        const auto status = static_cast<Self&>(*this).decode(centi);
+        if (status == cbor::tags::status_code::success) {
+            degrees = static_cast<float>(centi) / 100.0F;
+        }
+        return status;
+    }
+};
+
+// bytes contains the integer 2150; temperature becomes 21.5F.
+std::optional<float> temperature;
+auto dec = cbor::tags::make_decoder<centi_degrees>(bytes);
+auto result = dec(temperature);
+```
+
+Codec implementations that hand a consumed header to another value call
+`dec.decode_after_header(value, major, additional_info)`. After decoding a tag
+through `dec.decode(...)` or `dec.decode_tag_argument(...)`,
+call `dec.decode_after_tag(value, tag, additional_info)` with the original tag
+header's additional information, which preserves its encoded width. These calls
+require the decoder to stand immediately after that header or tag, before any
+payload bytes have been consumed. They select the contextual overload or return
+to the first byte for a codec that needs it. Re-reading the tag does not notify
+tag observers again. Direct `dec.decode(value, major,
+additional_info)` and `dec.decode(value, tag)` calls select only that overload
+form.
 
 ## Custom Decoder Success Contract
 

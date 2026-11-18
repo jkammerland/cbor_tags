@@ -75,6 +75,10 @@ add_test(NAME tests COMMAND tests "--test-suite-exclude=expected/*,cbor_wire/*,r
 add_test(NAME container_item_shape_wire COMMAND tests "--test-suite=cbor_wire/container_item_shape")
 set_tests_properties(container_item_shape_wire PROPERTIES LABELS "cbor-wire")
 
+# A codec that only has decode(T &), from every place a decoder gets to a T
+add_test(NAME codec_first_byte_wire COMMAND tests "--test-suite=cbor_wire/codec_first_byte")
+set_tests_properties(codec_first_byte_wire PROPERTIES LABELS "cbor-wire")
+
 # Reject only unbounded zero-input iterations, including nested count loops.
 foreach(SHAPE ARRAY_EMPTY ARRAY_NESTED_EMPTY ARRAY_TUPLE_EMPTY ARRAY_UNWRAPPED_EMPTY MAP_EMPTY
     OPTIONAL_ARRAY_EMPTY VARIANT_ARRAY_EMPTY)
@@ -179,7 +183,6 @@ if(CBOR_TAGS_TEST_HAS_STD_VALUE_WRAPPERS)
       "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
       "-DPASS_REGEX=${DIAGNOSTIC}" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   endfunction()
-  add_value_wrapper_compile_fail(std_indirect_direct_mixin_decode_compile_fails DIRECT_MIXIN DECODE "std::indirect payload must encode exactly one CBOR item")
   foreach(SHAPE EMPTY TAG_HEADER UNWRAPPED_GROUP)
     foreach(OPERATION ENCODE DECODE)
       string(TOLOWER "std_indirect_${SHAPE}_${OPERATION}_compile_fails" TEST_NAME)
@@ -215,7 +218,7 @@ if(CMAKE_CXX_STANDARD GREATER_EQUAL 23)
     set_tests_properties(std_expected_wire PROPERTIES LABELS "cbor-wire")
     add_test(NAME std_expected_roundtrip COMMAND tests "--test-suite=roundtrip/std_expected")
     set_tests_properties(std_expected_roundtrip PROPERTIES LABELS "roundtrip")
-    foreach(ROUTE HEADER_ROOT HEADER_GROUP HEADER_ARRAY DIRECT_ARRAY DIRECT_OPTIONAL TAG_VARIANT BOUNDED_CONTAINER INDEFINITE_CONTAINER)
+    foreach(ROUTE HEADER_ROOT HEADER_GROUP HEADER_ARRAY TAG_VARIANT BOUNDED_CONTAINER INDEFINITE_CONTAINER)
       string(TOLOWER "std_expected_${ROUTE}_compile_fails" TEST_NAME)
       add_executable(${TEST_NAME} EXCLUDE_FROM_ALL std_expected_dispatch_compile_fail.cc)
       target_compile_definitions(${TEST_NAME} PRIVATE CBOR_EXPECTED_${ROUTE})
@@ -333,7 +336,8 @@ add_executable(resumable_plain_codec_compile resumable_plain_codec_compile.cc)
 target_link_libraries(resumable_plain_codec_compile PRIVATE cbor::tags)
 add_test(NAME resumable_plain_codec_compile COMMAND resumable_plain_codec_compile)
 
-foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE CONTAINER_ENCODE DECODE CONTAINER_DECODE HEADER_DECODE TAG_DECODE)
+foreach(CASE IN ITEMS ENCODE MUTABLE_ENCODE CONTAINER_ENCODE DECODE CONTAINER_DECODE OPTIONAL_DECODE OPTIONAL_CONTAINER_DECODE
+                      HEADER_DECODE TAG_DECODE)
   string(TOLOWER "resumable_plain_codec_${CASE}_compile_fails" TEST_NAME)
   string(REGEX REPLACE "^.*_" "" DIRECTION "${CASE}")
   string(TOLOWER "${DIRECTION}" DIRECTION)
@@ -843,6 +847,23 @@ add_test(
     -P
     "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
 
+# A codec that only has decode(T &) for what a pointer in the variant points at
+add_executable(
+  smart_ptr_variant_first_byte_codec_compile_fails
+  EXCLUDE_FROM_ALL
+  smart_ptr_variant_first_byte_codec_compile_fail.cc)
+target_link_libraries(smart_ptr_variant_first_byte_codec_compile_fails PRIVATE cbor::tags)
+add_test(
+  NAME smart_ptr_variant_first_byte_codec_compile_fails
+  COMMAND
+    ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DTEST_TARGET=smart_ptr_variant_first_byte_codec_compile_fails"
+    "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=unique pointer variant alternatives must have codec-independent CBOR wire shapes"
+    -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+
 add_executable(smart_ptr_nested_null_compile_fails EXCLUDE_FROM_ALL smart_ptr_nested_null_compile_fail.cc)
 target_link_libraries(smart_ptr_nested_null_compile_fails PRIVATE cbor::tags)
 add_test(
@@ -1244,7 +1265,7 @@ function(add_resumable_retry_failure CASE DIAGNOSTIC)
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endfunction()
 
-foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG PLAIN OBSERVER_DECODE VIEW_OVERRIDE)
+foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG ENUM_DIRECT ENUM_HEADER ENUM_HIDDEN PLAIN OBSERVER_DECODE VIEW_OVERRIDE)
   add_resumable_retry_failure(${CASE} "one-shot decoding requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_${CASE})
 endforeach()
 add_resumable_retry_failure(MEMBER_ENCODE "one-shot encoding requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)

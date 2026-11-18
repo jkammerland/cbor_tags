@@ -49,7 +49,7 @@ template <typename Self> struct std_indirect : base<Self> {
             // Equal allocators let swap transfer ownership without moving T.
             value.swap(replacement);
         }
-        return static_cast<Self &>(*this).decode(*value, major, additional_info);
+        return static_cast<Self &>(*this).decode_after_header(*value, major, additional_info);
     }
 
     template <IsVariant Variant>

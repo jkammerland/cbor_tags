@@ -250,9 +250,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     template <IsEnum U> constexpr status_code decode(U &value, major_type major, std::byte additionalInfo) {
         using underlying_type = std::underlying_type_t<U>;
         underlying_type result;
-        auto            status = this->decode(result, major, additionalInfo);
+
+        // The encoder writes the number through its codecs, so read it through them
+        auto status = this->decode_after_header(result, major, additionalInfo);
         if (status != status_code::success) {
-            return status_code::no_match_for_enum_on_buffer;
+            // Keep enum mismatch diagnostics, but let incomplete and codec failures propagate.
+            return status == status_code::no_match_for_int_on_buffer || status == status_code::no_match_for_uint_on_buffer
+                       ? status_code::no_match_for_enum_on_buffer
+                       : status;
         }
         value = static_cast<U>(result);
         return status_code::success;
@@ -985,7 +990,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         } else {
             using value_type = std::remove_cvref_t<T>;
             auto t           = detail::make_decode_value_for_optional<value_type>(value);
-            auto result      = decode(t, major, additionalInfo);
+            auto result      = decode_after_header(t, major, additionalInfo);
             if (result == status_code::success) {
                 value = std::move(t);
             }
@@ -1168,7 +1173,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (element_major == major_type::Simple && element_info == static_cast<byte>(31)) {
                     return status_code::success;
                 }
-                status = decode(element, element_major, element_info);
+                status = decode_after_header(element, element_major, element_info);
             } else {
                 status = decode(element);
             }
@@ -1203,7 +1208,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (key_major == major_type::Simple && key_info == static_cast<byte>(31)) {
                     return status_code::success;
                 }
-                status = decode(key, key_major, key_info);
+                status = decode_after_header(key, key_major, key_info);
                 if (status != status_code::success) {
                     return status;
                 }
@@ -1213,7 +1218,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 if (value_major == major_type::Simple && value_info == static_cast<byte>(31)) {
                     return status_code::malformed_structure;
                 }
-                status = decode(value, value_major, value_info);
+                status = decode_after_header(value, value_major, value_info);
             } else {
                 status = decode(key);
                 if (status != status_code::success) {
@@ -1343,6 +1348,48 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         }
         const auto [majorType, additionalInfo] = read_initial_byte();
         return decode(value, majorType, additionalInfo);
+    }
+
+    // The header of this value is read. A codec that only has decode(T &) for
+    // the type reads the header itself, so step back the one byte and call
+    // that, the same as for a type with its own decode
+    template <typename T> constexpr status_code decode_after_header(T &value, major_type major, byte additionalInfo) {
+        using customization = detail::codec_payload_mixin_customization<self_t>;
+        if constexpr (customization::template wants_first_byte<std::remove_cvref_t<T>, detail::payload_decode_context::header>()) {
+            reader_.seek(-1);
+            return this->decode(value);
+        } else {
+            return this->decode(value, major, additionalInfo);
+        }
+    }
+
+    // The tag of this variant alternative is read. A codec with nothing that
+    // takes the tag reads it itself, so go back to where the tag starts
+    template <typename T> constexpr status_code decode_after_tag(T &value, std::uint64_t tag, byte additionalInfo) {
+        using customization = detail::codec_payload_mixin_customization<self_t>;
+        if constexpr (customization::template wants_first_byte<std::remove_cvref_t<T>, detail::payload_decode_context::tag>()) {
+            // 24 to 27 say the tag number takes 1, 2, 4 or 8 more bytes
+            const auto info      = static_cast<unsigned>(additionalInfo);
+            const auto tag_bytes = info < 24U ? std::ptrdiff_t{0} : std::ptrdiff_t{1} << (info - 24U);
+
+            if constexpr (detail::HasDecodedCborTagObserver<self_t>) {
+                // This tag was already observed. Suppress only its repeated read,
+                // leaving nested payload tags and later items visible to observers.
+                struct restore_observation {
+                    std::optional<size_type> &slot;
+                    std::optional<size_type>  previous;
+                    constexpr ~restore_observation() { slot = previous; }
+                } guard{reread_tag_end_, std::exchange(reread_tag_end_, current_offset())};
+
+                reader_.seek(-1 - tag_bytes);
+                return this->decode(value);
+            } else {
+                reader_.seek(-1 - tag_bytes);
+                return this->decode(value);
+            }
+        } else {
+            return this->decode(value, tag);
+        }
     }
 
     template <typename Header>
@@ -1532,6 +1579,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     constexpr status_code decode_tag_argument(byte additionalInfo, std::uint64_t &tag) {
         tag = decode_unsigned(additionalInfo);
         if constexpr (detail::HasDecodedCborTagObserver<self_t>) {
+            if (reread_tag_end_ == current_offset()) {
+                return status_code::success;
+            }
             return static_cast<self_t &>(*this).observe_decoded_cbor_tag(tag);
         }
         return status_code::success;
@@ -1917,8 +1967,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             return std::apply([this](auto &&...args) { return this->applier(args...); }, tuple);
         } else {
             // Single-field and unwrapped groups pass the header to their first
-            // field; the reader must not rewind or read that header a second time.
-            const auto status = decode(std::get<0>(tuple), major, additional_info);
+            // field, a codec that starts on the first byte gets it stepped back.
+            const auto status = decode_after_header(std::get<0>(tuple), major, additional_info);
             if (status != status_code::success) {
                 return status;
             }
@@ -1963,6 +2013,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     reader_type        reader_;
 
   private:
+    // Decoders without a tag observer need no replay state or storage.
+    struct no_tag_observer {};
+    [[no_unique_address]] std::conditional_t<(detail::HasDecodedCborTagObserver<Decoders<self_t>> || ...), std::optional<size_type>,
+                                             no_tag_observer> reread_tag_end_{};
+
     constexpr auto take_bstring_payload(size_type span_length) {
         if constexpr (IsContiguous<InputBuffer>) {
             auto *begin  = std::ranges::data(data_) + reader_.position_;
@@ -2112,9 +2167,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     }
                     tag = decoded_tag;
                 }
-                result = this->decode(decoded_value, *tag);
+                result = this->decode_after_tag(decoded_value, *tag, additionalInfo);
             } else {
-                result = this->decode(decoded_value, major, additionalInfo);
+                result = this->decode_after_header(decoded_value, major, additionalInfo);
             }
 
             if (result == status_code::success) {
@@ -2207,9 +2262,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     }
                     tag = decoded_tag;
                 }
-                result = this->decode(decoded_value, *tag);
+                result = this->decode_after_tag(decoded_value, *tag, additionalInfo);
             } else {
-                result = this->decode(decoded_value, major, additionalInfo);
+                result = this->decode_after_header(decoded_value, major, additionalInfo);
             }
 
             if (result == status_code::success) {
