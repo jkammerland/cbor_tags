@@ -29,8 +29,9 @@ int main() {
     // This vector owns the bytes borrowed by both incoming chunks.
     std::vector<std::byte> wire;
     const std::string sent = "ready";
-    const auto encoded = ct::make_encoder(wire)(sent);
-    assert(encoded);
+    auto encoder = ct::make_encoder(wire);
+    const auto encode_result = encoder(sent);
+    assert(encode_result);
 
     std::deque<std::span<const std::byte>> input;
     auto decoder = ct::make_resumable_decoder(input);
@@ -87,8 +88,8 @@ int main() {
 
     auto decoder = ct::make_decoder(output);
     std::string received;
-    const auto decoded = decoder(received);
-    assert(decoded);
+    const auto decode_result = decoder(received);
+    assert(decode_result);
     assert(received == sent);
 }
 ```
@@ -137,8 +138,8 @@ int main() {
         std::span<const std::byte>{storage}.first(operation.committed_bytes());
     auto decoder = ct::make_decoder(committed);
     std::string received;
-    const auto decoded = decoder(received);
-    assert(decoded);
+    const auto decode_result = decoder(received);
+    assert(decode_result);
     assert(received == sent);
 }
 ```
@@ -213,8 +214,9 @@ namespace ct = cbor::tags;
 
 int main() {
     std::vector<std::byte> wire;
-    const auto encoded = ct::make_encoder(wire)(std::string{"station"}, std::vector<int>{1, 2, 3});
-    assert(encoded);
+    auto encoder = ct::make_encoder(wire);
+    const auto encode_result = encoder(std::string{"station"}, std::vector<int>{1, 2, 3});
+    assert(encode_result);
 
     std::vector<std::byte> input;
     auto decoder = ct::make_resumable_decoder(input);
@@ -278,8 +280,9 @@ int main() {
     std::vector<std::byte> wire;
     const std::vector<std::byte> image(5'000, std::byte{0x2a});
     const std::vector<std::uint32_t> readings{3, 5, 8};
-    const auto encoded = ct::make_encoder(wire)(image, readings);
-    assert(encoded);
+    auto encoder = ct::make_encoder(wire);
+    const auto encode_result = encoder(image, readings);
+    assert(encode_result);
 
     std::deque<std::span<const std::byte>> input;
     auto decoder = ct::make_resumable_decoder(input);
@@ -348,8 +351,9 @@ example::consumer observe_cancellation(Operation &operation, std::size_t &notifi
 
 int main() {
     std::vector<std::byte> wire;
-    const auto encoded = ct::make_encoder(wire)(7, 1000);
-    assert(encoded);
+    auto encoder = ct::make_encoder(wire);
+    const auto encode_result = encoder(7, 1000);
+    assert(encode_result);
 
     std::deque<std::span<const std::byte>> input;
     auto decoder = ct::make_resumable_decoder(input);
@@ -423,8 +427,9 @@ namespace ct = cbor::tags;
 
 int main() {
     std::vector<std::byte> input;
-    const auto encoded = ct::make_encoder(input)(7, 1000);
-    assert(encoded);
+    auto encoder = ct::make_encoder(input);
+    const auto encode_result = encoder(7, 1000);
+    assert(encode_result);
 
     auto source = ct::make_input_source(input);
     auto items = ct::make_resumable_generator<int>(source);
@@ -576,7 +581,8 @@ type. Calling `decoder(value)` inside a hook for `value` would invoke the hook
 again. `decoder.retry(value)` bypasses resumable hooks, tries the ordinary
 `decode` overloads immediately, and waits and retries if the input is incomplete.
 
-This hook decodes a double, then checks that it is finite:
+This hook decodes a double, then checks that it is finite. Input arrives one
+byte at a time, so the same awaited call retries repeatedly before succeeding:
 
 ```cpp
 #include "cbor_tags/cbor_encoder.h"
@@ -605,21 +611,32 @@ template <typename Self> struct finite_doubles : ct::codec::decoder_base<Self> {
 int main() {
     const double sent = 1.25;
     std::vector<std::byte> wire;
-    const auto encoded = ct::make_encoder(wire)(sent);
-    assert(encoded);
-    assert(wire.size() > 1);
+    auto encoder = ct::make_encoder(wire);
+    const auto encode_result = encoder(sent);
+    assert(encode_result);
+    assert(wire.size() > 2);
 
-    // The codec's input is incomplete until the second delivery arrives.
-    std::vector<std::byte> input(wire.begin(), wire.end() - 1);
+    // The hook awaits one retry operation while input arrives byte by byte.
+    std::vector<std::byte> input;
     auto decoder = ct::make_resumable_decoder<finite_doubles>(input);
     double received{};
     auto operation = decoder(received);
     assert(!operation.done());
 
-    input.push_back(wire.back());
-    const auto completed = operation.resume();
-    assert(completed == ct::resume_state::done);
-    assert(operation.result());
+    // Every incomplete prefix causes another wait; the final byte completes the decode.
+    for (const auto byte : wire) {
+        input.push_back(byte);
+        const auto state = operation.resume();
+        if (input.size() < wire.size()) {
+            assert(state == ct::resume_state::need_input);
+            assert(operation.committed_bytes() == 0);
+        } else {
+            assert(state == ct::resume_state::done);
+        }
+    }
+
+    const auto decode_result = operation.result();
+    assert(decode_result);
     assert(received == sent);
     return 0;
 }
@@ -756,8 +773,9 @@ namespace ct = cbor::tags;
 
 int main() {
     std::vector<std::byte> wire;
-    const auto encoded = ct::make_encoder(wire)(1000);
-    assert(encoded);
+    auto encoder = ct::make_encoder(wire);
+    const auto encode_result = encoder(1000);
+    assert(encode_result);
 
     std::vector<std::byte> input;
     auto source = ct::make_input_source(input);

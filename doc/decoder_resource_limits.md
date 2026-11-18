@@ -7,7 +7,8 @@ application message-size limit before decoding:
 if (input.size() > max_message_bytes)
     return input_too_large;
 
-return cbor::tags::make_decoder(input)(value);
+auto decoder = cbor::tags::make_decoder(input);
+return decoder(value);
 ```
 
 For streaming or resumable parsing, enforce the same policy against the cumulative bytes received.
@@ -88,7 +89,8 @@ decoded destination contents.
 // std::ranges::sized_range.
 // It contains: 0x65, 'o', 'k' -- a tstr header that declares five bytes.
 std::string output{"prefix:"};
-const auto result = cbor::tags::make_decoder(input)(output);
+auto decoder = cbor::tags::make_decoder(input);
+const auto result = decoder(output);
 
 // result.error() == cbor::tags::status_code::incomplete
 // output == "prefix:ok"; the input has been consumed to its end.

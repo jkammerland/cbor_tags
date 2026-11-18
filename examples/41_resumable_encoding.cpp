@@ -40,8 +40,8 @@ int main() {
     // Decode the committed prefix directly from the caller-owned container.
     auto decoder = ct::make_decoder(committed);
     std::string received;
-    const auto decoded = decoder(received);
-    assert(decoded);
+    const auto decode_result = decoder(received);
+    assert(decode_result);
     assert(received == sent);
     assert(decoder.tell() == committed.end());
 

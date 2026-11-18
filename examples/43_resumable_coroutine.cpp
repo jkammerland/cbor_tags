@@ -30,8 +30,9 @@ message = tstr
 int main() {
     const std::string sent = "ready";
     std::vector<std::byte> buffer;
-    const auto encoded = ct::make_encoder(buffer)(sent);
-    assert(encoded);
+    auto encoder = ct::make_encoder(buffer);
+    const auto encode_result = encoder(sent);
+    assert(encode_result);
 
     // Declare the waiter last so its frame is destroyed before the operation.
     const auto bytes = std::span<const std::byte>{buffer};

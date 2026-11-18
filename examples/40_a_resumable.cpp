@@ -49,8 +49,8 @@ int main() {
 
     // Let us append 2 more uints. In reality, you would use a resumable encoder, but for simplicity...
     auto enc = ct::make_encoder(buffer);
-    const auto appended = enc(10u, 1000u);
-    assert(appended);
+    const auto encode_result = enc(10u, 1000u);
+    assert(encode_result);
     // See example 41 for resumable encoding.
 
     // In theory, we should be able to resume and complete the 3 element array decoding.

@@ -27,21 +27,32 @@ measurement = float
 int main() {
     const double sent = 1.25;
     std::vector<std::byte> wire;
-    const auto encoded = ct::make_encoder(wire)(sent);
-    assert(encoded);
-    assert(wire.size() > 1);
+    auto encoder = ct::make_encoder(wire);
+    const auto encode_result = encoder(sent);
+    assert(encode_result);
+    assert(wire.size() > 2);
 
-    // The codec's input is incomplete until the second delivery arrives.
-    std::vector<std::byte> input(wire.begin(), wire.end() - 1);
+    // The hook awaits one retry operation while input arrives byte by byte.
+    std::vector<std::byte> input;
     auto decoder = ct::make_resumable_decoder<finite_doubles>(input);
     double received{};
     auto operation = decoder(received);
     assert(!operation.done());
 
-    input.push_back(wire.back());
-    const auto completed = operation.resume();
-    assert(completed == ct::resume_state::done);
-    assert(operation.result());
+    // Every incomplete prefix causes another wait; the final byte completes the decode.
+    for (const auto byte : wire) {
+        input.push_back(byte);
+        const auto state = operation.resume();
+        if (input.size() < wire.size()) {
+            assert(state == ct::resume_state::need_input);
+            assert(operation.committed_bytes() == 0);
+        } else {
+            assert(state == ct::resume_state::done);
+        }
+    }
+
+    const auto decode_result = operation.result();
+    assert(decode_result);
     assert(received == sent);
     return 0;
 }

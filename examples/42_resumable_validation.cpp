@@ -17,8 +17,9 @@ int main() {
     // Prepare two items; validate their CBOR without constructing decoded values.
     const std::vector<std::string> stations{"north", "south"};
     std::vector<std::byte> buffer;
-    const auto encoded = ct::make_encoder(buffer)(stations, true);
-    assert(encoded);
+    auto encoder = ct::make_encoder(buffer);
+    const auto encode_result = encoder(stations, true);
+    assert(encode_result);
 
     // A validator checks one item. The producer appends bytes to the bound container before resuming it.
     const auto bytes = std::span<const std::byte>{buffer};

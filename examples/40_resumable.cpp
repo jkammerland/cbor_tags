@@ -27,8 +27,9 @@ int main() {
     const Message sent{.name = "station", .values = {1, 24, 1000}};
     const std::uint32_t sequence = 42;
     std::vector<std::byte> buffer;
-    const auto encoded = ct::make_encoder(buffer)(sent, sequence);
-    assert(encoded);
+    auto encoder = ct::make_encoder(buffer);
+    const auto encode_result = encoder(sent, sequence);
+    assert(encode_result);
 
     // The buffer owns every byte; the deque holds append-only borrowed chunks.
     const auto bytes = std::span<const std::byte>{buffer};

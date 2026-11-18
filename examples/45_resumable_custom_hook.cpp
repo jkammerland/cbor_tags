@@ -41,15 +41,15 @@ int main() {
     assert(encoding.done());
 
     // Check the selected field order independently through the ordinary array decoder.
-    const auto encoded = encoding.result();
-    assert(encoded);
-    assert(*encoded == encoding.committed_bytes());
-    auto produced = std::span<const std::byte>{output}.first(*encoded);
+    const auto encode_result = encoding.result();
+    assert(encode_result);
+    assert(*encode_result == encoding.committed_bytes());
+    auto produced = std::span<const std::byte>{output}.first(*encode_result);
     auto decoder = ct::make_decoder(produced);
     std::string station;
     std::vector<int> samples;
-    const auto fields = decoder(ct::wrap_as_array{station, samples});
-    assert(fields);
+    const auto fields_result = decoder(ct::wrap_as_array{station, samples});
+    assert(fields_result);
     assert(station == sent.station);
     assert(samples == sent.samples);
     assert(decoder.tell() == produced.end());
@@ -68,9 +68,9 @@ int main() {
     assert(final_input_state == ct::resume_state::done);
 
     // The hook resumes inside its fields, then reconstructs the application layout.
-    const auto decoded = decoding.result();
-    assert(decoded);
-    assert(*decoded == *encoded);
+    const auto decode_result = decoding.result();
+    assert(decode_result);
+    assert(*decode_result == *encode_result);
     assert(received.station == sent.station);
     assert(received.samples == sent.samples);
     return 0;
