@@ -58,11 +58,24 @@ bool same_extended(const named_extended &lhs, const named_extended &rhs) {
     return lhs.id == rhs.id && lhs.extra.value_ == rhs.extra.value_;
 }
 
-// The ordinary decoder is the reference: every input split must give its
-// status, and on success the same value.
-template <typename T, typename Equal> void check_named_map_splits(std::span<const std::byte> wire, Equal equal) {
-    T          expected{};
-    const auto expected_result = make_decoder(wire)(as_named_map{expected});
+// What a wire has to give at every input split: the value in sent, or the
+// status when there is no value. The ordinary decoder has to give the same
+template <typename T, typename Equal>
+void check_named_map_splits(std::span<const std::byte> wire, const T *sent, status_code status, Equal equal) {
+    const auto check = [&](const auto &result, const T &actual) {
+        if (sent != nullptr) {
+            REQUIRE(result.has_value());
+            CHECK(equal(actual, *sent));
+        } else {
+            REQUIRE_FALSE(result.has_value());
+            CHECK(result.error() == status);
+        }
+    };
+
+    T          ordinary{};
+    auto       ordinary_decoder = make_decoder(wire);
+    const auto ordinary_result  = ordinary_decoder(as_named_map{ordinary});
+    check(ordinary_result, ordinary);
 
     for (std::size_t cut = 0; cut <= wire.size(); ++cut) {
         CAPTURE(cut);
@@ -77,13 +90,9 @@ template <typename T, typename Equal> void check_named_map_splits(std::span<cons
 
         REQUIRE(operation.done());
         const auto result = operation.result();
-        REQUIRE(result.has_value() == expected_result.has_value());
-        if (expected_result) {
+        check(result, actual);
+        if (result)
             CHECK(*result == wire.size());
-            CHECK(equal(actual, expected));
-        } else {
-            CHECK(result.error() == expected_result.error());
-        }
     }
 
     // One byte per resume: every field and element boundary suspends.
@@ -99,12 +108,17 @@ template <typename T, typename Equal> void check_named_map_splits(std::span<cons
     }
 
     REQUIRE(operation.done());
-    const auto result = operation.result();
-    REQUIRE(result.has_value() == expected_result.has_value());
-    if (expected_result)
-        CHECK(equal(actual, expected));
-    else
-        CHECK(result.error() == expected_result.error());
+    check(operation.result(), actual);
+}
+
+// The wire decodes to sent
+template <typename T, typename Equal> void check_named_map_value(std::span<const std::byte> wire, const T &sent, Equal equal) {
+    check_named_map_splits<T>(wire, &sent, status_code::success, equal);
+}
+
+// The wire is refused with this status
+template <typename T> void check_named_map_status(std::span<const std::byte> wire, status_code status) {
+    check_named_map_splits<T>(wire, nullptr, status, [](const T &, const T &) { return false; });
 }
 
 std::string repeat(std::string_view hex, std::size_t count) {
@@ -135,7 +149,7 @@ TEST_SUITE("cbor_wire/resumable") {
         };
         const auto wire = encode_named(sent);
 
-        check_named_map_splits<named_station>(wire, std::equal_to<>{});
+        check_named_map_value(std::span<const std::byte>{wire}, sent, std::equal_to<>{});
 
         // The original failure: pieces smaller than a field duplicated it.
         std::vector<std::byte> input;
@@ -160,11 +174,17 @@ TEST_SUITE("cbor_wire/resumable") {
             .position = as_named_group<named_position>{named_position{.lat = 59.3, .lon = 18.1}},
             .battery  = 87,
         };
-        check_named_map_splits<named_reading>(encode_named(reading), same_reading);
+        check_named_map_value(std::span<const std::byte>{encode_named(reading)}, reading, same_reading);
 
         named_extended extended{.id = "device"};
         extended.extra.value_ = {{"k1", "v1"}, {"k2", std::string(30, 'v')}};
-        check_named_map_splits<named_extended>(encode_named(extended), same_extended);
+        check_named_map_value(std::span<const std::byte>{encode_named(extended)}, extended, same_extended);
+
+        // {_ "name": "a", "values": [1], "id": 1}, a map of indefinite length
+        // clang-format off
+        const auto indefinite = to_bytes("bf" "646e616d65" "6161" "6676616c756573" "8101" "626964" "01" "ff");
+        // clang-format on
+        check_named_map_value(std::span<const std::byte>{indefinite}, named_station{"a", {1}, std::nullopt, 1}, std::equal_to<>{});
     }
 
     TEST_CASE("named maps report the ordinary status for malformed entries at every split") {
@@ -174,22 +194,21 @@ TEST_SUITE("cbor_wire/resumable") {
         const std::string no_values = "6676616c756573" "80";
         const std::string id_1      = "626964" "01";
 
-        const std::string cases[] = {
-            "a1" "637a7a7a" "01",                                   // unknown key "zzz"
-            "a4" + name_a + no_values + id_1 + "626964" "02",       // duplicate "id"
-            "a1" + id_1,                                            // missing required fields
-            "a4" + name_a + no_values + id_1 + "646e6f7465" "f6",   // explicit null for optional "note"
-            "80",                                                   // not a map
-            "a1" "01" "01",                                         // integer key
-            "bf" + name_a + "6676616c756573" "8101" + id_1 + "ff",  // indefinite map
-            "a1" "74" + repeat("6b", 20) + "01",                    // 20-byte key, longer than every field
+        const std::pair<std::string, status_code> cases[] = {
+            {"a1" "637a7a7a" "01",                                 status_code::unexpected_group_size},       // unknown key "zzz"
+            {"a4" + name_a + no_values + id_1 + "626964" "02",     status_code::unexpected_group_size},       // duplicate "id"
+            {"a1" + id_1,                                          status_code::unexpected_group_size},       // missing required fields
+            {"a4" + name_a + no_values + id_1 + "646e6f7465" "f6", status_code::no_match_for_tstr_on_buffer}, // explicit null for optional "note"
+            {"80",                                                 status_code::no_match_for_map_on_buffer},  // not a map
+            {"a1" "01" "01",                                       status_code::no_match_for_tstr_on_buffer}, // integer key
+            {"a1" "74" + repeat("6b", 20) + "01",                  status_code::unexpected_group_size},       // 20-byte key, longer than every field
         };
         // clang-format on
-        for (const auto &hex : cases) {
+        for (const auto &[hex, status] : cases) {
             CAPTURE(hex);
             const auto wire = to_bytes(hex);
             REQUIRE_FALSE(wire.empty());
-            check_named_map_splits<named_station>(wire, std::equal_to<>{});
+            check_named_map_status<named_station>(wire, status);
         }
     }
 
@@ -271,7 +290,8 @@ TEST_SUITE("cbor_wire/resumable") {
     TEST_CASE("named map extension values with duplicate keys are rejected at every split") {
         // {"id": "a", "k": "v", "k": "w"}
         // clang-format off
-        check_named_map_splits<named_extended>(to_bytes("a3" "6269646161" "616b6176" "616b6177"), same_extended);
+        const auto duplicate = to_bytes("a3" "6269646161" "616b6176" "616b6177");
+        check_named_map_status<named_extended>(duplicate, status_code::unexpected_group_size);
         // clang-format on
     }
 }
