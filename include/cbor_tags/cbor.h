@@ -496,6 +496,12 @@ template <typename... T> wrap_as_array(T &&...) -> wrap_as_array<T...>;
 // Deduction guide for tuple
 template <typename... TupleArgs> wrap_as_array(std::tuple<TupleArgs...> &) -> wrap_as_array<std::tuple<TupleArgs...> &>;
 
+namespace detail {
+// Every place of the wrapper is something of the caller's. A decoder needs
+// that: what it writes into a kept temporary is gone with the wrapper
+template <typename... T> inline constexpr bool wrap_as_array_holds_lvalues = (std::is_lvalue_reference_v<T> && ...);
+} // namespace detail
+
 struct as_indefinite_array {};
 struct end_array {};
 

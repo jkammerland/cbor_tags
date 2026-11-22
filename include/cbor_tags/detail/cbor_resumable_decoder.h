@@ -16,6 +16,9 @@ namespace cbor::tags::detail {
 template <typename T> inline constexpr bool    resumable_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_wrap_array<wrap_as_array<T...>> = true;
 
+template <typename T> inline constexpr bool    resumable_wrap_array_holds_lvalues                      = false;
+template <typename... T> inline constexpr bool resumable_wrap_array_holds_lvalues<wrap_as_array<T...>> = wrap_as_array_holds_lvalues<T...>;
+
 // Keep capability detection separate from the dispatch that uses it.
 template <typename Decoder, typename T>
 concept HasRvalueTagDecode = requires(Decoder &decoder, T &tag) { decoder.decode(std::move(tag)); };
@@ -606,6 +609,9 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
             check_progress<indefinite_value_t<U>>();
             return bounded_container(value, 0, std::numeric_limits<std::uint64_t>::max());
         } else if constexpr (resumable_wrap_array<U>) {
+            static_assert(resumable_wrap_array_holds_lvalues<U>,
+                          "a wrap_as_array to decode into holds lvalues only, a temporary in it would take the value and be gone");
+
             // The places themselves. Handing on the tuple a wrapper spreads
             // would decode into a copy of it
             return group(std::apply([](auto &...places) { return std::tie(places...); }, value.values_), true);
