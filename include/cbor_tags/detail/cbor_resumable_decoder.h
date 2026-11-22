@@ -184,17 +184,58 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
         return await_retry(value);
     }
 
+    // A string must not be appended to the bytes it is read from, they would
+    // move under the reader. The same check as the ordinary decoder's
+    template <typename T> static bool overlaps(const T &value, std::span<const std::byte> input) {
+        if constexpr (input_output_alias_check_option_v<Options> && std::ranges::contiguous_range<const T> &&
+                      std::ranges::sized_range<const T>) {
+            if (std::ranges::empty(value) || input.empty())
+                return false;
+
+            const void *value_begin = std::ranges::data(value);
+            const void *value_end   = std::ranges::data(value) + std::ranges::size(value);
+            const void *input_begin = input.data();
+            const void *input_end   = input.data() + input.size();
+
+            const auto before = std::less<const void *>{};
+            return before(input_begin, value_end) && before(value_begin, input_end);
+        } else {
+            static_cast<void>(value);
+            static_cast<void>(input);
+            return false;
+        }
+    }
+
+    // Asked before anything is reserved or appended. Storage in pieces is only
+    // known by the piece the reader is in, the rest is compared as it is read
+    template <typename T> bool destination_is_input(const T &value) {
+        if constexpr (input_output_alias_check_option_v<Options>) {
+            if (resumable_source_access::storage_address(source_) == static_cast<const void *>(std::addressof(value)))
+                return true;
+            if (const auto extent = resumable_source_access::storage_extent(source_); extent && overlaps(value, *extent))
+                return true;
+
+            const auto window = resumable_source_access::borrow_window(source_, decoder_.reader_.position_);
+            return window && overlaps(value, *window);
+        } else {
+            static_cast<void>(value);
+            return false;
+        }
+    }
+
     // Bulk string transfer uses the same destination appender as ordinary decoding.
     template <typename T> resumable<status_code> payload(T &value, std::uint64_t length, appender<T> &append) {
-        drain_payload(value, length, append);
-        if (length == 0)
-            return status_code::success;
+        const auto status = drain_payload(value, length, append);
+        if (status != status_code::success || length == 0)
+            return status;
         return await_payload(value, length, append);
     }
 
-    template <typename T> void drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
+    template <typename T> status_code drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
         while (length != 0 && !empty()) {
             if (const auto span = resumable_source_access::borrow_window(source_, decoder_.reader_.position_); span && !span->empty()) {
+                if (overlaps(value, *span))
+                    return status_code::input_output_aliasing;
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, span->size()));
                 append(value, span->first(count));
                 resumable_source_access::consume_window(source_, decoder_.reader_.position_, count);
@@ -216,13 +257,16 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
             }
             commit();
         }
+        return status_code::success;
     }
 
     // Allocate a frame only when the current payload actually needs more input.
     template <typename T> resumable<status_code> await_payload(T &value, std::uint64_t length, appender<T> &append) {
         while (length != 0) {
             co_await wait();
-            drain_payload(value, length, append);
+            const auto status = drain_payload(value, length, append);
+            if (status != status_code::success)
+                co_return status;
         }
         co_return status_code::success;
     }
@@ -1259,6 +1303,11 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
             if (header.indefinite || header.size != value.size())
                 co_return status_code::unexpected_group_size;
         }
+        if constexpr (IsString<T>) {
+            if (destination_is_input(value))
+                co_return status_code::input_output_aliasing;
+        }
+
         appender<T> append;
         // The caller owns allocation limits. Appenders opt into element-count
         // reservation; some containers reserve descriptors rather than elements.

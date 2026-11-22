@@ -742,4 +742,78 @@ TEST_SUITE("roundtrip/resumable_storage") {
         CHECK(*operation.result() == wire.size());
         CHECK(std::ranges::equal(view.values(), expected));
     }
+
+    // The ordinary decoder ends with input_output_aliasing for these. A string
+    // that is appended to the bytes it is read from moves them under the reader
+    TEST_CASE("a byte string is not decoded into the storage it is read from") {
+        // 58 28 and 40 payload bytes
+        std::vector<std::byte> wire{std::byte{0x58}, std::byte{0x28}};
+        for (int index = 0; index < 40; ++index)
+            wire.push_back(static_cast<std::byte>(index));
+        const std::vector<std::byte> payload(wire.begin() + 2, wire.end());
+
+        SUBCASE("the vector the decoder reads from") {
+            auto buffer = wire;
+
+            auto decoder   = make_resumable_decoder(buffer);
+            auto operation = decoder(buffer);
+
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::input_output_aliasing);
+            CHECK(buffer == wire);
+        }
+
+        SUBCASE("a chunk that borrows the destination's bytes") {
+            auto                                   buffer = wire;
+            std::deque<std::span<const std::byte>> input{std::span<const std::byte>{buffer}};
+
+            auto decoder   = make_resumable_decoder(input);
+            auto operation = decoder(buffer);
+
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::input_output_aliasing);
+            CHECK(buffer == wire);
+        }
+
+        SUBCASE("a span over the destination's bytes, before the payload is there") {
+            // Only the 58 28 is input so far, nothing of the payload to compare with yet
+            auto                       buffer = wire;
+            std::span<const std::byte> input{buffer.data(), 2};
+
+            auto decoder   = make_resumable_decoder(input);
+            auto operation = decoder(buffer);
+
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::input_output_aliasing);
+            CHECK(buffer == wire);
+        }
+
+        SUBCASE("storage of its own is filled as before") {
+            auto                   buffer = wire;
+            std::vector<std::byte> decoded;
+
+            auto decoder   = make_resumable_decoder(buffer);
+            auto operation = decoder(decoded);
+
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == wire.size());
+            CHECK(decoded == payload);
+        }
+
+        SUBCASE("unchecked_aliasing_decoder_options leaves the check out") {
+            auto                   buffer = wire;
+            std::vector<std::byte> decoded;
+
+            auto decoder   = make_resumable_decoder_with_options<unchecked_aliasing_decoder_options>(buffer);
+            auto operation = decoder(decoded);
+
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(decoded == payload);
+        }
+    }
 }

@@ -195,6 +195,11 @@ input or output space is safe, but the producer should wait for a storage change
 rather than busy-loop. Running out of input or output space never ends an
 operation by itself.
 
+Decode into storage other than the input. A text or byte string destination
+whose bytes are the decoder's input ends the operation with
+`status_code::input_output_aliasing`, as with an ordinary decoder; see
+[unchecked input/output aliasing](options.md#unchecked-inputoutput-aliasing).
+
 ## Borrow decoded strings and items
 
 A resumable decoder can return views into its input instead of copying. Name
