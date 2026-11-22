@@ -84,6 +84,6 @@ int main() {
 - [Caller storage and abbreviated countersignatures](../examples/34_experimental_cwt_abbreviated_countersignature.cpp).
 - [Borrowed countersignature chains](../examples/35_experimental_cwt_countersignature_chain.cpp).
 
-Chains explicitly select recursive headers; singleton/list inputs normalize to a nonempty collection. Application extra fields must not recursively contain the same header model.
+Chains explicitly select recursive headers; singleton/list inputs normalize to a nonempty collection. Application extra fields must not recursively contain the same header model. How deep a received chain nests is up to its sender: bound it as for any recursive destination, see [Recursive Decode Paths](decoder_resource_limits.md#recursive-decode-paths).
 
 Legacy full verification requires `verify_legacy_countersignature`: on Sign1 it does not bind the original signature. Legacy generation, abbreviated legacy operations, and automatic fallback to legacy verification are unsupported; see [RFC 9338](https://www.rfc-editor.org/rfc/rfc9338.html).
