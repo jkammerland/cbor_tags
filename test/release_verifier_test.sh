@@ -130,6 +130,17 @@ expect_failure "cmake-version-mismatch" "does not match CMake project version" F
 expect_failure "vcpkg-version-mismatch" "does not match vcpkg.json version" FAKE_VCPKG_VERSION=0.21.0
 expect_failure "conan-version-mismatch" "does not match conanfile.py version" FAKE_CONAN_VERSION=0.21.0
 
+# A branch or a tag can be called origin/master as well, and Git resolves the
+# short name to it before the remote-tracking ref. The guide's commands are
+# pasted, so they name the ref in full
+release_guide="${repo_root}/doc/releases.md"
+grep -F -- '--trusted-ref refs/remotes/origin/master' "${release_guide}" >/dev/null
+if sed 's#refs/remotes/origin/master##g' "${release_guide}" | grep -n 'origin/master' >&2; then
+    echo "guide-full-trusted-ref: doc/releases.md names origin/master without refs/remotes/" >&2
+    exit 1
+fi
+echo "guide-full-trusted-ref: OK"
+
 invalid_name_output="${test_root}/invalid-name-output"
 if env PATH="${fake_bin}:${PATH}" bash "${repo_root}/scripts/release.sh" verify-tag --tag release-0.22.0 >"${invalid_name_output}" 2>&1; then
     echo "invalid-tag-name: verifier unexpectedly succeeded" >&2

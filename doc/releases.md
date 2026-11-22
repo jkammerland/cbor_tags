@@ -89,7 +89,7 @@ symlinks and noncanonical checksum records.
      "+refs/heads/master:refs/remotes/origin/master"
    bash scripts/release.sh verify-tag \
      --tag vX.Y.Z \
-     --trusted-ref origin/master
+     --trusted-ref refs/remotes/origin/master
    git push origin refs/tags/vX.Y.Z
    ```
 
@@ -115,14 +115,14 @@ symlinks and noncanonical checksum records.
    tag_object="$(git rev-parse refs/tags/vX.Y.Z)"
    commit="$(git rev-list -n 1 refs/tags/vX.Y.Z)"
    tooling_worktree="$(mktemp -d /tmp/cbor-tags-release-tools.XXXXXX)"
-   git worktree add --detach "${tooling_worktree}" origin/master
+   git worktree add --detach "${tooling_worktree}" refs/remotes/origin/master
    cd "${tooling_worktree}"
    source_worktree="$(mktemp -d /tmp/cbor-tags-release-source.XXXXXX)"
    git worktree add --detach "${source_worktree}" "${commit}"
 
    bash scripts/release.sh verify-tag \
      --tag vX.Y.Z \
-     --trusted-ref origin/master
+     --trusted-ref refs/remotes/origin/master
 
    gh run download RUN_ID \
      --repo jkammerland/cbor_tags \
