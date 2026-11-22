@@ -47,7 +47,7 @@ int main() {
 
 | Choice | Behavior |
 |---|---|
-| Plain destination | Its label must be present. |
+| Plain destination | Its label must be present. The decoded value replaces what the destination held. |
 | Optional destination | Missing labels clear it after successful decoding; a present value decodes the underlying type. |
 | Unknown label | Its value is skipped and omitted on re-encoding. |
 | Duplicate label | Rejected, including unknown input labels; duplicate schema labels fail compilation. |

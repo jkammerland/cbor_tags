@@ -32,6 +32,16 @@ template <typename Encoder, typename Map> void encode_fields(Encoder &enc, const
     });
 }
 
+// An empty value of the destination's type, with its allocator where it has one
+template <typename Value> Value empty_like(const Value &current) {
+    if constexpr (requires { Value{current.get_allocator()}; }) {
+        return Value{current.get_allocator()};
+    } else {
+        static_cast<void>(current);
+        return Value{};
+    }
+}
+
 template <typename Decoder, typename Observer, typename ReadValue, typename... Bindings>
 status_code decode_fields(Decoder &dec, field_map<Bindings...> &map, major_type major, std::byte info, Observer &&observe,
                           ReadValue &&read_value) try {
@@ -70,6 +80,14 @@ status_code decode_fields(Decoder &dec, field_map<Bindings...> &map, major_type 
                 if constexpr (field_optional<Value>) {
                     typename Value::value_type decoded{};
                     result = read_value(*label, decoded);
+                    if (result == status_code::success) {
+                        *binding.value = std::move(decoded);
+                    }
+                } else if constexpr (std::default_initializable<Value> && std::assignable_from<Value &, Value>) {
+                    // What is there is replaced, as for an optional. Decoding
+                    // in place would append to a string or a container
+                    auto decoded = empty_like(*binding.value);
+                    result       = read_value(*label, decoded);
                     if (result == status_code::success) {
                         *binding.value = std::move(decoded);
                     }
