@@ -176,15 +176,20 @@ verify_checksums() {
 write_release_manifest() {
     local package_dir="$1" version="$2" repository="$3" tag="$4" tag_object="$5" commit="$6"
     validate_release_identity "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}"
-    printf 'format=cbor_tags-release-manifest-v1\nrepository=%s\nversion=%s\ntag=%s\ntag_object=%s\ncommit=%s\nasset_count=10\n' \
-        "${repository}" "${version}" "${tag}" "${tag_object}" "${commit}"
+
+    # One list for the count and for the records, so they cannot disagree.
+    local manifest_assets asset_count
+    manifest_assets="$({ expected_unsigned_assets "${version}"; printf '%s\n' cbor_tags-release-public-key.asc; } | LC_ALL=C sort)"
+    asset_count="$(awk 'END { print NR }' <<<"${manifest_assets}")"
+    printf 'format=cbor_tags-release-manifest-v1\nrepository=%s\nversion=%s\ntag=%s\ntag_object=%s\ncommit=%s\nasset_count=%s\n' \
+        "${repository}" "${version}" "${tag}" "${tag_object}" "${commit}" "${asset_count}"
     (
         cd -- "${package_dir}"
         local asset
         while IFS= read -r asset; do
             [[ -f "${asset}" && ! -L "${asset}" ]] || die "manifest assets must be regular non-symlink files: ${asset}"
             write_release_checksum sha256 "${asset}" || die "failed to hash manifest asset ${asset}"
-        done < <({ expected_unsigned_assets "${version}"; printf '%s\n' cbor_tags-release-public-key.asc; } | LC_ALL=C sort)
+        done <<<"${manifest_assets}"
     )
 }
 

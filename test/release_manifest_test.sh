@@ -89,6 +89,18 @@ expect_failure() {
 }
 
 for verifier_path in "${PATH}" "${portable_bin}"; do
+# The count in the header is the number of records below it, also for a set of
+# assets that is not today's ten
+(
+    expected_unsigned_assets() {
+        printf '%s\n' "cbor_tags-$1.tar.gz" "cbor_tags-$1.zip"
+    }
+    two_and_the_key="$(write_release_manifest "${baseline}" "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}")"
+    [[ "$(grep -c '^[0-9a-f]\{64\}  ' <<<"${two_and_the_key}")" == 3 ]]
+    grep -Fx 'asset_count=3' <<<"${two_and_the_key}" >/dev/null
+)
+echo 'manifest asset count follows the asset list: OK'
+
 for fixture_verifier in verify_signed_assets verify_generated; do
 reset_fixture
 verify_fixture
