@@ -114,4 +114,37 @@ TEST_SUITE("cbor_wire/cwt") {
         CHECK_EQ(both.error(), status_code::error);
     }
 
+    TEST_CASE("every signature of a message with many body labels verifies") {
+        // 19 hh ll 00 for the labels 1000 to 2999
+        std::string body_labels;
+        for (unsigned label = 1000; label < 3000; ++label) {
+            static constexpr std::string_view digits{"0123456789abcdef"};
+            body_labels += "19";
+            for (const auto shift : {12U, 8U, 4U, 0U}) {
+                body_labels += digits[(label >> shift) & 0xfU];
+            }
+            body_labels += "00";
+        }
+
+        // [h'', {2,000 labels}, h'a0', [100 times [h'a10126', {}, h'51']]]
+        std::string hex = "8440b907d0" + body_labels + "41a09864";
+        for (int signer = 0; signer < 100; ++signer) {
+            hex += "8343a10126a04151";
+        }
+        const auto bytes = to_bytes(hex);
+
+        cose_sign message;
+        auto      decoder = make_decoder<codec::cwt>(bytes);
+        auto      decoded = decoder(message);
+        REQUIRE(decoded);
+        REQUIRE_EQ(message.signatures.size(), 100U);
+
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, message));
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, message, std::size_t{99}));
+
+        // An empty signature at the end is still found
+        message.signatures.back().signature.clear();
+        CHECK_FALSE(verify_sign<signature_presence_es256_backend>(nullptr, message));
+    }
+
 } // TEST_SUITE("cbor_wire/cwt")
