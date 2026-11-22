@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cbor_tags/cbor_traversal.h>
+#include <cbor_tags/codec.h>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -21,6 +22,32 @@
 using namespace cbor::tags;
 
 namespace {
+
+// A sensor sends whole centi-degrees, so a float is an integer on its wire
+template <typename Self> struct centi_degrees : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(float &degrees) {
+        std::int64_t centi{};
+        const auto   status = static_cast<Self &>(*this).decode(centi);
+        if (status == status_code::success)
+            degrees = static_cast<float>(centi) / 100.0F;
+        return status;
+    }
+};
+
+// Ids are 1000 lower on the wire
+template <typename Self> struct offset_ids : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(std::uint64_t &id) {
+        std::uint32_t wire{};
+        const auto    status = static_cast<Self &>(*this).decode(wire);
+        if (status == status_code::success)
+            id = std::uint64_t{wire} + 1000;
+        return status;
+    }
+};
 
 template <typename T> std::string event_name(const T &value) {
     if constexpr (std::same_as<T, as_array_any> || std::same_as<T, as_map_any> || std::same_as<T, as_text_any> ||
@@ -547,6 +574,35 @@ TEST_SUITE("cbor_wire/traversal") {
         positive remaining{};
         REQUIRE(dec(remaining));
         CHECK_EQ(remaining, 2);
+    }
+
+    TEST_CASE("validation and walking read the wire, not what a decode(T &) codec makes of a value") {
+        // [1.5F, 7]
+        const auto input = to_bytes("82fa3fc0000007");
+
+        // Through centi_degrees a float is an integer, and fa 3f c0 00 00 is none
+        auto sensor_decoder = make_decoder<centi_degrees>(input);
+        auto sensor_result  = validate_item(sensor_decoder);
+        CHECK(sensor_result);
+        CHECK(sensor_decoder.tell() == input.cend());
+
+        std::vector<float>    floats;
+        std::vector<positive> positives;
+        const auto            collect = [&](const auto &value, const auto &) {
+            using value_type = std::remove_cvref_t<decltype(value)>;
+            if constexpr (std::same_as<value_type, float>) {
+                floats.push_back(value);
+            } else if constexpr (std::same_as<value_type, positive>) {
+                positives.push_back(value);
+            }
+        };
+
+        // Through offset_ids the 7 would come out as 1007
+        auto id_decoder = make_decoder<offset_ids>(input);
+        auto id_result  = walk_item(id_decoder, collect);
+        REQUIRE(id_result);
+        CHECK(floats == std::vector<float>{1.5F});
+        CHECK(positives == std::vector<positive>{7});
     }
 
 } // TEST_SUITE("cbor_wire/traversal")

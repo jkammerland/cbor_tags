@@ -71,13 +71,20 @@ namespace detail {
 using catch_all_variant = std::variant<positive, negative, as_text_any, as_bstr_any, as_array_any, as_map_any, as_tag_any, float16_t, float,
                                        double, bool, std::nullptr_t, simple, indefinite_break>;
 
+struct walk_token_access {
+    template <typename Decoder>
+    static status_code decode(Decoder &decoder, catch_all_variant &value, major_type major, std::byte additional_info) {
+        return decoder.decode_wire_token(value, major, additional_info);
+    }
+};
+
 // Token interpretation is shared by synchronous and suspended traversal.
 template <typename Decoder> status_code read_walk_token(Decoder &decoder, catch_all_variant &value, bool strict_validation) {
     const auto [major, additional_info] = decoder.read_initial_byte();
     if (additional_info >= std::byte{28} && additional_info <= std::byte{30}) {
         return status_code::invalid_additional_info;
     }
-    const auto status = decoder.decode(value, major, additional_info);
+    const auto status = walk_token_access::decode(decoder, value, major, additional_info);
     if (status != status_code::success) {
         return detail::is_retriable_variant_mismatch(status) ? status_code::malformed_structure : status;
     }

@@ -49,6 +49,8 @@
 namespace cbor::tags {
 
 namespace detail {
+struct walk_token_access;
+
 // One address per type, to tell types apart without RTTI
 template <typename T> inline constexpr char decoded_type_token{};
 
@@ -2019,6 +2021,14 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     [[no_unique_address]] std::conditional_t<(detail::HasDecodedCborTagObserver<Decoders<self_t>> || ...), std::optional<size_type>,
                                              no_tag_observer> reread_tag_end_{};
 
+    // One item as it is on the wire, for walk_item and validate_item. A codec
+    // that only has decode(T &) says what a value means, the wire stays as it is
+    friend struct detail::walk_token_access;
+    template <IsVariant Variant> constexpr status_code decode_wire_token(Variant &value, major_type major, byte additionalInfo) {
+        std::optional<std::uint64_t> tag;
+        return decode_variant<false>(value, major, additionalInfo, tag);
+    }
+
     // A decode(T &) codec the decoder stepped back for and that is still running
     struct first_byte_call {
         const void            *type;
@@ -2184,7 +2194,8 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     }
 
     // Keep std::variant on the original pack-based fast path; generic trait-backed variant dispatch is slower here.
-    template <typename... T>
+    // FirstByteCodecs is off for walk_item and validate_item, see decode_wire_token
+    template <bool FirstByteCodecs = true, typename... T>
     constexpr status_code decode_variant(std::variant<T...> &value, major_type major, byte additionalInfo,
                                          std::optional<std::uint64_t> &tag) {
         using namespace detail;
@@ -2213,7 +2224,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         // an alternative read by a decode(T &) codec looks at bytes again, so
         // variants without one keep no track of this. A variant inside a
         // variant gets here with the tag number already read
-        constexpr bool steps_back = (steps_back_to_first_byte<T>() || ...);
+        constexpr bool steps_back = FirstByteCodecs && (steps_back_to_first_byte<T>() || ...);
         variant_start  start{steps_back ? current_offset() : size_type{0}, steps_back && tag.has_value(), false};
 
         auto try_decode = [this, major, additionalInfo, &start, &value, &tag, &saw_incomplete,
@@ -2242,7 +2253,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             raw_type    decoded_value;
             status_code result;
             if constexpr (IsVariant<raw_type>) {
-                result = this->decode_variant(decoded_value, major, additionalInfo, tag);
+                result = this->template decode_variant<FirstByteCodecs>(decoded_value, major, additionalInfo, tag);
             } else if constexpr (IsTag<raw_type>) {
                 if (!tag) {
                     std::uint64_t decoded_tag{};
@@ -2253,9 +2264,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     }
                     tag = decoded_tag;
                 }
-                result = this->decode_after_tag(decoded_value, *tag, additionalInfo);
+                if constexpr (FirstByteCodecs) {
+                    result = this->decode_after_tag(decoded_value, *tag, additionalInfo);
+                } else {
+                    result = this->decode(decoded_value, *tag);
+                }
             } else {
-                result = this->decode_after_header(decoded_value, major, additionalInfo);
+                if constexpr (FirstByteCodecs) {
+                    result = this->decode_after_header(decoded_value, major, additionalInfo);
+                } else {
+                    result = this->decode(decoded_value, major, additionalInfo);
+                }
             }
 
             if (result == status_code::success) {
@@ -2297,7 +2316,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         return status_code::success;
     }
 
-    template <IsVariant Variant>
+    template <bool FirstByteCodecs = true, IsVariant Variant>
     constexpr status_code decode_variant(Variant &value, major_type major, byte additionalInfo, std::optional<std::uint64_t> &tag) {
         using namespace detail;
         using variant_type = std::remove_cvref_t<Variant>;
@@ -2325,7 +2344,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         status_code hard_error     = status_code::success;
 
         // Where the alternatives start, see the std::variant overload
-        constexpr bool steps_back = steps_back_to_first_byte<variant_type>();
+        constexpr bool steps_back = FirstByteCodecs && steps_back_to_first_byte<variant_type>();
         variant_start  start{steps_back ? current_offset() : size_type{0}, steps_back && tag.has_value(), false};
 
         auto try_decode = [this, major, additionalInfo, &start, &value, &tag, &saw_incomplete,
@@ -2354,7 +2373,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             raw_type    decoded_value;
             status_code result;
             if constexpr (IsVariant<raw_type>) {
-                result = this->decode_variant(decoded_value, major, additionalInfo, tag);
+                result = this->template decode_variant<FirstByteCodecs>(decoded_value, major, additionalInfo, tag);
             } else if constexpr (IsTag<raw_type>) {
                 if (!tag) {
                     std::uint64_t decoded_tag{};
@@ -2365,9 +2384,17 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                     }
                     tag = decoded_tag;
                 }
-                result = this->decode_after_tag(decoded_value, *tag, additionalInfo);
+                if constexpr (FirstByteCodecs) {
+                    result = this->decode_after_tag(decoded_value, *tag, additionalInfo);
+                } else {
+                    result = this->decode(decoded_value, *tag);
+                }
             } else {
-                result = this->decode_after_header(decoded_value, major, additionalInfo);
+                if constexpr (FirstByteCodecs) {
+                    result = this->decode_after_header(decoded_value, major, additionalInfo);
+                } else {
+                    result = this->decode(decoded_value, major, additionalInfo);
+                }
             }
 
             if (result == status_code::success) {
