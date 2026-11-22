@@ -108,7 +108,6 @@ struct resumable_access {
 // Hooks only call the context and retry(value). Library code gets the rest here
 struct resumable_context_access {
     template <typename Context> static auto       &source(Context &context) noexcept { return context.source(); }
-    template <typename Context> static auto       &encoder(Context &context) noexcept { return context.encoder(); }
     template <typename Context> static auto       &decoder(Context &context) noexcept { return context.decoder(); }
     template <typename Context> static std::size_t offset(const Context &context) { return context.offset(); }
     template <typename Context> static auto        remaining_input(const Context &context) { return context.remaining_input(); }
