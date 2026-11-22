@@ -310,10 +310,12 @@ namespace ct = cbor::tags;
 
 std::vector<int> incoming{1, 2};
 std::vector<std::byte> input;
-ct::make_encoder(input)(incoming);
+auto enc = ct::make_encoder(input);
+auto result = enc(incoming);
 
 std::vector<int> destination{9, 8, 7};
-auto result = ct::make_decoder(input)(ct::as_bounded_size<2, 2>(destination));
+auto dec = ct::make_decoder(input);
+result = dec(ct::as_bounded_size<2, 2>(destination));
 // result succeeds; destination is now {9, 8, 7, 1, 2}.
 // Its final size may exceed the configured maximum because that maximum
 // constrained the incoming CBOR array.
