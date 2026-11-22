@@ -79,6 +79,31 @@ TEST_SUITE("cbor_wire/cwt") {
         }
     }
 
+    TEST_CASE("a label in both the protected and the unprotected header is refused") {
+        const auto verify = [](std::string_view hex) {
+            const auto bytes = to_bytes(hex);
+
+            cose_sign1 message;
+            auto       decoder = make_decoder<codec::cwt>(bytes);
+            auto       decoded = decoder(message);
+            REQUIRE(decoded);
+            return verify_sign1<signature_presence_es256_backend>(nullptr, message);
+        };
+
+        // [h'{1: -7}', {4: h'02'}, h'a0', h'51']: the kid is only in the unprotected header
+        CHECK(verify("8443a10126a104410241a04151"));
+
+        // [h'{1: -7, 4: h'01'}', {4: h'02'}, ...]: a kid in both
+        const auto known = verify("8446a20126044101a104410241a04151");
+        REQUIRE_FALSE(known);
+        CHECK_EQ(known.error(), status_code::error);
+
+        // [h'{1: -7, 99: 1}', {99: 2}, ...]: a label the library does not know, in both
+        const auto unknown = verify("8446a20126186301a118630241a04151");
+        REQUIRE_FALSE(unknown);
+        CHECK_EQ(unknown.error(), status_code::error);
+    }
+
     TEST_CASE("a header with many labels verifies and a label in both buckets is still refused") {
         // 19 hh ll 00 for every label: the label in 2 bytes, 0 as its value
         const auto labels = [](unsigned first, unsigned count) {
