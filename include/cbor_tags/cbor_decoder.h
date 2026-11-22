@@ -49,6 +49,9 @@
 namespace cbor::tags {
 
 namespace detail {
+// One address per type, to tell types apart without RTTI
+template <typename T> inline constexpr char decoded_type_token{};
+
 template <typename T> constexpr bool unsigned_value_fits(std::uint64_t value) {
     return value <= static_cast<std::uint64_t>(std::numeric_limits<T>::max());
 }
@@ -1357,7 +1360,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         using customization = detail::codec_payload_mixin_customization<self_t>;
         if constexpr (customization::template wants_first_byte<std::remove_cvref_t<T>, detail::payload_decode_context::header>()) {
             reader_.seek(-1);
-            return this->decode(value);
+            return this->decode_from_first_byte(value);
         } else {
             return this->decode(value, major, additionalInfo);
         }
@@ -1380,10 +1383,10 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
                 } guard{reread_tag_end_, std::exchange(reread_tag_end_, current_offset())};
 
                 reader_.seek(-1 - tag_bytes);
-                return this->decode(value);
+                return this->decode_from_first_byte(value);
             } else {
                 reader_.seek(-1 - tag_bytes);
-                return this->decode(value);
+                return this->decode_from_first_byte(value);
             }
         } else {
             return this->decode(value, tag);
@@ -2015,6 +2018,34 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     struct no_tag_observer {};
     [[no_unique_address]] std::conditional_t<(detail::HasDecodedCborTagObserver<Decoders<self_t>> || ...), std::optional<size_type>,
                                              no_tag_observer> reread_tag_end_{};
+
+    // A decode(T &) codec the decoder stepped back for and that is still running
+    struct first_byte_call {
+        const void            *type;
+        size_type              offset;
+        const first_byte_call *outer;
+    };
+    const first_byte_call *first_byte_calls_{};
+
+    // The reader stands on the value's first byte again. A codec that asks for
+    // its own type at the byte it started on, through an optional or a variant
+    // say, would be called from here without end
+    template <typename T> constexpr status_code decode_from_first_byte(T &value) {
+        const first_byte_call call{&detail::decoded_type_token<std::remove_cvref_t<T>>, current_offset(), first_byte_calls_};
+        for (const auto *outer = call.outer; outer != nullptr; outer = outer->outer) {
+            if (outer->offset == call.offset && outer->type == call.type) {
+                return status_code::error;
+            }
+        }
+
+        struct restore_calls {
+            const first_byte_call *&slot;
+            const first_byte_call  *previous;
+            constexpr ~restore_calls() { slot = previous; }
+        } guard{first_byte_calls_, std::exchange(first_byte_calls_, &call)};
+
+        return this->decode(value);
+    }
 
     // 24 to 27 say the tag number takes 1, 2, 4 or 8 more bytes
     [[nodiscard]] static constexpr size_type tag_number_bytes(byte additionalInfo) noexcept {

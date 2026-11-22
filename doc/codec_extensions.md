@@ -137,7 +137,9 @@ or tag by the time it selects a value. It calls the codec's form for that point
 when available, or steps back and calls `decode(T&)`. Transparent owning wrappers
 such as `std::unique_ptr` and `std::indirect` also dispatch to the payload's codec.
 Each wrapper's type restrictions still apply; for example, unique-pointer variant
-alternatives require codec-independent wire shapes.
+alternatives require codec-independent wire shapes. A variant chooses its
+alternative from the major type in the first byte, so a codec for an alternative
+keeps the major type that `T` has without the codec.
 
 Nested variants select their alternatives recursively in both ordinary and
 resumable decoding. A codec for an inner variant applies when that variant is
@@ -165,6 +167,40 @@ struct centi_degrees : cbor::tags::codec::decoder_base<Self> {
 std::optional<float> temperature;
 auto dec = cbor::tags::make_decoder<centi_degrees>(bytes);
 auto result = dec(temperature);
+```
+
+`centi_degrees` reads an integer, not a `float`. A codec's `decode(T&)` must not
+ask the decoder for a `T` at the byte it started on, for example through a
+`std::optional<T>` or a variant with `T` among its alternatives. The decoder would
+step back and call the codec again, so that read ends with `status_code::error`.
+
+To read `T` the way the decoder does without the codec, read the first byte with
+`dec.read_initial_byte()` and pass it to `dec.decode(value, major,
+additional_info)`. This codec accepts a port as a number or as decimal text:
+
+```cpp
+template <typename Self>
+struct port_or_text : cbor::tags::codec::decoder_base<Self> {
+    using cbor::tags::codec::decoder_base<Self>::decode;
+
+    cbor::tags::status_code decode(std::uint16_t& port) {
+        auto& dec = static_cast<Self&>(*this);
+        const auto [major, additional_info] = dec.read_initial_byte();
+
+        if (major == cbor::tags::major_type::UnsignedInteger) {
+            return dec.decode(port, major, additional_info);
+        }
+
+        std::string text;
+        const auto status = dec.decode(text, major, additional_info);
+        if (status != cbor::tags::status_code::success) {
+            return status;
+        }
+
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), port);
+        return parsed.ec == std::errc{} ? cbor::tags::status_code::success : cbor::tags::status_code::error;
+    }
+};
 ```
 
 Codec implementations that hand a consumed header to another value call

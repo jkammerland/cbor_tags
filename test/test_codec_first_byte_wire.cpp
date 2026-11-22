@@ -6,6 +6,7 @@
 #include <cbor_tags/codec.h>
 #include <cbor_tags/codec/shared_ptr.h>
 #include <cbor_tags/codec/unique_ptr.h>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -194,6 +195,69 @@ template <typename Self> struct marked_numbers : codec::decoder_base<Self> {
     }
 };
 
+status_code parse_port(std::string_view text, std::uint16_t &port) {
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), port);
+    return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() ? status_code::success : status_code::error;
+}
+
+// A port comes as a number or as decimal text. The variant in here asks for
+// the very type this codec is for, at the byte the codec started on
+template <typename Self> struct self_asking_port : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(std::uint16_t &port) {
+        std::variant<std::uint16_t, std::string> wire;
+        const auto                               status = static_cast<Self &>(*this).decode(wire);
+        if (status != status_code::success)
+            return status;
+
+        if (const auto *number = std::get_if<std::uint16_t>(&wire)) {
+            port = *number;
+            return status_code::success;
+        }
+        return parse_port(std::get<std::string>(wire), port);
+    }
+};
+
+// The same port with the header read first. decode(value, major, info) is the
+// decoder's own read of a number, it does not come back to the codec
+template <typename Self> struct port_or_text : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(std::uint16_t &port) {
+        auto &self               = static_cast<Self &>(*this);
+        const auto [major, info] = self.read_initial_byte();
+
+        if (major == major_type::UnsignedInteger)
+            return self.decode(port, major, info);
+
+        std::string text;
+        const auto  status = self.decode(text, major, info);
+        return status == status_code::success ? parse_port(text, port) : status;
+    }
+};
+
+// float asks for a double and double asks for a float, both at the same byte
+template <typename Self> struct each_others : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(float &value) {
+        std::optional<double> wide;
+        const auto            status = static_cast<Self &>(*this).decode(wide);
+        if (status == status_code::success && wide)
+            value = static_cast<float>(*wide);
+        return status;
+    }
+
+    status_code decode(double &value) {
+        std::optional<float> narrow;
+        const auto           status = static_cast<Self &>(*this).decode(narrow);
+        if (status == status_code::success && narrow)
+            value = *narrow;
+        return status;
+    }
+};
+
 } // namespace
 
 // All of them only write the value once they have it, so the resumable
@@ -223,6 +287,18 @@ template <std::uint64_t Tag, typename Self> struct resumable_retry_traits<readin
     static constexpr bool decode = true;
 };
 template <typename Self> struct resumable_retry_traits<std::uint32_t, marked_numbers<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<std::uint16_t, self_asking_port<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<std::uint16_t, port_or_text<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<float, each_others<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<double, each_others<Self>> {
     static constexpr bool decode = true;
 };
 
@@ -541,6 +617,26 @@ TEST_SUITE("cbor_wire/codec_first_byte") {
         check_rejects<outer, markers>("c1d86407", status_code::no_match_in_variant_on_buffer);
         check_rejects<std::variant<std::variant<reading<216>, reading<2>>, tagged_marker>, markers>(
             "d8d86407616263", status_code::no_match_in_variant_on_buffer);
+    }
+
+    TEST_CASE("a decode(T &) codec that asks for its own type at the same byte ends with an error") {
+        // Text never comes back to the codec
+        check_reads<std::uint16_t, self_asking_port>("6438303830", std::uint16_t{8080});
+
+        // 8080 as a number does. The variant in the codec steps back for the
+        // number and calls the codec, which reads that variant again
+        check_rejects<std::uint16_t, self_asking_port>("191f90", status_code::error);
+        check_rejects<std::vector<std::uint16_t>, self_asking_port>("81191f90", status_code::error);
+
+        // Around two codecs it is the same
+        check_rejects<float, each_others>("fa3fc00000", status_code::error);
+    }
+
+    TEST_CASE("a decode(T &) codec reads its own type through the header form") {
+        check_reads<std::uint16_t, port_or_text>("6438303830", std::uint16_t{8080});
+        check_reads<std::uint16_t, port_or_text>("191f90", std::uint16_t{8080});
+        check_reads<std::optional<std::uint16_t>, port_or_text>("191f90", std::uint16_t{8080});
+        check_reads<std::variant<std::uint16_t, bool>, port_or_text>("191f90", std::uint16_t{8080});
     }
 
     TEST_CASE("a decode(T &) codec reads what a unique pointer points at") {
