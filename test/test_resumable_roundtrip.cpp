@@ -1402,6 +1402,10 @@ TEST_SUITE("roundtrip/resumable") {
         CHECK(expected.front().ordinary_encode_calls == ordinary_encodes);
         CHECK(expected.front().resumable_encode_calls == 1);
 
+        // [[65536, "nested continuation"]]. The decoder below reads what this
+        // encoder wrote with the same hooks, so only this says what it wrote
+        CHECK(to_hex(bytes) == "81821a00010000736e657374656420636f6e74696e756174696f6e");
+
         input_chunks                             inputs;
         auto                                     source = make_input_source(inputs);
         std::vector<explicitly_resumable_record> actual;
@@ -1538,6 +1542,9 @@ TEST_SUITE("roundtrip/resumable") {
         REQUIRE(encoder.result());
         CHECK(expected.ordinary_calls == ordinary_encodes);
         CHECK(expected.resumable_calls == 1);
+
+        // [65536, "shared continuation"], see the test with the nested hooks
+        CHECK(to_hex(bytes) == "821a000100007373686172656420636f6e74696e756174696f6e");
 
         input_chunks                 inputs;
         auto                         source = make_input_source(inputs);
