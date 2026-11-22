@@ -318,6 +318,53 @@ template <typename T, template <typename> typename... Codecs> void check_reads(s
     check_reads_as<T, Codecs...>(hex, [&](const T &value) { CHECK(value == expected); });
 }
 
+// The bytes are no T. An ordinary decoder has to end with this status, a
+// resumable one has to refuse them however the input is cut up
+template <typename T, template <typename> typename... Codecs> void check_rejects(std::string_view hex, status_code expected) {
+    CAPTURE(hex);
+    const auto                  bytes = to_bytes(std::string(hex) + std::string(TRAILER_HEX));
+    const std::deque<std::byte> segments(bytes.begin(), bytes.end());
+
+    const auto ordinary = [&](const auto &input) {
+        T value{};
+
+        auto decoder = make_decoder<Codecs...>(input);
+        auto result  = decoder(value);
+
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == expected);
+    };
+    {
+        INFO("ordinary");
+        ordinary(bytes);
+    }
+    {
+        INFO("ordinary, input that isn't contiguous");
+        ordinary(segments);
+    }
+
+    for (const auto piece : {bytes.size(), std::size_t{1}}) {
+        INFO("resumable");
+        CAPTURE(piece);
+        const std::span<const std::byte> input{bytes};
+        input_chunks                     storage;
+        auto                             source = make_input_source(storage);
+
+        T value{};
+
+        auto decoder   = make_resumable_decoder<Codecs...>(source);
+        auto operation = decoder(value);
+
+        for (std::size_t offset = 0; offset < input.size() && !operation.done(); offset += piece) {
+            storage.emplace_back(input.subspan(offset, std::min(piece, input.size() - offset)));
+            operation.resume();
+        }
+
+        REQUIRE(operation.done());
+        CHECK_FALSE(operation.result());
+    }
+}
+
 // For a pointer: it has to come back holding this
 template <typename Pointer> auto points_at(typename Pointer::element_type expected) {
     return [expected](const Pointer &value) {
@@ -465,6 +512,35 @@ TEST_SUITE("cbor_wire/codec_first_byte") {
 
     TEST_CASE("the other alternative of that variant is read as before") {
         check_reads<std::variant<reading<100>, int>, offset_readings>("05", std::variant<reading<100>, int>{std::in_place_index<1>, 5});
+    }
+
+    TEST_CASE("a tagged alternative that fails partway leaves the next one the same bytes") {
+        // reading<1> is read by the decoder, tagged_marker (tag 100) by its codec
+        using either = std::variant<reading<1>, tagged_marker>;
+
+        check_reads<either, markers>("c105", either{reading<1>{5}});
+        check_reads<either, markers>("d86407", either{tagged_marker{}});
+
+        // 1(100(7)). reading<1> takes the 1 and gives up at the 100 inside.
+        // tagged_marker has to start at the 1 as well, not at that 100
+        check_rejects<either, markers>("c1d86407", status_code::no_match_in_variant_on_buffer);
+
+        // 216("\aabc"), a tag with 1 more byte. Two bytes back from where
+        // reading<216> gave up there is d8 64 07, which is 100(7) again
+        check_rejects<std::variant<reading<216>, tagged_marker>, markers>("d8d86407616263", status_code::no_match_in_variant_on_buffer);
+    }
+
+    TEST_CASE("a variant inside a variant leaves the outer alternatives the same bytes") {
+        using inner = std::variant<reading<1>, reading<2>>;
+        using outer = std::variant<inner, tagged_marker>;
+
+        check_reads<outer, markers>("c205", outer{inner{reading<2>{5}}});
+        check_reads<outer, markers>("d86407", outer{tagged_marker{}});
+
+        // The inner variant reads the tag number, the outer one must not count it twice
+        check_rejects<outer, markers>("c1d86407", status_code::no_match_in_variant_on_buffer);
+        check_rejects<std::variant<std::variant<reading<216>, reading<2>>, tagged_marker>, markers>(
+            "d8d86407616263", status_code::no_match_in_variant_on_buffer);
     }
 
     TEST_CASE("a decode(T &) codec reads what a unique pointer points at") {
