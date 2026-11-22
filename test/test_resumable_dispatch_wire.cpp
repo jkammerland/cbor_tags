@@ -146,6 +146,32 @@ template <typename Self> struct inner_codec : ct::codec::decoder_base<Self> {
     }
 };
 
+// Every tag number the decoder tells its observers about
+std::vector<std::uint64_t> observed_tags;
+
+template <typename Self> struct tag_log : ct::codec::decoder_base<Self> {
+    using ct::codec::decoder_base<Self>::decode;
+
+    ct::status_code observe_decoded_cbor_tag(std::uint64_t tag) {
+        observed_tags.push_back(tag);
+        return ct::status_code::success;
+    }
+};
+
+struct ten {
+    static constexpr std::uint64_t cbor_tag = 10;
+    int                            value{};
+};
+struct thousand {
+    static constexpr std::uint64_t cbor_tag = 1000;
+    int                            value{};
+};
+struct eleven {
+    static constexpr std::uint64_t cbor_tag = 11;
+    std::string                    text;
+};
+using tagged_choice = std::variant<ten, thousand, eleven, int>;
+
 // The other direction: an inner's number is written 1000 higher
 template <typename Self> struct inner_writer : ct::codec::encoder_base<Self> {
     using ct::codec::encoder_base<Self>::encode;
@@ -166,6 +192,10 @@ template <typename Self> struct resumable_retry_traits<inner, inner_codec<Self>>
 };
 template <typename Self> struct resumable_retry_traits<inner, inner_writer<Self>> {
     static constexpr bool encode = true;
+};
+// tag_log only listens. Reading a header again for it is as good as the first time
+template <typename T, typename Self> struct resumable_retry_traits<T, tag_log<Self>> {
+    static constexpr bool decode = true;
 };
 } // namespace cbor::tags
 
@@ -218,6 +248,68 @@ TEST_SUITE("cbor_wire/resumable") {
             CHECK(*operation.result() == input.size());
             CHECK(std::get<0>(std::get<0>(decoded)) == 256);
             CHECK(trailer == 7);
+        }
+    }
+
+    TEST_CASE("a tag observer hears once of the tag of a variant alternative") {
+        struct sample {
+            std::vector<std::byte> wire;
+            std::uint64_t          tag;
+            std::size_t            alternative;
+        };
+        const std::array samples{
+            // 10(5), 1000(5) with two more bytes of tag number, 11("abc")
+            sample{{std::byte{0xca}, std::byte{0x05}}, 10, 0},
+            sample{{std::byte{0xd9}, std::byte{0x03}, std::byte{0xe8}, std::byte{0x05}}, 1000, 1},
+            sample{{std::byte{0xcb}, std::byte{0x63}, std::byte{0x61}, std::byte{0x62}, std::byte{0x63}}, 11, 2},
+        };
+
+        for (const auto &[wire, tag, alternative] : samples) {
+            CAPTURE(tag);
+            const std::vector<std::uint64_t> once{tag};
+
+            SUBCASE("from an ordinary decoder") {
+                observed_tags.clear();
+                tagged_choice decoded;
+                auto          decoder = ct::make_decoder<tag_log>(wire);
+                auto          result  = decoder(decoded);
+                REQUIRE(result);
+                CHECK(decoded.index() == alternative);
+                CHECK(observed_tags == once);
+            }
+
+            SUBCASE("from a resumable decoder over one block of input") {
+                observed_tags.clear();
+                tagged_choice decoded;
+                auto          decoder   = ct::make_resumable_decoder<tag_log>(wire);
+                auto          operation = decoder(decoded);
+                REQUIRE(operation.done());
+                REQUIRE(operation.result());
+                CHECK(decoded.index() == alternative);
+                CHECK(observed_tags == once);
+            }
+
+            SUBCASE("from a resumable decoder, with the input split at every byte") {
+                for (std::size_t split = 0; split <= wire.size(); ++split) {
+                    CAPTURE(split);
+                    observed_tags.clear();
+
+                    std::list<std::span<const std::byte>> chunks{std::span{wire}.first(split)};
+                    auto                                  decoder = ct::make_resumable_decoder<tag_log>(chunks);
+                    tagged_choice                         decoded;
+                    auto                                  operation = decoder(decoded);
+                    if (split != wire.size()) {
+                        REQUIRE_FALSE(operation.done());
+                        chunks.push_back(std::span{wire}.subspan(split));
+                        operation.resume();
+                    }
+
+                    REQUIRE(operation.done());
+                    REQUIRE(operation.result());
+                    CHECK(decoded.index() == alternative);
+                    CHECK(observed_tags == once);
+                }
+            }
         }
     }
 

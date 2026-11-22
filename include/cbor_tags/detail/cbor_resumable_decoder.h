@@ -13,6 +13,16 @@
 
 namespace cbor::tags::detail {
 
+// The decoder's private way to not tell tag observers twice
+struct observed_tag_access {
+    // The offset the decoder compares a tag's end with
+    template <typename Decoder> static std::size_t offset(const Decoder &decoder) noexcept { return decoder.current_offset(); }
+
+    template <typename Decoder> static auto once(Decoder &decoder, const std::optional<std::size_t> &tag_end) noexcept {
+        return decoder.observe_tag_once(tag_end);
+    }
+};
+
 template <typename T> inline constexpr bool    resumable_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_wrap_array<wrap_as_array<T...>> = true;
 
@@ -982,24 +992,28 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
     }
 
     // Lookahead uses the same ordinary decoder without committing the speculative header.
-    template <typename T> status_code peek_once(T &value) {
+    // Reads the value and goes back. end gets the offset the value ended at
+    template <typename T> status_code peek_once(T &value, std::optional<std::size_t> &end) {
         require_retry<T>();
         const auto result = decoder_(value);
+        if (result)
+            end = observed_tag_access::offset(decoder_);
+
         rollback();
         return result ? status_code::success : result.error();
     }
 
-    template <typename T> resumable<status_code> peek(T &value) {
-        const auto status = peek_once(value);
+    template <typename T> resumable<status_code> peek(T &value, std::optional<std::size_t> &end) {
+        const auto status = peek_once(value, end);
         if (status != status_code::incomplete)
             return status;
-        return await_peek(value);
+        return await_peek(value, end);
     }
 
-    template <typename T> resumable<status_code> await_peek(T &value) {
+    template <typename T> resumable<status_code> await_peek(T &value, std::optional<std::size_t> &end) {
         for (;;) {
             co_await wait();
-            const auto status = peek_once(value);
+            const auto status = peek_once(value, end);
             if (status != status_code::incomplete)
                 co_return status;
         }
@@ -1024,12 +1038,18 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
             co_return status;
         const auto [major, info] = decoder_.read_initial_byte();
         rollback();
-        as_tag_any tag{};
+        as_tag_any                 tag{};
+        std::optional<std::size_t> tag_end;
         if (major == major_type::Tag) {
-            status = co_await peek(tag);
+            status = co_await peek(tag, tag_end);
             if (status != status_code::success)
                 co_return status;
         }
+
+        // The peek told the tag observers. The alternative reads the tag once
+        // more, and again after every wait, which is not news to them
+        [[maybe_unused]] const auto observed = observed_tag_access::once(decoder_, tag_end);
+
         const auto start = offset();
         status           = co_await variant_alternative<false>(value, major, info, tag.tag);
         if (status == status_code::no_match_in_variant_on_buffer && major == major_type::Simple && offset() == start) {

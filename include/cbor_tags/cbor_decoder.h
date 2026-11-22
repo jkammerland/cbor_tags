@@ -50,6 +50,7 @@ namespace cbor::tags {
 
 namespace detail {
 struct walk_token_access;
+struct observed_tag_access;
 
 // One address per type, to tell types apart without RTTI
 template <typename T> inline constexpr char decoded_type_token{};
@@ -1378,11 +1379,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
             if constexpr (detail::HasDecodedCborTagObserver<self_t>) {
                 // This tag was already observed. Suppress only its repeated read,
                 // leaving nested payload tags and later items visible to observers.
-                struct restore_observation {
-                    std::optional<size_type> &slot;
-                    std::optional<size_type>  previous;
-                    constexpr ~restore_observation() { slot = previous; }
-                } guard{reread_tag_end_, std::exchange(reread_tag_end_, current_offset())};
+                const tag_observed_once guard{reread_tag_end_, std::exchange(reread_tag_end_, current_offset())};
 
                 reader_.seek(-1 - tag_bytes);
                 return this->decode_from_first_byte(value);
@@ -2020,6 +2017,32 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
     struct no_tag_observer {};
     [[no_unique_address]] std::conditional_t<(detail::HasDecodedCborTagObserver<Decoders<self_t>> || ...), std::optional<size_type>,
                                              no_tag_observer> reread_tag_end_{};
+
+    // Lives while a tag number that was read and observed is read once more
+    // from its first byte. The observers hear of that tag once
+    struct [[nodiscard]] tag_observed_once {
+        std::optional<size_type> &slot;
+        std::optional<size_type>  previous;
+        constexpr ~tag_observed_once() { slot = previous; }
+    };
+
+    // For the resumable decoder, which peeks at the tag of a variant to pick
+    // the alternative and then reads the item from its first byte, again after
+    // every wait. tag_end is where the peeked tag number ends, or nothing when
+    // there was no tag to peek at
+    friend struct detail::observed_tag_access;
+    constexpr auto observe_tag_once(std::optional<size_type> tag_end) noexcept {
+        if constexpr (detail::HasDecodedCborTagObserver<self_t>) {
+            const auto previous = reread_tag_end_;
+            if (tag_end) {
+                reread_tag_end_ = tag_end;
+            }
+            return tag_observed_once{reread_tag_end_, previous};
+        } else {
+            static_cast<void>(tag_end);
+            return no_tag_observer{};
+        }
+    }
 
     // One item as it is on the wire, for walk_item and validate_item. A codec
     // that only has decode(T &) says what a value means, the wire stays as it is
