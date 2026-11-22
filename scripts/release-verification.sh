@@ -18,6 +18,12 @@ authenticate_release_key() {
     local key_listing primary_fingerprints
     key_listing="$(release_gpg "${verification_home}" --with-colons --import-options show-only --dry-run --import "${verification_key_file}")" ||
         die "could not inspect release public key"
+
+    # A secret key is no public key: it is not counted below, and the import
+    # would take it along.
+    [[ -z "$(awk -F: '$1 == "sec" || $1 == "ssb"' <<<"${key_listing}")" ]] ||
+        die "release public key file holds secret key material"
+
     primary_fingerprints="$(awk -F: '
         /^pub:/ { want_fingerprint = 1; next }
         want_fingerprint && /^fpr:/ { print toupper($10); want_fingerprint = 0 }
@@ -28,11 +34,31 @@ authenticate_release_key() {
     release_gpg "${verification_home}" --quiet --import "${verification_key_file}" || die "could not import authenticated release key"
 }
 
+# A signature by a key that has expired since is refused, unless the fourth
+# argument is accept-expired-key: for a release that is already published, whose
+# key file cannot change any more.
 authenticate_release_signature() {
     local verification_output="$1"
     local expected_fingerprint
     expected_fingerprint="$(printf '%s' "$2" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
     local description="$3"
+    local expired_key="${4:-reject-expired-key}"
+
+    # GnuPG exits 0 and prints VALIDSIG for a signature by a revoked or an
+    # expired key as well. What it makes of the key is on this line.
+    local verdicts
+    verdicts="$(awk '/^\[GNUPG:\] (GOODSIG|EXPKEYSIG|REVKEYSIG|EXPSIG|BADSIG|ERRSIG) / {
+        print $2
+    }' <<<"${verification_output}")"
+    case "${verdicts}" in
+        GOODSIG) ;;
+        EXPKEYSIG)
+            [[ "${expired_key}" == accept-expired-key ]] || die "${description} was signed by an expired key"
+            ;;
+        REVKEYSIG) die "${description} was signed by a revoked key" ;;
+        *) die "${description} needs exactly one good signature; GnuPG reported ${verdicts:-none}" ;;
+    esac
+
     local primary_fingerprints
     # VALIDSIG identifies the signing subkey first and its primary key last.
     # Requiring a single record also rejects concatenated valid signatures.
@@ -162,9 +188,11 @@ write_release_manifest() {
     )
 }
 
+# The ninth argument is authenticate_release_signature's: accept-expired-key for
+# a release that is already published.
 verify_signed_assets() {
     local package_dir="$1" version="$2" expected_fingerprint="$3" canonical_public_key="$4"
-    local repository="$5" tag="$6" tag_object="$7" commit="$8"
+    local repository="$5" tag="$6" tag_object="$7" commit="$8" expired_key="${9:-reject-expired-key}"
     validate_release_identity "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}"
     require_exact_assets "${package_dir}" "${version}" signed
 
@@ -186,7 +214,7 @@ verify_signed_assets() {
             printf '%s\n' "${verification_output}" >&2
             die "release manifest does not have a valid signature"
         fi
-        authenticate_release_signature "${verification_output}" "${expected_fingerprint}" 'release manifest'
+        authenticate_release_signature "${verification_output}" "${expected_fingerprint}" 'release manifest' "${expired_key}"
 
         # Regenerate from trusted identity arguments and the fixed assets, never
         # from identity or filenames supplied by the downloaded manifest.
@@ -211,6 +239,7 @@ write_release_verification_commands() {
         validate_release_identity expected_unsigned_assets expected_signed_assets \
         list_release_assets release_digest write_release_checksum \
         require_exact_assets verify_checksums write_release_manifest verify_signed_assets
-    printf 'verify_signed_assets . %q "${expected_fingerprint}" %q %q %q %q %q\n' \
+    # These are pasted for a published release, also after its key has expired
+    printf 'verify_signed_assets . %q "${expected_fingerprint}" %q %q %q %q %q accept-expired-key\n' \
         "${version}" '' "${repository}" "${tag}" "${tag_object}" "${commit}"
 }

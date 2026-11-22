@@ -328,7 +328,7 @@ awk '/^```sh$/ {in_commands=1; next} /^```$/ && in_commands {exit} in_commands {
     "${generated_root}/notes.md" >"${generated_root}/consumer-commands.sh"
 bash -n "${generated_root}/consumer-commands.sh"
 grep -Fx 'expected_fingerprint=7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D' "${generated_root}/consumer-commands.sh" >/dev/null
-grep -Fx "verify_signed_assets . ${version} \"\${expected_fingerprint}\" '' ${GITHUB_REPOSITORY} ${tag} ${tag_object} ${commit}" \
+grep -Fx "verify_signed_assets . ${version} \"\${expected_fingerprint}\" '' ${GITHUB_REPOSITORY} ${tag} ${tag_object} ${commit} accept-expired-key" \
     "${generated_root}/consumer-commands.sh" >/dev/null
 echo 'release-notes: OK'
 

@@ -44,6 +44,9 @@ relationship before including its digest in the signed manifest.
 - Tags and assets use the release key committed at
   `.github/release-signing-key.asc`, fingerprint
   `7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D`.
+- A signature by a revoked key is rejected. A signature by a key that has
+  expired is rejected while a release is prepared and published; the
+  verification commands of a published release keep accepting it.
 - Signing requires approval through the protected `release` environment;
   package builds have no access to signing secrets.
 - Publication requires immutable releases to be enabled and verifies the
@@ -55,25 +58,6 @@ with macOS). Run them in the directory containing all 12 release assets. They
 require the fingerprint above; the downloaded public key is not itself a source
 of trust. Verification rejects altered, missing, or unexpected assets, including
 symlinks and noncanonical checksum records.
-
-## One-Time Repository Setup
-
-Before publishing:
-
-1. Enable immutable releases under **Settings > General > Releases**.
-2. Create an environment named `release` under **Settings > Environments**.
-3. Require the release owner as a reviewer, allow self-review, disable
-   administrator bypass, and allow deployments only from the selected `master`
-   branch.
-4. Add `GPG_PRIVATE_KEY`, `GPG_SIGNING_KEY`, and `GPG_PASSPHRASE` as environment
-   secrets. Do not keep repository-level duplicates.
-5. Create an active tag ruleset for `v*` that restricts tag creation, update,
-   and deletion. Give repository administrators an explicit bypass for the
-   controlled signed-tag operation.
-
-`GPG_PRIVATE_KEY` is the armored private key, `GPG_SIGNING_KEY` is the fingerprint
-above, and `GPG_PASSPHRASE` is its passphrase. Enter secrets through GitHub settings
-or `gh secret set` prompts, not shell command arguments.
 
 ## Publishing A Release
 
