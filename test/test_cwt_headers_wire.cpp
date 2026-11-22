@@ -64,6 +64,21 @@ auto cwt_fields(extra &object) { return cwt::fields(cwt::field<"value">(object.v
 auto cwt_fields(const extra &object) { return cwt::fields(cwt::field<"value">(object.value)); }
 } // namespace empty_header_defaults
 
+TEST_CASE("a protected header with application fields and none selected is zero bytes" * doctest::test_suite("cbor_wire/cwt")) {
+    cwt::basic_header_map<false, empty_header_defaults::extra> header;
+
+    // {"value": 3}
+    auto selected = cwt::encode_protected_header(header);
+    REQUIRE(selected);
+    CHECK(*selected == std::vector<std::byte>{std::byte{0xa1}, std::byte{0x65}, std::byte{0x76}, std::byte{0x61}, std::byte{0x6c},
+                                              std::byte{0x75}, std::byte{0x65}, std::byte{0x03}});
+
+    header.extra.value.reset();
+    auto none = cwt::encode_protected_header(header);
+    REQUIRE(none);
+    CHECK(none->empty());
+}
+
 TEST_CASE("empty protected encodings clear optional application defaults" * doctest::test_suite("cbor_wire/cwt")) {
     for (const auto &input : {std::vector<std::byte>{}, std::vector<std::byte>{std::byte{0xa0}}}) {
         cwt::basic_header_map<false, empty_header_defaults::extra> header;

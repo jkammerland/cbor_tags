@@ -43,7 +43,9 @@ encode_protected_header(const basic_header_map<Borrowed, Extra> &header) {
     if (detail::validate_protected_placement(header) != status_code::success) {
         return unexpected<status_code>{status_code::error};
     }
-    if (header.empty()) {
+    // No selected field is the zero-length bstr, which RFC 9052 section 3 asks
+    // senders for. An application header has its own fields to look at
+    if (header.empty() || (!std::same_as<Extra, std::monostate> && detail::selected_header_labels(header).empty())) {
         return std::vector<std::byte>{};
     }
     return encode_to_bytes<Codecs...>(header);

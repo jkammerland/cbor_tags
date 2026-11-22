@@ -125,7 +125,8 @@ auto result = cwt::decode_protected_header(message.protected_header, headers);
 ```
 
 The input must be a named buffer whose storage remains valid while its views are
-used. Empty protected bytes produce an empty map. The helper rejects trailing
+used. Empty protected bytes produce an empty map, and `encode_protected_header`
+writes no bytes for a header without selected fields. The helper rejects trailing
 bytes and replaces the destination only on success. Use `header_map` as the
 destination to copy the fields instead, or keep the existing owning-result
 `decode_protected_header(bytes)` convenience.
