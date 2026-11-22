@@ -82,6 +82,19 @@ for bad_key in attacker extra-primary; do
     [[ -z "$(release_gpg "${verification_home}" --with-colons --list-keys 2>/dev/null | awk -F: '$1 == "pub" {print}')" ]]
 done
 
+# The right public key with somebody's secret key behind it. It has one primary
+# public key with the pinned fingerprint, and an import would take the rest along
+GNUPGHOME="${attacker_home}" gpg --no-options --batch --pinentry-mode loopback --passphrase '' \
+    --armor --export-secret-keys "${attacker_fingerprint}" >"${test_root}/attacker-secret.asc"
+cat "${test_root}/trusted.asc" "${test_root}/attacker-secret.asc" >"${test_root}/with-secret.asc"
+
+verification_home="${test_root}/verify-with-secret"
+mkdir -m 700 -- "${verification_home}"
+expect_rejection 'secret key in the key file' 'release public key file holds secret key material' authenticate_release_key \
+    "${verification_home}" "${test_root}/with-secret.asc" "${fixture_fingerprint}"
+[[ -z "$(release_gpg "${verification_home}" --with-colons --list-secret-keys 2>/dev/null)" ]]
+[[ -z "$(release_gpg "${verification_home}" --with-colons --list-keys 2>/dev/null | awk -F: '$1 == "pub" {print}')" ]]
+
 package_dir="${test_root}/packages"
 mkdir -- "${package_dir}"
 cp -- "${test_root}/trusted.asc" "${package_dir}/cbor_tags-release-public-key.asc"
@@ -115,6 +128,20 @@ cp -- "${test_root}/attacker.asc" "${package_dir}/cbor_tags-release-public-key.a
 expect_failure 'consumer wrong key' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
 cp -- "${test_root}/extra-primary.asc" "${package_dir}/cbor_tags-release-public-key.asc"
 expect_failure 'consumer extra primary' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
+
+# The pasted commands print no reason. A refusal at inspection and an import
+# that fails later look the same from outside, so record what gpg is asked to do
+recording_bin="${test_root}/recording-bin"
+mkdir -- "${recording_bin}"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >>"${GPG_CALLS}"' "exec $(printf '%q' "$(command -v gpg)") \"\$@\"" \
+    >"${recording_bin}/gpg"
+chmod +x "${recording_bin}/gpg"
+
+cp -- "${test_root}/with-secret.asc" "${package_dir}/cbor_tags-release-public-key.asc"
+expect_failure 'consumer secret key in the key file' env "PATH=${recording_bin}:${PATH}" "GPG_CALLS=${test_root}/gpg-calls" \
+    bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
+[[ "$(grep -c -- 'show-only' "${test_root}/gpg-calls")" == 1 ]]
+[[ "$(grep -c -- '--quiet --import' "${test_root}/gpg-calls")" == 0 ]]
 cp -- "${test_root}/trusted.asc" "${package_dir}/cbor_tags-release-public-key.asc"
 
 payload="${package_dir}/cbor_tags-0.28.0.tar.gz"

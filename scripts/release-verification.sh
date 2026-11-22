@@ -18,6 +18,12 @@ authenticate_release_key() {
     local key_listing primary_fingerprints
     key_listing="$(release_gpg "${verification_home}" --with-colons --import-options show-only --dry-run --import "${verification_key_file}")" ||
         die "could not inspect release public key"
+
+    # A secret key is no public key: it is not counted below, and the import
+    # would take it along.
+    [[ -z "$(awk -F: '$1 == "sec" || $1 == "ssb"' <<<"${key_listing}")" ]] ||
+        die "release public key file holds secret key material"
+
     primary_fingerprints="$(awk -F: '
         /^pub:/ { want_fingerprint = 1; next }
         want_fingerprint && /^fpr:/ { print toupper($10); want_fingerprint = 0 }
@@ -76,6 +82,7 @@ release_gpg() {
         --no-auto-key-retrieve --auto-key-locate clear "$@"
 }
 key_listing="$(release_gpg --with-colons --import-options show-only --dry-run --import cbor_tags-release-public-key.asc)"
+[[ -z "$(awk -F: '$1 == "sec" || $1 == "ssb"' <<<"${key_listing}")" ]]
 primary_fingerprints="$(awk -F: '/^pub:/ {want=1; next} want && /^fpr:/ {print toupper($10); want=0}' <<<"${key_listing}")"
 [[ "${primary_fingerprints}" == "${expected_fingerprint}" ]]
 release_gpg --quiet --import cbor_tags-release-public-key.asc
