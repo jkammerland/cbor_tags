@@ -69,11 +69,22 @@ template <typename T> class [[nodiscard]] resumable {
         return std::move(*promise.value);
     }
     struct awaiter {
-        resumable               value;
-        bool                    await_ready() const noexcept { return value.done(); }
-        std::coroutine_handle<> await_suspend(std::coroutine_handle<> parent) const noexcept {
+        resumable value;
+        bool      await_ready() const noexcept {
+            if (value.done())
+                return true;
+
+            // Run the child right here, before the parent is suspended. If it
+            // ends without waiting the parent just carries on, and the stack is
+            // back where it was. Handing over with a jump is only a jump where
+            // the compiler makes it one: GCC below -O2 calls instead, a frame
+            // deeper for every element
+            value.handle_.resume();
+            return value.handle_.done();
+        }
+        void await_suspend(std::coroutine_handle<> parent) const noexcept {
+            // The child waits for bytes. Whoever resumes it later ends up in the parent
             value.handle_.promise().continuation = parent;
-            return value.handle_;
         }
         T await_resume() { return value.result(); }
     };

@@ -530,6 +530,11 @@ Reservable destinations may allocate from validated lengths before payload
 arrival; use `as_bounded_size<0, limit>(values)` or a bounded allocator to impose
 application limits, with allocation failure reported as `out_of_memory`.
 
+A value inside another value is handled by a call inside its parent's, so stack
+use follows the nesting depth of the data, as it does for ordinary encoders and
+decoders. Only a recursive type lets the input choose that depth; see
+[Recursive Decode Paths](decoder_resource_limits.md#recursive-decode-paths).
+
 Changing transport chunk boundaries must preserve decoded values. Test custom
 codecs at every input/output split relevant to their wire representation.
 
