@@ -14,7 +14,7 @@ For version `X.Y.Z`, the workflow publishes exactly 12 assets:
 - `cbor_tags-X.Y.Z.release-manifest` and its detached `.sig`.
 
 One signed manifest binds all assets to the repository, version, signed tag, and
-commit. Verification requires the expected release identity; a downloaded manifest cannot choose it.
+commit.
 
 The archives contain the exact tracked source snapshot for the signed release
 commit. They do not contain a pre-installed CMake tree. The workflow extracts
@@ -24,9 +24,7 @@ It separately stages one internal install and builds `test_package` against it
 to keep the CMake package metadata covered without publishing that install tree.
 
 The build uses workflow-commit tooling and a separate, clean checkout of the
-verified release commit. Signing and candidate audits also use workflow-commit
-tooling; signing reads project versions from the verified release commit.
-Archive validation is independent of example names.
+verified release commit. Archive validation is independent of example names.
 
 The release driver normalizes ZIP metadata to UTC so the unsigned packages are
 byte-reproducible regardless of the operator's local timezone.
@@ -52,14 +50,13 @@ relationship before including its digest in the signed manifest.
 - Publication requires immutable releases to be enabled and verifies the
   published assets and GitHub release attestation.
 
-To verify a download, run the release notes' verification commands with Bash
-3.2 or newer, GPG, and either GNU `sha256sum`/`sha512sum` or `shasum` (included
-with macOS). Run them in the directory containing all 12 release assets. They
-require the fingerprint above; the downloaded public key is not itself a source
-of trust. Verification rejects altered, missing, or unexpected assets, including
-symlinks and noncanonical checksum records. The commands print
-`cbor_tags X.Y.Z: release assets verified`, or an error with status 2. They run
-in a subshell, so the shell they are pasted into stays as it was.
+To verify a download, put all 12 release assets into an otherwise empty
+directory and run the release notes' verification commands there. They need Bash
+3.2 or newer, GPG, and `sha256sum`/`sha512sum` or `shasum`. They require the
+fingerprint above; the downloaded public key is not itself a source of trust.
+Altered, missing, and additional files are rejected. The commands print
+`cbor_tags X.Y.Z: release assets verified`, or an error with status 2, and leave
+the shell they are pasted into as it was.
 
 ## Publishing A Release
 
