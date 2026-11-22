@@ -452,22 +452,25 @@ TEST_SUITE("roundtrip/resumable_storage") {
         }
     }
 
-    TEST_CASE("nested output tail growth preserves tentative ordinary writes") {
-        std::vector<std::byte>                                   tail(1);
+    TEST_CASE("nested output tail growth keeps what was written before it") {
+        // Room for the 7 and for a part of 65536, which is 1a 00 01 00 00
+        std::vector<std::byte>                                   tail(3);
         std::list<std::ranges::ref_view<std::vector<std::byte>>> chunks;
         chunks.emplace_back(tail);
         auto encoder   = make_resumable_encoder(chunks);
-        auto operation = encoder(65536);
+        auto operation = encoder(std::uint8_t{7}, 65536);
         REQUIRE_FALSE(operation.done());
-        CHECK(operation.committed_bytes() == 0);
+        CHECK(operation.committed_bytes() == 1);
 
+        // The vector moves its bytes. The 7 goes along and the number comes after it
         tail.resize(16);
         REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
-        auto committed = std::span<const std::byte>{tail}.first(operation.committed_bytes());
-        int  actual{};
-        REQUIRE(make_decoder(committed)(actual));
-        CHECK(actual == 65536);
+        CHECK(operation.committed_bytes() == 6);
+
+        const std::vector<std::byte> expected{std::byte{0x07}, std::byte{0x1a}, std::byte{0x00},
+                                              std::byte{0x01}, std::byte{0x00}, std::byte{0x00}};
+        CHECK(std::vector<std::byte>(tail.begin(), tail.begin() + 6) == expected);
     }
 
     TEST_CASE("committed byte counts survive cancellation") {
