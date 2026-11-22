@@ -121,7 +121,7 @@ std::vector<std::byte> storage{std::byte{0x42}, std::byte{0x01}, std::byte{0x02}
 auto input = storage | std::views::transform([](std::byte& byte) -> std::byte& { return byte; });
 
 auto dec = make_decoder(input);
-dec(storage); // Unsupported: input and mutable destination share storage.
+auto result = dec(storage); // Unsupported: input and mutable destination share storage.
 ```
 
 Keep decoder input and mutable string destinations in separate storage. This
@@ -145,7 +145,7 @@ std::span<std::byte, 3>       output{storage.data(), 3};
 std::span<const std::byte, 2> source{storage.data() + 3, 2};
 
 auto enc = make_encoder(output);
-enc(source);
+auto result = enc(source);
 
 // output now contains: 42 01 02
 ```

@@ -24,11 +24,11 @@ contract.
 std::string source = "payload";
 std::vector<std::byte> buffer;
 auto enc = make_encoder(buffer);
-enc(source);
+auto result = enc(source);
 
 std::string destination = "prefix:";
 auto dec = make_decoder(buffer);
-dec(destination);
+result = dec(destination);
 assert(destination == "prefix:payload");
 ```
 

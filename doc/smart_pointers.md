@@ -30,11 +30,11 @@ std::vector<std::byte> bytes;
 std::unique_ptr<int> sent = std::make_unique<int>(42);
 
 auto enc = make_encoder<cbor::tags::codec::unique_ptr>(bytes);
-enc(sent); // encodes the same item as int{42}
+auto result = enc(sent); // encodes the same item as int{42}
 
 std::unique_ptr<int> received;
 auto dec = make_decoder<cbor::tags::codec::unique_ptr>(bytes);
-dec(received);
+result = dec(received);
 ```
 
 The wire shape is simply:
@@ -72,11 +72,11 @@ message sent{value, value};
 
 std::vector<std::byte> bytes;
 auto enc = make_encoder<cbor::tags::codec::shared_ptr>(bytes);
-enc(sent);
+auto result = enc(sent);
 
 message received;
 auto dec = make_decoder<cbor::tags::codec::shared_ptr>(bytes);
-dec(received);
+result = dec(received);
 
 assert(received.first == received.second);
 ```
@@ -260,12 +260,12 @@ The encoder and decoder each keep one reference table. That table belongs to
 the codec object and remains across calls:
 
 ```cpp
-enc(value);  // #6.28(42)
+auto result = enc(value);  // #6.28(42)
 *value = 99;
-enc(value);  // #6.29(0), still refers to the first snapshot
+result = enc(value);  // #6.29(0), still refers to the first snapshot
 
 enc.reset_shared_ptr_scope();
-enc(value);  // #6.28(99), first value in a new table
+result = enc(value);  // #6.28(99), first value in a new table
 ```
 
 The decoder must receive matching segments in the same order and retain its
@@ -298,8 +298,8 @@ shared_ptr_encode_scope table;
 table.reserve(64);
 
 enc.set_shared_ptr_scope(table);
-enc(first_segment);
-enc(second_segment);
+auto result = enc(first_segment);
+result = enc(second_segment);
 
 table.reset();
 ```
@@ -309,8 +309,8 @@ Use a matching decode scope on the receiver:
 ```cpp
 shared_ptr_decode_scope table;
 dec.set_shared_ptr_scope(table);
-dec(first_output);
-dec(second_output);
+auto result = dec(first_output);
+result = dec(second_output);
 ```
 
 `SharedPtrEncodeScope` requires:

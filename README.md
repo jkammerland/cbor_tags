@@ -336,13 +336,13 @@ int main() {
     auto enc = make_encoder(data);
 
     // Encode Api1 with a tag of 0x10 - note that the tag does not have to be part of the struct
-    enc(make_tag_pair(static_tag<0x10>{}, Api1{.a = 42, .b = 43}));
+    auto result = enc(make_tag_pair(static_tag<0x10>{}, Api1{.a = 42, .b = 43}));
 
     // Encode a 0 length binary string in the middle of the buffer
-    enc(std::vector<std::byte>{});
+    result = enc(std::vector<std::byte>{});
 
     // Encode Api2 with a tag of 0x20
-    enc(make_tag_pair(static_tag<0x20>{}, Api2{"hello", "world"}));
+    result = enc(make_tag_pair(static_tag<0x20>{}, Api2{"hello", "world"}));
 
     // Decoding - accept bstr and any tagged value
     auto dec = make_decoder(data);
@@ -1009,11 +1009,11 @@ auto value = std::make_shared<int>(42);
 std::vector<std::shared_ptr<int>> sent{value, value};
 
 auto enc = make_encoder<codec::shared_ptr>(buffer);
-enc(sent);
+auto result = enc(sent);
 
 std::vector<std::shared_ptr<int>> received;
 auto dec = make_decoder<codec::shared_ptr>(buffer);
-dec(received);
+result = dec(received);
 
 // received[0].get() == received[1].get(): both point to the same int.
 ```

@@ -249,7 +249,7 @@ std::vector<int> values{1, 2, 3, 4};
 
 auto view = ct::as_array_range(values);
 auto bounded_view = ct::as_bounded_size<0, 4>(view);
-enc(bounded_view);
+auto result = enc(bounded_view);
 // CDDL: [0*4 int]
 ```
 
@@ -262,10 +262,10 @@ namespace ct = cbor::tags;
 
 auto evens = values | std::views::filter(is_even);
 
-enc(ct::as_array_range(evens));
+auto result = enc(ct::as_array_range(evens));
 
 // Unsupported: evens has no constant-time size().
-enc(ct::as_bounded_size<0, 4>(ct::as_array_range(evens)));
+result = enc(ct::as_bounded_size<0, 4>(ct::as_array_range(evens)));
 ```
 
 `as_indefinite(container)` is also supported when the underlying container is a
@@ -276,7 +276,7 @@ indefinite:
 namespace ct = cbor::tags;
 
 std::vector<int> values{1, 2, 3};
-enc(ct::as_bounded_size<0, 3>(ct::as_indefinite{values}));
+auto result = enc(ct::as_bounded_size<0, 3>(ct::as_indefinite{values}));
 // 9f 01 02 03 ff
 ```
 
@@ -490,7 +490,7 @@ struct Person {
 Person person{.age = 42, .name = "Ada", .employer = "AcmeCo"};
 std::vector<std::byte> buffer;
 auto enc = ct::make_encoder(buffer);
-enc(ct::as_named_map{person});
+auto result = enc(ct::as_named_map{person});
 
 fmt::memory_buffer schema;
 cddl::schema_to<ct::as_named_map<Person>>(
