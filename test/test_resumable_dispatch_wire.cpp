@@ -146,11 +146,26 @@ template <typename Self> struct inner_codec : ct::codec::decoder_base<Self> {
     }
 };
 
+// The other direction: an inner's number is written 1000 higher
+template <typename Self> struct inner_writer : ct::codec::encoder_base<Self> {
+    using ct::codec::encoder_base<Self>::encode;
+    void encode(const inner &value) {
+        auto &self = static_cast<Self &>(*this);
+        if (const auto *text = std::get_if<std::string>(&value))
+            self.encode(*text);
+        else
+            self.encode(std::get<std::uint32_t>(value) + 1000);
+    }
+};
+
 } // namespace
 
 namespace cbor::tags {
 template <typename Self> struct resumable_retry_traits<inner, inner_codec<Self>> {
     static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<inner, inner_writer<Self>> {
+    static constexpr bool encode = true;
 };
 } // namespace cbor::tags
 
@@ -204,5 +219,25 @@ TEST_SUITE("cbor_wire/resumable") {
             CHECK(std::get<0>(std::get<0>(decoded)) == 256);
             CHECK(trailer == 7);
         }
+    }
+
+    TEST_CASE("an encoder applies the codec of a variant that is an alternative of another") {
+        // The decoders above leave inner's codec out there. Both encoders
+        // call it: 7 is written as 1007, which is 19 03 ef
+        const outer                  value{inner{std::uint32_t{7}}};
+        const std::vector<std::byte> expected{std::byte{0x19}, std::byte{0x03}, std::byte{0xef}};
+
+        std::vector<std::byte> ordinary;
+        auto                   encoder = ct::make_encoder<inner_writer>(ordinary);
+        auto                   result  = encoder(value);
+        REQUIRE(result);
+        CHECK(ordinary == expected);
+
+        std::vector<std::byte> resumed;
+        auto                   resumable_encoder = ct::make_resumable_encoder<inner_writer>(resumed);
+        auto                   operation         = resumable_encoder(value);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(resumed == expected);
     }
 }

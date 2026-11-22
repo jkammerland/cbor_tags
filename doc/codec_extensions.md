@@ -144,7 +144,9 @@ keeps the major type that `T` has without the codec.
 Nested variants select their alternatives recursively in both ordinary and
 resumable decoding. A codec for an inner variant applies when that variant is
 decoded directly or through an optional, but not when it is itself an outer
-variant's alternative. Explicit resumable hooks still own their dispatch.
+variant's alternative. Encoders call the inner variant's codec in that place as
+well, so a codec that has to read what it writes belongs on the outer variant.
+Explicit resumable hooks still own their dispatch.
 
 For example, a sensor codec can read integer centi-degrees into a `float`:
 
