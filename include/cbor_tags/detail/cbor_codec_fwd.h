@@ -15,6 +15,11 @@ struct decoder;
 template <typename T> struct cbor_header_decoder;
 template <typename T> struct cbor_indefinite_decoder;
 
+template <typename T> struct cbor_header_encoder;
+template <typename T> struct cbor_indefinite_encoder;
+template <typename T> struct cbor_optional_encoder;
+template <typename T> struct cbor_variant_encoder;
+
 } // namespace cbor::tags
 
 namespace cbor::tags::detail {

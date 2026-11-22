@@ -1280,6 +1280,8 @@ foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG ENUM_DIRECT E
 endforeach()
 add_resumable_retry_failure(MEMBER_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
 add_resumable_retry_failure(OBSERVER_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
+add_resumable_retry_failure(BASE_CLASS_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_BASE_CLASS_ENCODE)
+add_resumable_retry_failure(BASE_CLASS_DECODE "retrying a decode customization requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_BASE_CLASS_DECODE)
 
 # Built-in delegation cannot authorize a nested custom encoder.
 foreach(CASE ENUM_ENCODE ENUM_HIDDEN_ENCODE)
