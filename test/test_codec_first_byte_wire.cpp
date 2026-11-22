@@ -606,6 +606,18 @@ TEST_SUITE("cbor_wire/codec_first_byte") {
         check_rejects<std::variant<reading<216>, tagged_marker>, markers>("d8d86407616263", status_code::no_match_in_variant_on_buffer);
     }
 
+    TEST_CASE("a tagged alternative that fails partway leaves a codec inside an optional the same bytes") {
+        // The codec is one step further in here: the optional hands on the
+        // header it was given, and tagged_marker's codec steps back from there
+        using either = std::variant<reading<1>, std::optional<tagged_marker>>;
+
+        check_reads<either, markers>("c105", either{reading<1>{5}});
+        check_reads<either, markers>("f6", either{std::optional<tagged_marker>{}});
+
+        // 1(100(7)) again. The optional's tagged_marker has to start at the 1
+        check_rejects<either, markers>("c1d86407", status_code::no_match_in_variant_on_buffer);
+    }
+
     TEST_CASE("a variant inside a variant leaves the outer alternatives the same bytes") {
         using inner = std::variant<reading<1>, reading<2>>;
         using outer = std::variant<inner, tagged_marker>;

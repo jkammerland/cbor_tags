@@ -2071,21 +2071,11 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         bool      gave_up;
     };
 
-    // Whether reading this variant alternative steps back to the first byte of
-    // the value, for a codec that only has decode(T &). An alternative that is
-    // a variant itself does when one of its own does
-    template <typename U> static consteval bool steps_back_to_first_byte() {
-        using raw_type      = std::remove_cvref_t<U>;
-        using customization = detail::codec_payload_mixin_customization<self_t>;
-        if constexpr (IsVariant<raw_type>) {
-            return detail::with_variant_alternatives<raw_type>(
-                []<typename... Alternatives>() { return (steps_back_to_first_byte<Alternatives>() || ...); });
-        } else if constexpr (IsTag<raw_type>) {
-            return customization::template wants_first_byte<raw_type, detail::payload_decode_context::tag>();
-        } else {
-            return customization::template wants_first_byte<raw_type, detail::payload_decode_context::header>();
-        }
-    }
+    // Whether a variant has to know where its alternatives start. Only a codec
+    // that has decode(T &) alone looks at bytes again, and it can sit anywhere
+    // below an alternative: inside an optional, behind another codec. So with
+    // codecs installed every variant keeps track, and without any none does
+    static constexpr bool variant_alternatives_step_back = detail::codec_payload_mixin_customization<self_t>::has_codecs;
 
     // Back to where the alternatives of a variant start: after the first byte,
     // or after the tag number once that is read. An alternative that gave up
@@ -2220,11 +2210,9 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         bool        saw_incomplete = false;
         status_code hard_error     = status_code::success;
 
-        // Where the alternatives start, for when one gives up partway. Only
-        // an alternative read by a decode(T &) codec looks at bytes again, so
-        // variants without one keep no track of this. A variant inside a
-        // variant gets here with the tag number already read
-        constexpr bool steps_back = FirstByteCodecs && (steps_back_to_first_byte<T>() || ...);
+        // Where the alternatives start, for when one gives up partway. A
+        // variant inside a variant gets here with the tag number already read
+        constexpr bool steps_back = FirstByteCodecs && variant_alternatives_step_back;
         variant_start  start{steps_back ? current_offset() : size_type{0}, steps_back && tag.has_value(), false};
 
         auto try_decode = [this, major, additionalInfo, &start, &value, &tag, &saw_incomplete,
@@ -2344,7 +2332,7 @@ struct decoder : public Decoders<decoder<InputBuffer, Options, Decoders...>>... 
         status_code hard_error     = status_code::success;
 
         // Where the alternatives start, see the std::variant overload
-        constexpr bool steps_back = FirstByteCodecs && steps_back_to_first_byte<variant_type>();
+        constexpr bool steps_back = FirstByteCodecs && variant_alternatives_step_back;
         variant_start  start{steps_back ? current_offset() : size_type{0}, steps_back && tag.has_value(), false};
 
         auto try_decode = [this, major, additionalInfo, &start, &value, &tag, &saw_incomplete,
