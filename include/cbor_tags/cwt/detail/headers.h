@@ -68,12 +68,14 @@ template <class Header> status_code validate_header_fields(const Header &header)
     return seen.has_duplicates() ? status_code::error : status_code::success;
 }
 
+// The selected fields, then every label seen on the wire. A label can be in
+// here twice: the callers only ask whether one is there, and looking each one
+// up before adding it takes a long time for a header with many labels
 template <class Header> auto received_header_labels(const Header &header) {
     auto labels = selected_header_labels(header);
+    labels.reserve(labels.size() + header.observed_labels.size());
     for (const auto &label : header.observed_labels) {
-        if (std::find(labels.begin(), labels.end(), label) == labels.end()) {
-            labels.push_back(label);
-        }
+        labels.push_back(label);
     }
     return labels;
 }
@@ -93,9 +95,10 @@ status_code validate_header_pair(const Protected &protected_header, const Unprot
         unprotected.typ) {
         return status_code::error;
     }
-    const auto protected_labels = received_header_labels(protected_header);
+    auto protected_labels = received_header_labels(protected_header);
+    std::sort(protected_labels.begin(), protected_labels.end());
     for (const auto &label : received_header_labels(unprotected)) {
-        if (std::find(protected_labels.begin(), protected_labels.end(), label) != protected_labels.end()) {
+        if (std::binary_search(protected_labels.begin(), protected_labels.end(), label)) {
             return status_code::error;
         }
     }

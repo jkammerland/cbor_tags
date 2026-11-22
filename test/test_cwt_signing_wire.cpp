@@ -79,4 +79,39 @@ TEST_SUITE("cbor_wire/cwt") {
         }
     }
 
+    TEST_CASE("a header with many labels verifies and a label in both buckets is still refused") {
+        // 19 hh ll 00 for every label: the label in 2 bytes, 0 as its value
+        const auto labels = [](unsigned first, unsigned count) {
+            static constexpr std::string_view digits{"0123456789abcdef"};
+            std::string                       hex;
+            for (unsigned label = first; label < first + count; ++label) {
+                hex += "19";
+                for (const auto shift : {12U, 8U, 4U, 0U}) {
+                    hex += digits[(label >> shift) & 0xfU];
+                }
+                hex += "00";
+            }
+            return hex;
+        };
+
+        // [protected, {1000: 0 ... 20999: 0}, h'a0', h'00']. b9 4e 20 opens a map of 20,000
+        const auto verify = [&](std::string_view protected_hex) {
+            const auto bytes = to_bytes(std::string{"84"} + std::string{protected_hex} + "b94e20" + labels(1000, 20000) + "41a04100");
+
+            cose_sign1 message;
+            auto       decoder = make_decoder<codec::cwt>(bytes);
+            auto       decoded = decoder(message);
+            REQUIRE(decoded);
+            return verify_sign1<signature_presence_es256_backend>(nullptr, message);
+        };
+
+        // {1: -7}
+        CHECK(verify("43a10126"));
+
+        // {1: -7, 20999: 0}: 20999 is in the unprotected map as well
+        const auto both = verify("47a2012619520700");
+        REQUIRE_FALSE(both);
+        CHECK_EQ(both.error(), status_code::error);
+    }
+
 } // TEST_SUITE("cbor_wire/cwt")
