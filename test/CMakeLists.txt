@@ -311,6 +311,13 @@ foreach(CASE IN ITEMS DUPLICATE TEMPORARY BOOLEAN MISSING_ENCODER MISSING_DECODE
     "-DPASS_REGEX=${DIAGNOSTIC}" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "cwt;compile-fail")
 endforeach()
+# A writable container in countersign0's third place could be storage or AAD.
+add_executable(cwt_countersign0_ambiguous_bytes_compile_fails EXCLUDE_FROM_ALL cwt_countersign0_storage_compile_fail.cc)
+target_link_libraries(cwt_countersign0_ambiguous_bytes_compile_fails PRIVATE cbor::tags)
+add_test(NAME cwt_countersign0_ambiguous_bytes_compile_fails COMMAND ${CMAKE_COMMAND}
+  "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=cwt_countersign0_ambiguous_bytes_compile_fails" "-DCONFIG=$<CONFIG>"
+  "-DPASS_REGEX=deleted function" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+set_tests_properties(cwt_countersign0_ambiguous_bytes_compile_fails PROPERTIES LABELS "cwt;compile-fail")
 
 add_test(NAME encoded_item_views_wire COMMAND tests "--test-suite=cbor_wire/encoded_item_views")
 set_tests_properties(encoded_item_views_wire PROPERTIES LABELS "cbor-wire")

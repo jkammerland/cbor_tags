@@ -74,6 +74,7 @@ int main() {
 | Whole COSE_Sign target | Unsupported. |
 | Full countersignature | Uses its own protected algorithm. |
 | Abbreviated countersignature | The application supplies its algorithm and key. |
+| Caller storage for `countersign0` | Passed as a `std::span<std::byte>` before the AAD. Any other writable byte container in that position does not compile; pass an AAD you hold in one as `std::as_const(aad)`. |
 | External context | Independent of the original signer's AAD and absent from the message. |
 | Segmented signing input | CBOR headers interleaved with views into original data, in encoding order; keep the data stable until the backend finishes. |
 | Parsed header output | Assigned after verification and critical processing; views borrow the countersignature's protected bytes. |

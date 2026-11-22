@@ -3,7 +3,80 @@
 #include <cbor_tags/cwt/countersignatures.h>
 #include <list>
 
+namespace {
+
+// Remembers what it was asked to sign. Its signature is the one byte 51
+struct recording_es256_backend {
+    static constexpr algorithm           algorithm_id = algorithm::es256;
+    static inline std::vector<std::byte> signed_bytes;
+
+    template <std::ranges::input_range Parts> static void record(Parts &&parts) {
+        signed_bytes.clear();
+        for (const auto &part : parts) {
+            signed_bytes.insert(signed_bytes.end(), part.begin(), part.end());
+        }
+    }
+
+    template <std::ranges::input_range Parts> static expected<std::vector<std::byte>, status_code> sign(void *, Parts &&parts) {
+        record(parts);
+        return std::vector<std::byte>{std::byte{0x51}};
+    }
+
+    template <std::ranges::input_range Parts>
+    static expected<std::size_t, status_code> sign(void *, Parts &&parts, std::span<std::byte> output) {
+        record(parts);
+        if (output.empty()) {
+            return cbor::tags::unexpected<status_code>{status_code::error};
+        }
+        output.front() = std::byte{0x51};
+        return std::size_t{1};
+    }
+};
+
+// [context, target protected, AAD, payload, [signature]] for an empty protected header
+std::vector<std::byte> countersignature0_input(std::byte aad, std::byte payload, std::byte signature) {
+    std::vector<std::byte> expected{std::byte{0x85}, std::byte{0x73}};
+    for (char c : std::string_view{"CounterSignature0V2"}) {
+        expected.push_back(std::byte(c));
+    }
+    expected.insert(expected.end(),
+                    {std::byte{0x40}, std::byte{0x41}, aad, std::byte{0x41}, payload, std::byte{0x81}, std::byte{0x41}, signature});
+    return expected;
+}
+
+} // namespace
+
 TEST_SUITE("cbor_wire/cwt/countersignatures") {
+    TEST_CASE("an abbreviated countersignature keeps AAD and caller storage apart") {
+        // Detached, so the payload is an argument of its own
+        cose_sign1             target{.protected_header = {}, .unprotected = {}, .payload = std::nullopt, .signature = {std::byte{0x02}}};
+        std::vector<std::byte> aad{std::byte{0x03}};
+        std::vector<std::byte> payload{std::byte{0x01}};
+
+        SUBCASE("a container that is not written to is the AAD") {
+            auto signature = countersign0<recording_es256_backend>(nullptr, target, std::as_const(aad), payload);
+            static_assert(std::same_as<decltype(signature), expected<std::vector<std::byte>, status_code>>);
+
+            REQUIRE(signature);
+            CHECK(*signature == std::vector<std::byte>{std::byte{0x51}});
+            CHECK(aad == std::vector<std::byte>{std::byte{0x03}});
+            CHECK(recording_es256_backend::signed_bytes == countersignature0_input(std::byte{0x03}, std::byte{0x01}, std::byte{0x02}));
+        }
+
+        SUBCASE("a std::span<std::byte> is storage for the signature") {
+            std::array<std::byte, 4> storage{};
+
+            auto written = countersign0<recording_es256_backend>(nullptr, target, std::span<std::byte>{storage}, aad, payload);
+            static_assert(std::same_as<decltype(written), expected<std::size_t, status_code>>);
+
+            REQUIRE(written);
+            CHECK(*written == 1);
+            CHECK(storage.front() == std::byte{0x51});
+            CHECK(aad == std::vector<std::byte>{std::byte{0x03}});
+            CHECK(recording_es256_backend::signed_bytes == countersignature0_input(std::byte{0x03}, std::byte{0x01}, std::byte{0x02}));
+        }
+    }
+
     TEST_CASE("countersignature signature input includes independent framing and original signature") {
         cose_sign1       target{.protected_header = {std::byte{0xa0}},
                                 .unprotected      = {},
