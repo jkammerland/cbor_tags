@@ -2,7 +2,10 @@
 
 The encoder and decoder (`make_encoder`, `make_decoder`) process the requested
 items within one call. Running out of input or output space ends that call. Use a resumable
-operation to wait for more storage and continue where it stopped.
+operation to wait for more storage and continue where it stopped. This guide
+calls the encoder and decoder that `make_encoder` and `make_decoder` return
+*ordinary*, and the ones from `make_resumable_encoder` and
+`make_resumable_decoder` *resumable*.
 
 Include `<cbor_tags/cbor_resumable.h>`, bind caller-owned storage once, then add
 more input or output space and call argument-free `resume()`. Operation creation
@@ -517,9 +520,12 @@ int main() {
 ```
 
 Inside a hook, `co_await decoder(fields...)` or `co_await encoder(fields...)`
-retains progress in those fields across input or output deliveries. A hook may
-wait only through these calls or the [retry helper](#delegate-to-a-codec).
-Perform unrelated asynchronous work between calls to `resume()`.
+retains progress in those fields across input or output deliveries. A hook must
+wait only through these calls or [`retry(value)`](#delegate-to-a-codec). The
+operation does not track any other wait: `resume()` would still report
+`need_input` or `need_output`, and cancelling or destroying the operation
+destroys the hook under a continuation held elsewhere. Perform unrelated
+asynchronous work between calls to `resume()`.
 
 Member, ADL, and mixin `encode`/`decode` customizations need a resumable hook or
 an explicit [retry declaration](#retry-declarations). Library codecs follow the
@@ -553,7 +559,25 @@ ADL, member, and codec-mixin hooks return exactly `resumable<status_code>`;
 an lvalue. An encode hook takes it as `const`, and a member encode hook is a
 `const` member, so a const value reaches the hook too. Explicit hooks take
 precedence over ordinary codecs; see the
-[custom hook example](../examples/45_resumable_custom_hook.cpp).
+[custom hook example](../examples/45_resumable_custom_hook.cpp), which uses ADL
+hooks. As members they read:
+
+```cpp
+struct message {
+    std::uint32_t sequence{};
+    std::string   text;
+
+    template <typename Encoder>
+    ct::resumable<ct::status_code> resumable_encode(Encoder& encoder) const {
+        co_return co_await encoder(ct::wrap_as_array{sequence, text});
+    }
+
+    template <typename Decoder>
+    ct::resumable<ct::status_code> resumable_decode(Decoder& decoder) {
+        co_return co_await decoder(ct::wrap_as_array{sequence, text});
+    }
+};
+```
 
 Install mixins with `make_resumable_encoder<Codec...>` or
 `make_resumable_decoder<Codec...>`, and select options with
@@ -670,11 +694,6 @@ On an encoder, `retry(value)` can also encode those composite values because its
 output remains tentative until the whole call succeeds. The complete input or
 output for a retry must fit retained storage.
 
-A hook must wait only through `encoder(values...)`, `decoder(values...)`, or
-`retry(value)`. Unrelated waits are not tracked by the operation: `resume()` would
-still report `need_input` or `need_output`, and destroying the operation would
-invalidate a continuation held elsewhere.
-
 ### Typed arrays
 
 With `codec::typed_array`, owning RFC 8746 arrays and `as_typed_array(...)`
@@ -706,8 +725,10 @@ Other wrappers need an applicable hook or retry declaration.
 `resumable_retry_traits<T, Codec = void>` defaults both `encode` and `decode`
 to `false`. Specialize it before instantiating an operation; a flag the
 specialization leaves out stays `false`. Omit `Codec` for member or ADL
-customizations; for a mixin, specialize on its `Codec<Transcoder>` instantiation for the
-encoder or decoder that runs the retried call:
+customizations; for a mixin, write a partial specialization over every
+`Transcoder`, as in the second declaration. It is looked up with the ordinary
+encoder or decoder that the resumable one makes the retried call on, a type
+you cannot spell:
 
 ```cpp
 // transactional_record's decoder must publish changes only after success.

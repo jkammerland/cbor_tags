@@ -20,7 +20,7 @@ There are two codecs because the wire formats do different things:
 `codec::shared_ptr` works with ordinary encoders and decoders. Resumable ones
 reject it because graph scope updates need to survive suspension without being
 repeated; see
-[resumable codec composition](resumable.md#custom-codecs-and-supported-combinations).
+[resumable codec composition](resumable.md#compose-custom-codecs).
 
 Both codecs use structural concepts rather than matching only the standard
 pointer templates. `IsUniquePointer`, `IsSharedPointer`, and `IsSmartPointer`
