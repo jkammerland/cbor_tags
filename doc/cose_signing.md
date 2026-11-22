@@ -174,7 +174,8 @@ The example's application policy requires exactly two signatures in an agreed
 order and verifies each index with its corresponding trusted key. It rejects
 a wrong key, a damaged signature and a missing signer. The no-index
 `verify_sign(key, message, aad)` overload checks every signature using that one
-key; use the indexed overload or `verify_signature` when signers have different
+key, and `{}` in the AAD position is an empty AAD; use the indexed overload,
+which takes an integer there, or `verify_signature` when signers have different
 keys. Key selection and whether one, all or a threshold of signers is required
 remain application policy. Apply the claim policy from example 25 after that
 signature policy succeeds.
