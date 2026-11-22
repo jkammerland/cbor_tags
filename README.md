@@ -134,7 +134,7 @@ other CBOR implementations agree on that tag and schema.
 
 | Concern | Ordinary API contract |
 | --- | --- |
-| Destinations | Owning strings and sequences append; maps insert. Start empty for a fresh value. Fixed destinations assign elements; typed-array destination wrappers replace contents. See [destination rules](doc/decoder_resource_limits.md#decoder-contract) and [typed arrays](doc/rfc8746_typed_arrays.md). |
+| Destinations | Owning strings and sequences append; maps add entries and replace the value of a key already present. Start empty for a fresh value. Fixed destinations assign elements; typed-array destination wrappers replace contents. See [destination rules](doc/decoder_resource_limits.md#decoder-contract) and [typed arrays](doc/rfc8746_typed_arrays.md). |
 | Trailing bytes | A call reads its requested items and leaves trailing input unread. Compare `tell()` with the supplied end when the message must consume the buffer. |
 | Numeric conversion | Default integer decoding permits narrowing; [strict integer options](doc/options.md#strict-integer-decode) require representability. Floating-point destinations require the matching wire width. |
 | Validation | Typed decoding is distinct from [structural/text validation](doc/traversal.md). Neither implies an application profile or duplicate-key rejection. |

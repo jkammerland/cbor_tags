@@ -303,7 +303,8 @@ using bounded_rows = ct::max_size<std::vector<bounded_row>, 16>;
 Static and runtime bounds describe the cardinality of one encoded or decoded
 CBOR item. They are not persistent invariants on the backing C++ container.
 Decoding into an existing mutable destination validates only the incoming item,
-then follows the core decoder's append/insert contract:
+then follows the core decoder's
+[destination contract](decoder_resource_limits.md#decoder-contract):
 
 ```cpp
 namespace ct = cbor::tags;

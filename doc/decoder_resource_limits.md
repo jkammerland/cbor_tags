@@ -15,10 +15,11 @@ For streaming or resumable parsing, enforce the same policy against the cumulati
 
 ## Decoder Contract
 
-The core CBOR decoder accumulates into mutable owning sequence destinations.
-Arrays, maps, byte strings, and text strings are appended to or inserted into;
-they are not cleared first. Initialize a destination empty when replacement
-semantics are wanted. Codec extensions can define a different destination
+The core CBOR decoder accumulates into mutable owning destinations. Arrays,
+byte strings, and text strings are appended to. Maps get the decoded entries
+added, and a key that is already present gets the decoded value. None of them
+is cleared first. Initialize a destination empty when replacement semantics
+are wanted. Codec extensions can define a different destination
 contract.
 
 ```cpp

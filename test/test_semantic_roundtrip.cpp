@@ -128,3 +128,15 @@ TEST_CASE("core roundtrip replaces preseeded scalar optional and variant state")
     test_support::roundtrip_into(input, output);
     CHECK(output == input);
 }
+
+TEST_CASE("core decoding into a map with entries adds keys and replaces the value of a key already there") {
+    // {1: 10, 2: 20}
+    const std::vector<std::byte> wire{std::byte{0xa2}, std::byte{0x01}, std::byte{0x0a}, std::byte{0x02}, std::byte{0x14}};
+
+    std::map<int, int> destination{{1, 99}, {7, 70}};
+    auto               decoder = cbor::tags::make_decoder(wire);
+    const auto         result  = decoder(destination);
+
+    REQUIRE(result);
+    CHECK(destination == std::map<int, int>{{1, 10}, {2, 20}, {7, 70}});
+}
