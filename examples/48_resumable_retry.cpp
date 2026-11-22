@@ -4,6 +4,8 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <iostream>
+#include <limits>
 #include <vector>
 
 namespace ct = cbor::tags;
@@ -49,5 +51,22 @@ int main() {
     const auto decode_result = operation.result();
     assert(decode_result);
     assert(received == sent);
+    std::cout << "decoded " << received << '\n';
+
+    // An infinity is a valid double on the wire. The hook's own rule refuses it
+    std::vector<std::byte> infinite_wire;
+    auto infinite_encoder = ct::make_encoder(infinite_wire);
+    const auto infinite_result = infinite_encoder(std::numeric_limits<double>::infinity());
+    assert(infinite_result);
+
+    auto rejecting_decoder = ct::make_resumable_decoder<finite_doubles>(infinite_wire);
+    double refused{};
+    auto rejection = rejecting_decoder(refused);
+    assert(rejection.done());
+    assert(!rejection.result());
+
+    // The destination was written before the rule ran, so it holds the infinity
+    std::cout << "refused " << refused << ": " << ct::status_message(rejection.result().error())
+              << '\n';
     return 0;
 }
