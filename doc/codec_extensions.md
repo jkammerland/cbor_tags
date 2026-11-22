@@ -174,6 +174,11 @@ ask the decoder for a `T` at the byte it started on, for example through a
 `std::optional<T>` or a variant with `T` among its alternatives. The decoder would
 step back and call the codec again, so that read ends with `status_code::error`.
 
+The decoder ends that loop for `decode(T&)` only. A
+`decode(T&, major, additional_info)` that passes its header on to a value
+containing a `T`, and a type whose own `decode` asks the decoder for itself,
+call themselves until the stack runs out.
+
 To read `T` the way the decoder does without the codec, read the first byte with
 `dec.read_initial_byte()` and pass it to `dec.decode(value, major,
 additional_info)`. This codec accepts a port as a number or as decimal text:
@@ -197,8 +202,11 @@ struct port_or_text : cbor::tags::codec::decoder_base<Self> {
             return status;
         }
 
-        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), port);
-        return parsed.ec == std::errc{} ? cbor::tags::status_code::success : cbor::tags::status_code::error;
+        // All of the text has to be the number: "80abc" is not a port
+        const auto end    = text.data() + text.size();
+        const auto parsed = std::from_chars(text.data(), end, port);
+        const bool whole  = parsed.ec == std::errc{} && parsed.ptr == end;
+        return whole ? cbor::tags::status_code::success : cbor::tags::status_code::error;
     }
 };
 ```
