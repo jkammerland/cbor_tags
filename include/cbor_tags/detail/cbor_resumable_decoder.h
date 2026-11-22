@@ -605,8 +605,11 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
         } else if constexpr (IsIndefiniteWrapper<U>) {
             check_progress<indefinite_value_t<U>>();
             return bounded_container(value, 0, std::numeric_limits<std::uint64_t>::max());
-        } else if constexpr (resumable_wrap_array<U>)
-            return group(value.values_, true);
+        } else if constexpr (resumable_wrap_array<U>) {
+            // The places themselves. Handing on the tuple a wrapper spreads
+            // would decode into a copy of it
+            return group(std::apply([](auto &...places) { return std::tie(places...); }, value.values_), true);
+        }
 #if CBOR_TAGS_HAS_NAMED_REFLECTION
         else if constexpr (IsNamedMapWrapper<U>)
             return named_map(value.value_);

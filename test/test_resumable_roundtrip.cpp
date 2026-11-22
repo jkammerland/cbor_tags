@@ -1844,4 +1844,22 @@ TEST_SUITE("roundtrip/resumable") {
         REQUIRE(operation.result());
         CHECK(to_hex(output) == "830462616205");
     }
+
+    TEST_CASE("both decoders write the tuple a wrap_as_array spreads") {
+        // [1, "ab"]
+        const auto input = to_bytes("8201626162");
+
+        std::tuple<int, std::string> ordinary;
+        auto                         decoder = make_decoder(input);
+        auto                         result  = decoder(wrap_as_array{ordinary});
+        REQUIRE(result);
+        CHECK(ordinary == std::tuple<int, std::string>{1, "ab"});
+
+        std::tuple<int, std::string> resumed;
+        auto                         resumable_decoder = make_resumable_decoder(input);
+        auto                         operation         = resumable_decoder(wrap_as_array{resumed});
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(resumed == std::tuple<int, std::string>{1, "ab"});
+    }
 }
