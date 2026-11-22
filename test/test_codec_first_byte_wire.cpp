@@ -318,7 +318,7 @@ using input_chunks = std::list<std::span<const std::byte>>;
 constexpr std::string_view TRAILER_HEX{"182a"};
 constexpr int              TRAILER{42};
 
-// One T and the trailer, with a one-shot decoder over the whole input
+// One T and the trailer, with an ordinary decoder over the whole input
 template <typename T, typename Input, template <typename> typename... Codecs> T read_one_shot(const Input &input) {
     T   value{};
     int trailer{};
@@ -355,7 +355,7 @@ template <typename T, template <typename> typename... Codecs> T read_resumable(c
     return value;
 }
 
-// The bytes through a one-shot decoder, from a vector and from a deque. Each
+// The bytes through an ordinary decoder, from a vector and from a deque. Each
 // value that comes back is handed to look
 template <typename T, template <typename> typename... Codecs> void check_one_shot_reads(std::string_view hex, const auto &look) {
     CAPTURE(hex);
@@ -363,11 +363,11 @@ template <typename T, template <typename> typename... Codecs> void check_one_sho
     const std::deque<std::byte> segments(bytes.begin(), bytes.end());
 
     {
-        INFO("one-shot");
+        INFO("ordinary");
         look(read_one_shot<T, std::vector<std::byte>, Codecs...>(bytes));
     }
     {
-        INFO("one-shot, input that isn't contiguous");
+        INFO("ordinary, input that isn't contiguous");
         look(read_one_shot<T, std::deque<std::byte>, Codecs...>(segments));
     }
 }

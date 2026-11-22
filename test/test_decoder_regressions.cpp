@@ -1283,7 +1283,7 @@ TEST_CASE("decoder should report incomplete indefinite bstr without retry contra
     CHECK_EQ(result.error(), status_code::incomplete);
 }
 
-TEST_CASE("decoder should decode complete definite values in one shot") {
+TEST_CASE("decoder should decode complete definite values in one call") {
     std::vector<std::byte> buffer;
     auto                   enc = make_encoder(buffer);
     REQUIRE(enc(std::vector<int>{1, 2, 3}, std::map<int, int>{{1, 2}}, std::string{"ok"}));
@@ -1295,13 +1295,13 @@ TEST_CASE("decoder should decode complete definite values in one shot") {
     std::string        label;
     auto               result = dec(values, mapping, label);
 
-    REQUIRE_MESSAGE(result, "Complete definite values should decode through the one-shot path.");
+    REQUIRE_MESSAGE(result, "Complete definite values should decode through the ordinary decoder.");
     CHECK_EQ(values, std::vector<int>{1, 2, 3});
     CHECK_EQ(mapping, (std::map<int, int>{{1, 2}}));
     CHECK_EQ(label, "ok");
 }
 
-TEST_CASE("decoder should decode complete non-contiguous definite and indefinite values in one shot") {
+TEST_CASE("decoder should decode complete non-contiguous definite and indefinite values in one call") {
     std::deque<std::byte> buffer{
         std::byte{0x82}, std::byte{0x01}, std::byte{0x02},                  // array [1, 2]
         std::byte{0xA1}, std::byte{0x01}, std::byte{0x02},                  // map {1: 2}
@@ -1321,7 +1321,7 @@ TEST_CASE("decoder should decode complete non-contiguous definite and indefinite
     std::string            text;
     auto                   result = dec(definite_values, definite_mapping, indefinite_values, indefinite_mapping, bytes, text);
 
-    REQUIRE_MESSAGE(result, "Complete non-contiguous definite and indefinite values should decode in one shot.");
+    REQUIRE_MESSAGE(result, "Complete non-contiguous definite and indefinite values should decode in one call.");
     CHECK_EQ(definite_values, std::vector<int>{1, 2});
     CHECK_EQ(definite_mapping, (std::map<int, int>{{1, 2}}));
     CHECK_EQ(indefinite_values, std::vector<int>{3, 4});

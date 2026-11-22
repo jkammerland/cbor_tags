@@ -18,7 +18,7 @@ struct point {
     int y{};
 };
 
-// Tagged, so an ordinary variant reads the tag and then asks the codecs with it
+// Tagged, so in a variant the ordinary decoder reads the tag and then asks the codecs with it
 struct reading {
     static constexpr std::uint64_t cbor_tag = 100;
     int                            value{};
@@ -102,7 +102,7 @@ template <typename Self> struct reversed_ints_decoder {
     }
 };
 
-// An ordinary variant calls this once it has read the tag
+// The ordinary decoder calls this for a variant once it has read the tag
 template <typename Self> struct offset_readings_decoder {
     ct::status_code decode(reading &value, std::uint64_t tag) {
         if (tag != reading::cbor_tag)

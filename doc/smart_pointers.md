@@ -17,7 +17,7 @@ There are two codecs because the wire formats do different things:
 - `cbor::tags::codec::shared_ptr` writes CBOR shared-reference tags 28 and 29 so repeated
   pointers decode to the same object.
 
-`codec::shared_ptr` works with one-shot encoders and decoders. Resumable ones
+`codec::shared_ptr` works with ordinary encoders and decoders. Resumable ones
 reject it because graph scope updates need to survive suspension without being
 repeated; see
 [resumable codec composition](resumable.md#custom-codecs-and-supported-combinations).
@@ -401,7 +401,7 @@ Cycles are rejected. A tag 29 reference may only target a completed tag 28
 entry. The codec does not prewalk the graph and does not roll back after a
 failure.
 
-One-shot decode is terminal as elsewhere in the library. If a pointee decode
+Ordinary decoding is terminal as elsewhere in the library. If a pointee decode
 returns `incomplete`, the allocated pointer and decoded prefix remain in the
 destination, and the scope remains in its terminal failed state. Reset or
 discard both before reuse.

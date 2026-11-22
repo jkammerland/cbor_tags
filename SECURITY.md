@@ -17,7 +17,7 @@ documented contracts.
 The application owns:
 
 - input lifetime, transport framing, admission limits, and the stable admitted
-  range supplied to a one-shot decoder call;
+  range supplied to an ordinary decoder call;
 - the selected C++ destination schema and the data model it authorizes;
 - custom codecs and member or free encoder, decoder, and transcoder functions;
 - allocator policy and application-specific resource limits; and
@@ -60,6 +60,6 @@ Reports without a concrete library-owned operation and violated guarantee are
 treated as application behavior or hardening suggestions rather than security
 vulnerabilities.
 
-For the one-shot decoder's detailed ownership, input, failure, and destination
+For the ordinary decoder's detailed ownership, input, failure, and destination
 semantics, see the
 [decoder contract](doc/decoder_resource_limits.md#decoder-contract).

@@ -38,7 +38,7 @@ struct tagged_record {
 
 enum class retry_level : std::uint32_t { low = 7 };
 
-// The same codec is legal ordinary but has no replay declaration.
+// Fine in an ordinary encoder, but nothing says it may be retried.
 template <typename Self> struct undeclared_encoder : codec::encoder_base<Self> {
     using codec::encoder_base<Self>::encode;
     void encode(std::uint32_t value) { static_cast<Self &>(*this).encode(std::uint64_t{value}); }

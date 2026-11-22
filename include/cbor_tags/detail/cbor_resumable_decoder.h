@@ -1079,7 +1079,7 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
     // finishes. Only metadata-only candidate selection can return eagerly.
     template <std::size_t I, typename T> resumable<status_code> selected_alternative(T &value) {
         using U = variant_alternative_t<I, T>;
-        // An ordinary variant has read the tag by now and asks the codecs with it
+        // The ordinary decoder has read the variant's tag by now and asks the codecs with it
         static_assert(!IsTag<U> || !(own_hook_beats_codec<U, payload_decode_context::tag>()),
                       "an installed codec defines decode for this type and has no resumable hook, so the type's own hook "
                       "would run here and the codec in an ordinary decoder, give the codec a resumable_decode too");
@@ -1089,7 +1089,7 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())
             status = co_await item(decoded);
         else if constexpr (IsVariant<U>)
-            // Ordinary variant selection recurses directly into nested alternatives.
+            // The ordinary decoder's variant selection recurses directly into nested alternatives.
             // An inner variant's ordinary codec is not part of that route.
             status = co_await variant(decoded);
         else if constexpr (IsTag<U> && !IsVariant<U> && !IsOptional<U>) {
