@@ -199,6 +199,8 @@ Decode into storage other than the input. A text or byte string destination
 whose bytes are the decoder's input ends the operation with
 `status_code::input_output_aliasing`, as with an ordinary decoder; see
 [unchecked input/output aliasing](options.md#unchecked-inputoutput-aliasing).
+For input in several pieces the check covers the piece being read. Keeping the
+destination apart from the other pieces is up to the caller.
 
 ## Borrow decoded strings and items
 
@@ -536,8 +538,9 @@ arrival; use `as_bounded_size<0, limit>(values)` or a bounded allocator to impos
 application limits, with allocation failure reported as `out_of_memory`.
 
 A value inside another value is handled by a call inside its parent's, so stack
-use follows the nesting depth of the data, as it does for ordinary encoders and
-decoders. Only a recursive type lets the input choose that depth; see
+use follows the nesting depth of the data. Each level takes more stack than it
+does in an ordinary encoder or decoder. The input chooses that depth where the
+destination is a recursive type, and for a validator up to its `max_depth`; see
 [Recursive Decode Paths](decoder_resource_limits.md#recursive-decode-paths).
 
 Changing transport chunk boundaries must preserve decoded values. Test custom
