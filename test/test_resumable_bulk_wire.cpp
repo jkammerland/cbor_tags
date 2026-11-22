@@ -391,16 +391,43 @@ TEST_SUITE("cbor_wire/resumable_bulk") {
         CHECK(output == expected);
     }
 
-    TEST_CASE("empty output waits on the header without writing") {
+    TEST_CASE("output without room for the whole header waits without writing") {
         std::deque<std::span<std::byte>> chunks;
         auto                             source  = ct::make_output_buffer(chunks);
         auto                             encoder = ct::make_resumable_encoder(source);
-        const std::array                 value{std::byte{1}};
-        auto                             operation = encoder(value);
 
-        REQUIRE_FALSE(operation.done());
-        CHECK(operation.committed_bytes() == 0);
-        CHECK(source.position().offset() == 0);
+        SUBCASE("no room at all") {
+            const std::array value{std::byte{1}};
+            auto             operation = encoder(value);
+
+            REQUIRE_FALSE(operation.done());
+            CHECK(operation.committed_bytes() == 0);
+            CHECK(source.position().offset() == 0);
+        }
+
+        SUBCASE("one byte of room for a header of two") {
+            // 24 bytes have the header 58 18. Its first byte would fit
+            std::array<std::byte, 24> value{};
+            value.fill(std::byte{1});
+            std::array<std::byte, 1>  first{};
+            std::array<std::byte, 32> rest{};
+            chunks.emplace_back(first);
+
+            auto operation = encoder(value);
+            REQUIRE_FALSE(operation.done());
+            CHECK(operation.committed_bytes() == 0);
+            CHECK(source.position().offset() == 0);
+
+            chunks.emplace_back(rest);
+            operation.resume();
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == 26);
+
+            std::vector<std::byte> expected{std::byte{0x58}, std::byte{0x18}};
+            expected.insert(expected.end(), 24, std::byte{1});
+            CHECK(std::vector<std::byte>(source.begin(), source.end()) == expected);
+        }
     }
 
     TEST_CASE("a short payload write suspends without probing the exhausted source again") {
