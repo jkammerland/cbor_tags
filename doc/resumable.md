@@ -172,7 +172,9 @@ output instead of starting another operation on it.
 Use `make_input_source(storage)` or `make_output_buffer(storage)` when the
 source or output buffer must outlive one encoder or decoder, or share its
 position between operation kinds. Encoders and decoders borrow them; validators
-and generators require a source.
+and generators require a source. A resumable encode operation starts after
+everything that is in the output buffer, including what an ordinary encoder
+wrote there, and keeps it.
 
 Default adapters support flat and nested byte ranges, including owning inner
 containers and borrowed spans. Input may bind through a const reference to the

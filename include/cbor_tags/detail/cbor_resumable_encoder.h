@@ -90,7 +90,11 @@ class resumable_encode_context : public resumable_codec_mixin<Codecs<resumable_e
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_output;
 
-    resumable_encode_context(Source &source, resume_control &control) : source_(source), control_(control), encoder_(source) {}
+    resumable_encode_context(Source &source, resume_control &control) : source_(source), control_(control), encoder_(source) {
+        // What is in the buffer by now is somebody else's, an ordinary
+        // encoder's say. A retry of this operation goes back to here, not over it
+        source_.commit();
+    }
 
     // Hooks compose values through operator() or retry a complete codec call.
     template <typename... T> resumable<status_code> operator()(T &&...value) {
