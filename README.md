@@ -147,7 +147,6 @@ Choose the next example by task:
 | Fixed storage or bounded destinations | [Decoder resource limits](doc/decoder_resource_limits.md) |
 | Borrow a view | [Byte-view example](examples/20_experimental_byte_view.cpp) |
 | Process consecutive items | [Basic values](examples/01_basic_values.cpp) and [per-call byte counts](doc/options.md#return-byte-counts) |
-| Resume an incoming stream | [Resumable API proposal](https://github.com/jkammerland/cbor_tags/pull/225) |
 | Add a custom codec | [Codec extensions](doc/codec_extensions.md) |
 
 ### Advanced Type Support
