@@ -116,7 +116,7 @@ int main() {
 | Compute a thumbprint | Hashes required public parameters only; text curves need resolution and compressed EC2 points need expansion. |
 | Supply a SHA-256 backend | Implement `digest(parts, output)` returning `expected<void, status_code>`; consume byte spans once and write 32 bytes. |
 | Import a P-256 key | Checks the point, algorithm, and verification permission; the OpenSSL handle retains the algorithm restriction. |
-| Validate key use | Checks representation and metadata restrictions, not mathematical validity; absent operations are unrestricted, an empty list permits none. |
+| Validate key use | Checks representation and metadata restrictions, not mathematical validity; absent operations are unrestricted, an empty list permits none. The key type must be the algorithm's, and for `esp256`, `esp384`, `esp512`, `ed25519` and `ed448` the curve as well. |
 
 ## Confirm the presenter's key
 

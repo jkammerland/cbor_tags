@@ -51,6 +51,48 @@ TEST_CASE("cwt public keys preserve compressed points and key restrictions") {
     CHECK_FALSE(cwt::validate_key_use(received, cwt::algorithm::esp256));
 }
 
+TEST_CASE("key use requires the key type and curve of the algorithm") {
+    cwt::ec2_public_key p256;
+    p256.x.assign(32, std::byte{3});
+    p256.y = std::vector<std::byte>(32, std::byte{4});
+
+    cwt::ec2_public_key p384;
+    p384.curve = 2;
+    p384.x.assign(48, std::byte{3});
+    p384.y = std::vector<std::byte>(48, std::byte{4});
+
+    cwt::okp_public_key ed25519;
+    ed25519.x.assign(32, std::byte{7});
+
+    cwt::rsa_public_key rsa;
+    rsa.modulus  = {std::byte{0x80}, std::byte{1}};
+    rsa.exponent = {std::byte{3}};
+
+    // ESP256 is ECDSA with P-256, and each fully specified algorithm is as exact
+    CHECK(cwt::validate_key_use(p256, cwt::algorithm::esp256));
+    CHECK_FALSE(cwt::validate_key_use(p384, cwt::algorithm::esp256));
+    CHECK_FALSE(cwt::validate_key_use(ed25519, cwt::algorithm::esp256));
+    CHECK_FALSE(cwt::validate_key_use(rsa, cwt::algorithm::esp256));
+    CHECK(cwt::validate_key_use(p384, cwt::algorithm::esp384));
+    CHECK_FALSE(cwt::validate_key_use(p256, cwt::algorithm::esp384));
+    CHECK(cwt::validate_key_use(ed25519, cwt::algorithm::ed25519));
+    CHECK_FALSE(cwt::validate_key_use(ed25519, cwt::algorithm::ed448));
+    CHECK_FALSE(cwt::validate_key_use(p256, cwt::algorithm::ed25519));
+
+    // The older identifiers leave the curve open, not the kind of key
+    CHECK(cwt::validate_key_use(p256, cwt::algorithm::es256));
+    CHECK(cwt::validate_key_use(p384, cwt::algorithm::es256));
+    CHECK_FALSE(cwt::validate_key_use(ed25519, cwt::algorithm::es256));
+    CHECK(cwt::validate_key_use(ed25519, cwt::algorithm::eddsa));
+    CHECK_FALSE(cwt::validate_key_use(p256, cwt::algorithm::eddsa));
+
+    // A curve with a name of its own is not P-256
+    cwt::ec2_public_key named = p256;
+    named.curve               = "application-curve";
+    CHECK_FALSE(cwt::validate_key_use(named, cwt::algorithm::esp256));
+    CHECK(cwt::validate_key_use(named, cwt::algorithm::es256));
+}
+
 TEST_CASE("cwt rsa and okp public keys round trip") {
     cwt::rsa_public_key rsa;
     rsa.modulus  = {std::byte{0x80}, std::byte{1}};
