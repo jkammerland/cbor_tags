@@ -108,9 +108,35 @@ done
 # A global attacker keyring and options cannot participate in verification.
 export GNUPGHOME="${attacker_home}"
 printf 'auto-key-retrieve\nkeyserver hkp://127.0.0.1:1\n' >"${attacker_home}/gpg.conf"
+ambient_keys() {
+    gpg --no-options --batch --with-colons --list-keys | awk -F: '$1 == "fpr" {print $10}'
+}
+[[ "$(ambient_keys)" == "${attacker_fingerprint}" ]]
+
 lowercase_fingerprint="$(printf '%s' "${fixture_fingerprint}" | tr '[:upper:]' '[:lower:]')"
 verify_signed_assets "${package_dir}" 0.28.0 "${lowercase_fingerprint}"
 echo 'trusted signing subkey with hostile global keyring: OK'
+
+# The check above also passes when the ambient keyring does the verifying: the
+# trusted key is imported there and the fingerprint still matches. So look at
+# the keyrings. The ambient one got nothing
+[[ "$(ambient_keys)" == "${attacker_fingerprint}" ]]
+echo 'ambient keyring unchanged by verification: OK'
+
+# The verification keyring holds the imported key and nothing ambient
+isolated_home="${test_root}/isolated"
+mkdir -m 700 -- "${isolated_home}"
+authenticate_release_key "${isolated_home}" "${test_root}/trusted.asc" "${fixture_fingerprint}"
+[[ "$(release_gpg "${isolated_home}" --with-colons --list-keys | awk -F: '/^pub:/ {want = 1; next} want && /^fpr:/ {print $10; want = 0}')" == "${fixture_fingerprint}" ]]
+echo 'ambient key invisible to verification: OK'
+
+# So a signature by the ambient key has no key to be checked with
+printf 'signed by the ambient key\n' >"${test_root}/ambient-payload"
+gpg --no-options --batch --yes --pinentry-mode loopback --passphrase '' --local-user "${attacker_fingerprint}" \
+    --output "${test_root}/ambient-payload.sig" --detach-sign "${test_root}/ambient-payload"
+ambient_status="$(release_gpg "${isolated_home}" --status-fd 1 --verify "${test_root}/ambient-payload.sig" "${test_root}/ambient-payload" 2>/dev/null || true)"
+grep -Fx "[GNUPG:] NO_PUBKEY ${attacker_fingerprint:24}" <<<"${ambient_status}" >/dev/null
+echo 'signature by the ambient key finds no key: OK'
 
 write_release_verification_commands 0.28.0 >"${test_root}/generated.sh"
 grep -Fx 'expected_fingerprint=7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D' "${test_root}/generated.sh"
@@ -123,6 +149,8 @@ bash -n "${test_root}/generated.sh"
 } >"${test_root}/fixture-commands.sh"
 (cd -- "${package_dir}" && bash "${test_root}/fixture-commands.sh")
 echo 'generated consumer commands: OK'
+[[ "$(ambient_keys)" == "${attacker_fingerprint}" ]]
+echo 'ambient keyring unchanged by the consumer commands: OK'
 
 cp -- "${test_root}/attacker.asc" "${package_dir}/cbor_tags-release-public-key.asc"
 expect_failure 'consumer wrong key' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
