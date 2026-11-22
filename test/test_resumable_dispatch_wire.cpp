@@ -212,11 +212,13 @@ TEST_SUITE("cbor_wire/resumable") {
         REQUIRE(std::get<0>(direct) == 1256);
 
         // Direct and optional values still use the codec in resumable mode.
-        auto direct_decoder   = ct::make_resumable_decoder<inner_codec>(input);
-        auto direct_operation = direct_decoder(direct);
+        // A value of its own: direct already holds 1256 from above
+        inner resumed;
+        auto  direct_decoder   = ct::make_resumable_decoder<inner_codec>(input);
+        auto  direct_operation = direct_decoder(resumed);
         REQUIRE(direct_operation.done());
         REQUIRE(direct_operation.result());
-        CHECK(std::get<0>(direct) == 1256);
+        CHECK(std::get<0>(resumed) == 1256);
         std::optional<inner> optional;
         auto                 optional_decoder   = ct::make_resumable_decoder<inner_codec>(input);
         auto                 optional_operation = optional_decoder(optional);
