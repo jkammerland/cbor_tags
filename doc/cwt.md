@@ -174,7 +174,7 @@ public third-party dependencies. Conan's aggregate target is `cbor::all`.
   preserves it; the decoder cursor remains terminal, without rollback.
 - Duplicate integer or text claim labels are rejected, including unknown and
   noncanonical spellings. Unknown integer and text claims are consumed and discarded.
-- Integer dates must fit `int64_t`; floating dates must be finite.
+- Integer dates must fit `int64_t`; floating dates of any width must be finite.
 - Header labels accept integers or text. Duplicate labels within each map,
   unsupported/empty `crit`, absent critical targets and trailing protected-header
   bytes are rejected. Supported critical targets are `alg` (1) and `kid` (4).

@@ -325,6 +325,42 @@ TEST_SUITE("cbor_wire/cwt") {
         }
     }
 
+    TEST_CASE("CWT NumericDate accepts a float of every width") {
+        constexpr std::array accepted{
+            // fa 4e e1 b7 b1 is 1893456000 as a float32, f9 3e 00 is 1.5 as a float16
+            std::pair{"a104fa4ee1b7b1", 1893456000.0},
+            std::pair{"a104f93e00", 1.5},
+            std::pair{"a104fb3ff8000000000000", 1.5},
+        };
+        for (const auto &[hex, expected_value] : accepted) {
+            CAPTURE(hex);
+            auto       input = to_bytes(hex);
+            claims_set decoded;
+
+            auto decoder = make_decoder<codec::cwt>(input);
+            auto result  = decoder(decoded);
+
+            REQUIRE(result);
+            CHECK_EQ(decoded.expiration, numeric_date{expected_value});
+        }
+
+        // Infinity as a float32 and as a float16, and a float16 NaN
+        constexpr std::array rejected{"a104fa7f800000", "a104f97c00", "a104f97e00"};
+        for (const auto hex : rejected) {
+            CAPTURE(hex);
+            auto       input = to_bytes(hex);
+            claims_set decoded;
+            decoded.expiration = std::int64_t{42};
+
+            auto decoder = make_decoder<codec::cwt>(input);
+            auto result  = decoder(decoded);
+
+            REQUIRE_FALSE(result);
+            CHECK_EQ(result.error(), status_code::error);
+            CHECK_EQ(decoded.expiration, numeric_date{std::int64_t{42}});
+        }
+    }
+
     TEST_CASE("COSE protected header and explicit Sign1 structure encode in RFC shape") {
         const auto protected_header = encode_protected_header(header_map{.alg = algorithm::es256, .kid = std::nullopt, .crit = {}});
         REQUIRE(protected_header);
