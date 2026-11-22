@@ -32,6 +32,47 @@ expect_failure() {
     echo "${name}: OK"
 }
 
+# Fails for the reason it names, not for any reason
+expect_rejection() {
+    local name="$1"
+    local expected="$2"
+    shift 2
+    if ("$@") >"${test_root}/failure.out" 2>&1; then
+        echo "${name}: unexpectedly succeeded" >&2
+        exit 1
+    fi
+    if ! grep -F -- "${expected}" "${test_root}/failure.out" >/dev/null; then
+        printf '%s: expected output containing %q, got:\n' "${name}" "${expected}" >&2
+        cat "${test_root}/failure.out" >&2
+        exit 1
+    fi
+    echo "${name}: OK"
+}
+
+# Three assets with checksums, signed by the key in signer_home. Further
+# arguments go to the signing gpg
+write_signed_packages() {
+    local packages="$1" public_key="$2" signer_home="$3" signer="$4"
+    shift 4
+    mkdir -- "${packages}"
+    cp -- "${public_key}" "${packages}/cbor_tags-release-public-key.asc"
+
+    local asset
+    for asset in cbor_tags-0.28.0.tar.gz cbor_tags-0.28.0.zip cbor_tags-0.28.0.spdx.json; do
+        printf 'fixture %s\n' "${asset}" >"${packages}/${asset}"
+        write_checksums "${packages}/${asset}"
+        GNUPGHOME="${signer_home}" gpg --no-options --batch --yes --pinentry-mode loopback --passphrase '' "$@" \
+            --local-user "${signer}" --output "${packages}/${asset}.sig" --detach-sign "${packages}/${asset}"
+    done
+}
+
+# The commands a consumer pastes, with the fingerprint they got elsewhere
+write_consumer_commands() {
+    local fingerprint="$1"
+    printf 'expected_fingerprint=%q\n' "${fingerprint}"
+    write_release_verification_commands 0.28.0 | tail -n +2
+}
+
 for bad_key in attacker extra-primary; do
     verification_home="${test_root}/verify-${bad_key}"
     mkdir -m 700 -- "${verification_home}"
@@ -86,5 +127,51 @@ GNUPGHOME="${attacker_home}" gpg --no-options --batch --yes --pinentry-mode loop
     --local-user "${attacker_fingerprint}" --output "${payload}.sig" --detach-sign "${payload}"
 expect_failure 'attacker signature with global attacker key' verify_signed_assets "${package_dir}" 0.28.0 "${fixture_fingerprint}"
 expect_failure 'consumer attacker signature' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
+
+# The signing subkey is copied while it is good, then revoked. The key file a
+# verifier gets carries the revocation. GnuPG still exits 0 and prints VALIDSIG
+# for a signature the copy makes: only REVKEYSIG in place of GOODSIG tells
+maintainer_home="${test_root}/maintainer"
+thief_home="${test_root}/thief"
+mkdir -m 700 -- "${maintainer_home}"
+GNUPGHOME="${maintainer_home}" gpg --no-options --batch --pinentry-mode loopback --passphrase '' \
+    --quick-generate-key 'revoking primary <revoking@cbor-tags.invalid>' ed25519 cert 1d >/dev/null
+maintainer_fingerprint="$(GNUPGHOME="${maintainer_home}" gpg --no-options --with-colons --list-keys | awk -F: '/^fpr:/ {print $10; exit}')"
+GNUPGHOME="${maintainer_home}" gpg --no-options --batch --pinentry-mode loopback --passphrase '' \
+    --quick-add-key "${maintainer_fingerprint}" ed25519 sign 1d >/dev/null
+
+cp -R -- "${maintainer_home}" "${thief_home}"
+find "${thief_home}" -type s -delete
+printf 'key 1\nrevkey\ny\n1\n\ny\nsave\n' |
+    GNUPGHOME="${maintainer_home}" gpg --no-options --batch --pinentry-mode loopback --passphrase '' \
+        --command-fd 0 --edit-key "${maintainer_fingerprint}" >/dev/null 2>&1
+GNUPGHOME="${maintainer_home}" gpg --no-options --armor --export "${maintainer_fingerprint}" >"${test_root}/revoked-subkey.asc"
+[[ "$(GNUPGHOME="${maintainer_home}" gpg --no-options --with-colons --list-keys "${maintainer_fingerprint}" | awk -F: '$1 == "sub" {print $2}')" == r ]]
+
+revoked_packages="${test_root}/revoked-packages"
+write_signed_packages "${revoked_packages}" "${test_root}/revoked-subkey.asc" "${thief_home}" "${maintainer_fingerprint}"
+expect_rejection 'signature by a revoked subkey' 'was signed by a revoked key' \
+    verify_signed_assets "${revoked_packages}" 0.28.0 "${maintainer_fingerprint}"
+write_consumer_commands "${maintainer_fingerprint}" >"${test_root}/revoked-commands.sh"
+expect_failure 'consumer signature by a revoked subkey' bash -c 'cd -- "$1" && bash "$2"' _ "${revoked_packages}" "${test_root}/revoked-commands.sh"
+
+# A key that has expired since it signed. Nothing new is published with it, but
+# the key file that comes with an old release cannot change, so the commands a
+# consumer pastes keep accepting what it signed
+expired_home="${test_root}/expired"
+mkdir -m 700 -- "${expired_home}"
+GNUPGHOME="${expired_home}" gpg --no-options --batch --pinentry-mode loopback --passphrase '' --faked-system-time 20240101T000000 \
+    --quick-generate-key 'expired <expired@cbor-tags.invalid>' ed25519 sign 1d >/dev/null 2>&1
+expired_fingerprint="$(GNUPGHOME="${expired_home}" gpg --no-options --with-colons --list-keys 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
+GNUPGHOME="${expired_home}" gpg --no-options --armor --export "${expired_fingerprint}" >"${test_root}/expired.asc"
+
+expired_packages="${test_root}/expired-packages"
+write_signed_packages "${expired_packages}" "${test_root}/expired.asc" "${expired_home}" "${expired_fingerprint}" \
+    --faked-system-time 20240101T010000 2>/dev/null
+expect_rejection 'signature by an expired key' 'was signed by an expired key' \
+    verify_signed_assets "${expired_packages}" 0.28.0 "${expired_fingerprint}"
+write_consumer_commands "${expired_fingerprint}" >"${test_root}/expired-commands.sh"
+(cd -- "${expired_packages}" && bash "${test_root}/expired-commands.sh")
+echo 'consumer signature by a key that expired later: OK'
 
 echo 'release trust anchor checks passed'

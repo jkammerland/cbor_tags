@@ -28,11 +28,31 @@ authenticate_release_key() {
     release_gpg "${verification_home}" --quiet --import "${verification_key_file}"
 }
 
+# A signature by a key that has expired since is refused, unless the fourth
+# argument is accept-expired-key: for a release that is already published, whose
+# key file cannot change any more.
 authenticate_release_signature() {
     local verification_output="$1"
     local expected_fingerprint
     expected_fingerprint="$(printf '%s' "$2" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
     local description="$3"
+    local expired_key="${4:-reject-expired-key}"
+
+    # GnuPG exits 0 and prints VALIDSIG for a signature by a revoked or an
+    # expired key as well. What it makes of the key is on this line.
+    local verdicts
+    verdicts="$(awk '/^\[GNUPG:\] (GOODSIG|EXPKEYSIG|REVKEYSIG|EXPSIG|BADSIG|ERRSIG) / {
+        print $2
+    }' <<<"${verification_output}")"
+    case "${verdicts}" in
+        GOODSIG) ;;
+        EXPKEYSIG)
+            [[ "${expired_key}" == accept-expired-key ]] || die "${description} was signed by an expired key"
+            ;;
+        REVKEYSIG) die "${description} was signed by a revoked key" ;;
+        *) die "${description} needs exactly one good signature; GnuPG reported ${verdicts:-none}" ;;
+    esac
+
     local primary_fingerprints
     # VALIDSIG identifies the signing subkey first and its primary key last.
     # Requiring a single record also rejects concatenated valid signatures.
@@ -60,8 +80,11 @@ primary_fingerprints="$(awk -F: '/^pub:/ {want=1; next} want && /^fpr:/ {print t
 [[ "${primary_fingerprints}" == "${expected_fingerprint}" ]]
 release_gpg --quiet --import cbor_tags-release-public-key.asc
 verify_signature() {
-    local payload="$1" status primary
+    local payload="$1" status verdict primary
     status="$(release_gpg --status-fd 1 --verify "${payload}.sig" "${payload}")"
+    # A revoked key gives REVKEYSIG here. EXPKEYSIG is a key that expired after it signed.
+    verdict="$(awk '/^\[GNUPG:\] (GOODSIG|EXPKEYSIG|REVKEYSIG|EXPSIG|BADSIG|ERRSIG) / {print $2}' <<<"${status}")"
+    [[ "${verdict}" == GOODSIG || "${verdict}" == EXPKEYSIG ]]
     primary="$(awk '/^\[GNUPG:\] VALIDSIG / {print toupper(NF >= 12 ? $12 : $3)}' <<<"${status}")"
     [[ "${primary}" == "${expected_fingerprint}" ]]
 }

@@ -52,7 +52,10 @@ for argument in "$@"; do
                 printf '[GNUPG:] BADSIG fake\n'
                 exit 1
             fi
+            # As GnuPG reports it: what it makes of the signature and its key,
+            # then VALIDSIG. A revoked or an expired key only changes the first line
             fingerprint="${FAKE_SIGNATURE_FINGERPRINT:-7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D}"
+            printf '[GNUPG:] %s %s release\n' "${FAKE_SIGNATURE_VERDICT:-GOODSIG}" "${fingerprint:24}"
             printf '[GNUPG:] VALIDSIG %s 2026-01-01 0 4 0 19 10 00 %s\n' \
                 "${fingerprint}" "${fingerprint}"
             exit 0
@@ -106,6 +109,11 @@ expect_failure() {
 
 run_verifier >/dev/null
 echo "valid-signed-release: OK"
+
+# The archive is published and pinned by digest. Its key expiring later does not undo it
+run_verifier FAKE_SIGNATURE_VERDICT=EXPKEYSIG >/dev/null
+echo "signing-key-expired-later: OK"
+expect_failure "revoked-signing-key" "dependency archive was signed by a revoked key" FAKE_SIGNATURE_VERDICT=REVKEYSIG
 expect_failure \
     "published-digest-mismatch" \
     "published checksum is" \
