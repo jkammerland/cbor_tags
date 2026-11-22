@@ -592,7 +592,7 @@ template <typename Self> struct weight_doubling_codec : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    void encode(const weighted &value) { static_cast<Self &>(*this)(wrap_as_array{value.id, value.weight * 2}); }
+    void encode(const weighted &value) { static_cast<Self &>(*this).encode(wrap_as_array{value.id, value.weight * 2}); }
 
     status_code decode(weighted &value) {
         int        id{};
