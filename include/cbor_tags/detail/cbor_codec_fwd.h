@@ -12,12 +12,20 @@ template <typename InputBuffer, IsOptions Options, template <typename> typename.
     requires CborInputBuffer<InputBuffer>
 struct decoder;
 
+// The mixins every decoder and encoder is made of. Public construction
+// supports composition of codec mixins.
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_header_decoder;
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_indefinite_decoder;
 
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_header_encoder;
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_indefinite_encoder;
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_optional_encoder;
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 template <typename T> struct cbor_variant_encoder;
 
 } // namespace cbor::tags
