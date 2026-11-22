@@ -110,7 +110,8 @@ struct message {
 int main() {
     const message sent{42, "ready"};
     std::vector<std::byte> wire;
-    const auto encoded = ct::make_encoder(wire)(sent);
+    auto encoder = ct::make_encoder(wire);
+    const auto encoded = encoder(sent);
     if (!encoded) return 1;
 
     // Start with a fresh destination for each message.
