@@ -37,7 +37,13 @@ sign_manifest "${baseline}/${manifest_name}"
 # Reuse the actual generated verifier definitions for every hostile fixture.
 # Pass expected identity from the test, never from downloaded content.
 write_release_verification_commands "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}" >"${test_root}/generated.sh"
-{ sed '$d' "${test_root}/generated.sh"; printf 'verify_signed_assets "$@"\n'; } >"${test_root}/generated-fixture.sh"
+# They are everything before the generated call. The fixtures make their own
+# call and close the subshell the definitions were opened in
+grep -c '^verify_signed_assets \. ' "${test_root}/generated.sh" | grep -Fx 1 >/dev/null
+{
+    sed '/^verify_signed_assets \. /,$d' "${test_root}/generated.sh"
+    printf '%s\n' 'verify_signed_assets "$@"' ')'
+} >"${test_root}/generated-fixture.sh"
 verifier_shell="$(command -v "${RELEASE_VERIFIER_SHELL:-bash}")"
 
 # Exercise shasum even on hosts that also install GNU coreutils. Omitting find

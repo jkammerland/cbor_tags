@@ -57,7 +57,9 @@ To verify a download, run the release notes' verification commands with Bash
 with macOS). Run them in the directory containing all 12 release assets. They
 require the fingerprint above; the downloaded public key is not itself a source
 of trust. Verification rejects altered, missing, or unexpected assets, including
-symlinks and noncanonical checksum records.
+symlinks and noncanonical checksum records. The commands print
+`cbor_tags X.Y.Z: release assets verified`, or an error with status 2. They run
+in a subshell, so the shell they are pasted into stays as it was.
 
 ## Publishing A Release
 

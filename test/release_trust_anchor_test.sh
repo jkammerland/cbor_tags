@@ -162,8 +162,29 @@ echo 'generated consumer commands: OK'
 [[ "$(ambient_keys)" == "${attacker_fingerprint}" ]]
 echo 'ambient keyring unchanged by the consumer commands: OK'
 
+# The commands are pasted into the shell somebody is working in. That shell
+# keeps its options, gets no functions, and gets a status to look at
+pasted_into_a_shell() {
+    bash --norc --noprofile -c '
+        cd -- "$1"
+        options_before="$(set +o)"
+
+        source "$2" >/dev/null 2>&1
+        pasted_status=$?
+
+        [[ "$(set +o)" == "${options_before}" ]] || { echo "shell options changed"; exit 0; }
+        [[ -z "$(declare -F verify_signed_assets die)" ]] || { echo "functions left behind"; exit 0; }
+        echo "status ${pasted_status}"
+    ' _ "$1" "$2"
+}
+[[ "$(pasted_into_a_shell "${package_dir}" "${test_root}/fixture-commands.sh")" == 'status 0' ]]
+[[ "$(cd -- "${package_dir}" && bash "${test_root}/fixture-commands.sh")" == 'cbor_tags 0.28.0: release assets verified' ]]
+echo 'pasted consumer commands leave the shell as it was: OK'
+
 cp -- "${test_root}/attacker.asc" "${package_dir}/cbor_tags-release-public-key.asc"
 expect_failure 'consumer wrong key' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
+[[ "$(pasted_into_a_shell "${package_dir}" "${test_root}/fixture-commands.sh")" == 'status 2' ]]
+echo 'pasted consumer commands with a wrong key keep the shell open: OK'
 cp -- "${test_root}/extra-primary.asc" "${package_dir}/cbor_tags-release-public-key.asc"
 expect_failure 'consumer extra primary' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
 

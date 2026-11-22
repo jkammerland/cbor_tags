@@ -232,7 +232,9 @@ write_release_verification_commands() {
     local version="$1" repository="$2" tag="$3" tag_object="$4" commit="$5"
     validate_release_identity "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}"
     printf 'expected_fingerprint=%q\n' '7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D'
-    printf '%s\n' 'set -euo pipefail'
+    # These are pasted into the shell somebody is working in. In a subshell,
+    # set -e and die end the check and leave that shell and its options alone.
+    printf '%s\n' '(' 'set -euo pipefail'
     # Emit the shared verifier so consumer instructions and local validation use
     # the same canonical format without maintaining a second shell program.
     declare -f die release_gpg authenticate_release_key authenticate_release_signature \
@@ -242,4 +244,7 @@ write_release_verification_commands() {
     # These are pasted for a published release, also after its key has expired
     printf 'verify_signed_assets . %q "${expected_fingerprint}" %q %q %q %q %q accept-expired-key\n' \
         "${version}" '' "${repository}" "${tag}" "${tag_object}" "${commit}"
+    # The shell stays open either way now, so say which way it went
+    printf 'echo %q\n' "cbor_tags ${version}: release assets verified"
+    printf '%s\n' ')'
 }
