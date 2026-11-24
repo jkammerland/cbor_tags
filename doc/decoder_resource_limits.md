@@ -15,12 +15,11 @@ For streaming or resumable parsing, enforce the same policy against the cumulati
 
 ## Decoder Contract
 
-The core CBOR decoder accumulates into mutable owning destinations. Arrays,
-byte strings, and text strings are appended to. Maps get the decoded entries
-added, and a key that is already present gets the decoded value. None of them
-is cleared first. Initialize a destination empty when replacement semantics
-are wanted. Codec extensions can define a different destination
-contract.
+The core CBOR decoder appends to growable owning sequences and strings. Maps that
+support `insert_or_assign` for the decoded entry update existing keys.
+Other maps use `insert`, so a `std::multimap` keeps each entry for a key.
+Start with an empty destination for a fresh result. Codec extensions can
+define their own destination contract.
 
 ```cpp
 std::string source = "payload";
