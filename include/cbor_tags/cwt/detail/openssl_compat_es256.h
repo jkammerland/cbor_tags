@@ -21,10 +21,8 @@ namespace cbor::tags::cwt::detail {
 
 template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, decltype(FreeFn)>;
 
-// What OpenSSL queues during one of these calls stays in here. The result
-// already says that a signature or a key was refused, and an entry left behind
-// would be read as an error of the caller's own next OpenSSL call. Entries the
-// caller had queued before are kept
+// Discard the call's OpenSSL errors on return. New errors can evict older
+// entries when the thread's queue is full.
 struct openssl_error_scope {
     openssl_error_scope() noexcept { ERR_set_mark(); }
     ~openssl_error_scope() { ERR_pop_to_mark(); }
