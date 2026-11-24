@@ -74,8 +74,8 @@ write_signed_packages() {
 # The commands a consumer pastes, with the fingerprint they got elsewhere
 write_consumer_commands() {
     local fingerprint="$1"
-    printf 'expected_fingerprint=%q\n' "${fingerprint}"
-    write_release_verification_commands 0.28.0 "${identity[@]}" | tail -n +2
+    write_release_verification_commands 0.28.0 "${identity[@]}" |
+        sed "s/^expected_fingerprint=.*/expected_fingerprint=${fingerprint}/"
 }
 
 for bad_key in attacker extra-primary; do
@@ -153,27 +153,25 @@ grep -Fx 'expected_fingerprint=7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D' "${test
 bash -n "${test_root}/generated.sh"
 # Substitute only the independently trusted fixture fingerprint; do not derive
 # the expected identity from the downloaded public key.
-{
-    printf 'expected_fingerprint=%q\n' "${fixture_fingerprint}"
-    tail -n +2 "${test_root}/generated.sh"
-} >"${test_root}/fixture-commands.sh"
+write_consumer_commands "${fixture_fingerprint}" >"${test_root}/fixture-commands.sh"
 (cd -- "${package_dir}" && bash "${test_root}/fixture-commands.sh")
 echo 'generated consumer commands: OK'
 [[ "$(ambient_keys)" == "${attacker_fingerprint}" ]]
 echo 'ambient keyring unchanged by the consumer commands: OK'
 
-# The commands are pasted into the shell somebody is working in. That shell
-# keeps its options, gets no functions, and gets a status to look at
+# Sourcing the commands reports the status and preserves the caller's state.
 pasted_into_a_shell() {
     bash --norc --noprofile -c '
         cd -- "$1"
         options_before="$(set +o)"
+        expected_fingerprint=caller-fingerprint
 
         source "$2" >/dev/null 2>&1
         pasted_status=$?
 
         [[ "$(set +o)" == "${options_before}" ]] || { echo "shell options changed"; exit 0; }
         [[ -z "$(declare -F verify_signed_assets die)" ]] || { echo "functions left behind"; exit 0; }
+        [[ "${expected_fingerprint}" == caller-fingerprint ]] || { echo "fingerprint variable changed" >&2; exit 1; }
         echo "status ${pasted_status}"
     ' _ "$1" "$2"
 }

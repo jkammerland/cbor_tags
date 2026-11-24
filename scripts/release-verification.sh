@@ -236,10 +236,9 @@ verify_signed_assets() {
 write_release_verification_commands() {
     local version="$1" repository="$2" tag="$3" tag_object="$4" commit="$5"
     validate_release_identity "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}"
-    printf 'expected_fingerprint=%q\n' '7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D'
-    # These are pasted into the shell somebody is working in. In a subshell,
-    # set -e and die end the check and leave that shell and its options alone.
+    # Keep the pasted commands' variables, functions and options in the subshell.
     printf '%s\n' '(' 'set -euo pipefail'
+    printf 'expected_fingerprint=%q\n' '7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D'
     # Emit the shared verifier so consumer instructions and local validation use
     # the same canonical format without maintaining a second shell program.
     declare -f die release_gpg authenticate_release_key authenticate_release_signature \

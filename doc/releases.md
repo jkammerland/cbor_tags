@@ -55,8 +55,8 @@ directory and run the release notes' verification commands there. They need Bash
 3.2 or newer, GPG, and `sha256sum`/`sha512sum` or `shasum`. They require the
 fingerprint above; the downloaded public key is not itself a source of trust.
 Altered, missing, and additional files are rejected. The commands print
-`cbor_tags X.Y.Z: release assets verified`, or an error with status 2, and leave
-the shell they are pasted into as it was.
+`cbor_tags X.Y.Z: release assets verified`, or an error with status 2. Their
+variables, functions, and shell options are local to the verification subshell.
 
 ## Publishing A Release
 
