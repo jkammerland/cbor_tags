@@ -224,7 +224,22 @@ template <typename Self> struct shape_reader : codec::decoder_base<Self> {
     }
 };
 
+// Remembering the last tag is safe to repeat for any value type.
+template <typename Self> struct last_tag_observer : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    void          observe_encoded_cbor_tag(std::uint64_t tag) { last_tag = tag; }
+    void          observe_decoded_cbor_tag(std::uint64_t tag) { last_tag = tag; }
+    std::uint64_t last_tag{};
+};
+
 namespace cbor::tags {
+template <typename T, typename Self> struct resumable_retry_traits<T, last_tag_observer<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+
 #if !defined(CBOR_RETRY_BASE_CLASS_ENCODE)
 template <typename Self> struct resumable_retry_traits<square_shape, shape_codec<Self>> {
     static constexpr bool encode = true;
@@ -277,12 +292,20 @@ int main() {
     auto   operation = factory(value);
 #elif defined(CBOR_RETRY_BASE_CLASS_ENCODE)
     const square_shape value{1000};
-    auto               factory   = make_resumable_encoder<shape_codec>(bytes);
-    auto               operation = factory(value);
+#if defined(CBOR_RETRY_DECLARED_OBSERVER)
+    auto factory = make_resumable_encoder<shape_codec, last_tag_observer>(bytes);
+#else
+    auto factory = make_resumable_encoder<shape_codec>(bytes);
+#endif
+    auto operation = factory(value);
 #elif defined(CBOR_RETRY_BASE_CLASS_DECODE)
     square_shape value;
-    auto         factory   = make_resumable_decoder<shape_reader>(bytes);
-    auto         operation = factory(value);
+#if defined(CBOR_RETRY_DECLARED_OBSERVER)
+    auto factory = make_resumable_decoder<shape_reader, last_tag_observer>(bytes);
+#else
+    auto factory = make_resumable_decoder<shape_reader>(bytes);
+#endif
+    auto operation = factory(value);
 #elif defined(CBOR_RETRY_MEMBER_DECODE)
     record value;
     auto   factory   = make_resumable_decoder(bytes);
@@ -388,7 +411,7 @@ int main() {
     for (std::size_t split = 0; split <= square_wire.size(); ++split) {
         std::array<std::byte, 3>        output{};
         std::list<std::span<std::byte>> chunks{std::span{output}.first(split)};
-        auto                            shape_encoder   = make_resumable_encoder<shape_codec>(chunks);
+        auto                            shape_encoder   = make_resumable_encoder<shape_codec, last_tag_observer>(chunks);
         auto                            shape_operation = shape_encoder(square);
         if (split != output.size()) {
             if (shape_operation.done())
@@ -404,7 +427,7 @@ int main() {
     for (std::size_t split = 0; split <= square_wire.size(); ++split) {
         std::list<std::span<const std::byte>> chunks{std::span{square_wire}.first(split)};
         square_shape                          read;
-        auto                                  shape_decoder   = make_resumable_decoder<shape_reader>(chunks);
+        auto                                  shape_decoder   = make_resumable_decoder<shape_reader, last_tag_observer>(chunks);
         auto                                  shape_operation = shape_decoder(read);
         if (split != square_wire.size()) {
             if (shape_operation.done())

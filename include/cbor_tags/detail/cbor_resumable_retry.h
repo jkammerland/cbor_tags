@@ -85,18 +85,21 @@ struct decoder_without_codecs<decoder<Buffer, Options, Mixins...>> {
     using type = decoder<Buffer, Options, cbor_header_decoder, cbor_indefinite_decoder>;
 };
 
-// The decoder reads the type after its header or its tag only with the codecs
-// that are installed. One of them takes it then, also when it is declared for
-// a base class of the type or for something the type converts to
-template <typename Transcoder, typename T> consteval bool resumable_decode_ends_in_codec() {
-    using core                  = typename decoder_without_codecs<Transcoder>::type;
-    constexpr bool after_header = requires(Transcoder &with, T &value, major_type major, std::byte info) {
-        with.decode(value, major, info);
-    } && !requires(core &without, T &value, major_type major, std::byte info) { without.decode(value, major, info); };
-    constexpr bool after_tag = requires(Transcoder &with, T &value, std::uint64_t tag) { with.decode(value, tag); } &&
-                               !requires(core &without, T &value, std::uint64_t tag) { without.decode(value, tag); };
-    return after_header || after_tag;
+// A codec can accept a value through a conversion even when the exact-form
+// probe reports a core overload.
+template <typename Transcoder, typename T, payload_decode_context Context> consteval bool resumable_decode_ends_in_codec() {
+    using core = typename decoder_without_codecs<Transcoder>::type;
+    if constexpr (Context == payload_decode_context::tag) {
+        return RetryDecodeTag<Transcoder, T> && !RetryDecodeTag<core, T>;
+    } else {
+        return RetryDecodeHeader<Transcoder, T> && !RetryDecodeHeader<core, T>;
+    }
 }
+
+template <typename Codec, typename T, payload_decode_context Context>
+concept RetryDecodeCandidate = (Context == payload_decode_context::tag && RetryDecodeTag<Codec, T>) ||
+                               (Context != payload_decode_context::tag && RetryDecodeHeader<Codec, T>) ||
+                               (Context == payload_decode_context::direct && (RetryDecodeDirect<Codec, T> || RetryDecodeRvalue<Codec, T>));
 
 template <typename Transcoder, typename T, payload_decode_context Context, typename... Codecs>
 consteval bool resumable_decode_retry_allowed() {
@@ -104,7 +107,9 @@ consteval bool resumable_decode_retry_allowed() {
         if constexpr (sizeof...(Codecs) == 0 || IsClassWithDecodingOverload<Transcoder, T>)
             return true;
         else
-            return !resumable_decode_ends_in_codec<Transcoder, T>() || (resumable_retry_declared<T, Codecs, false>() || ...);
+            // A tag observer can opt in for every type without decoding any of them.
+            return !resumable_decode_ends_in_codec<Transcoder, T, Context>() ||
+                   ((RetryDecodeCandidate<Codecs, T, Context> && resumable_retry_declared<T, Codecs, false>()) || ...);
     }();
     constexpr bool allowed = declared_where_needed &&
                              (!IsClassWithDecodingOverload<Transcoder, T> || resumable_retry_declared<T, void, false>()) &&
@@ -259,8 +264,8 @@ template <typename Transcoder, typename... Codecs> struct resumable_encode_retry
         } else if constexpr (CoreOnly || written_without_codecs<U>()) {
             return true;
         } else {
-            // A codec's call, like every other one that is retried
-            return (resumable_retry_declared<T, Codecs, true>() || ...);
+            // Match the declaration to a codec that can receive the value.
+            return ((RetryEncodeDirect<Codecs, T> && resumable_retry_declared<T, Codecs, true>()) || ...);
         }
     }
 };

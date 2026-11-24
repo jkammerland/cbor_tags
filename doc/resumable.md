@@ -781,6 +781,9 @@ does not authorize an installed mixin override; each applicable customization
 must declare its direction, including header/tag dispatch inside optionals and
 variants. A codec that takes a type through a base class of it, or through a
 conversion, needs the declaration for the type that is encoded or decoded.
+When a value relies on conversion-based mixin overloads, the check can establish
+that a viable codec declares retry support. If several overloads are viable,
+ensure the codec selected by the ordinary call has its own declaration.
 Tag-observer mixins also need a declaration for calls being retried:
 a complete tag can be observed before the rest of a tagged header suspends.
 Calling `retry(value)` from a hook uses the same declaration checks.
