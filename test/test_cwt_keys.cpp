@@ -79,18 +79,41 @@ TEST_CASE("key use requires the key type and curve of the algorithm") {
     CHECK_FALSE(cwt::validate_key_use(ed25519, cwt::algorithm::ed448));
     CHECK_FALSE(cwt::validate_key_use(p256, cwt::algorithm::ed25519));
 
-    // The older identifiers leave the curve open, not the kind of key
+    // Legacy ECDSA supports multiple EC2 curves.
     CHECK(cwt::validate_key_use(p256, cwt::algorithm::es256));
     CHECK(cwt::validate_key_use(p384, cwt::algorithm::es256));
     CHECK_FALSE(cwt::validate_key_use(ed25519, cwt::algorithm::es256));
-    CHECK(cwt::validate_key_use(ed25519, cwt::algorithm::eddsa));
-    CHECK_FALSE(cwt::validate_key_use(p256, cwt::algorithm::eddsa));
 
     // A curve with a name of its own is not P-256
     cwt::ec2_public_key named = p256;
     named.curve               = "application-curve";
     CHECK_FALSE(cwt::validate_key_use(named, cwt::algorithm::esp256));
     CHECK(cwt::validate_key_use(named, cwt::algorithm::es256));
+}
+
+TEST_CASE("legacy eddsa accepts edwards signature curves") {
+    cwt::okp_public_key key;
+
+    key.curve = 6; // Ed25519
+    key.x.assign(32, std::byte{1});
+    CHECK(cwt::validate_key_use(key, cwt::algorithm::eddsa));
+
+    key.curve = 7; // Ed448
+    key.x.assign(57, std::byte{1});
+    CHECK(cwt::validate_key_use(key, cwt::algorithm::eddsa));
+
+    key.curve = 4; // X25519
+    key.x.assign(32, std::byte{1});
+    CHECK_FALSE(cwt::validate_key_use(key, cwt::algorithm::eddsa));
+
+    key.curve = 5; // X448
+    key.x.assign(56, std::byte{1});
+    CHECK_FALSE(cwt::validate_key_use(key, cwt::algorithm::eddsa));
+
+    cwt::ec2_public_key ec2;
+    ec2.x.assign(32, std::byte{1});
+    ec2.y = std::vector<std::byte>(32, std::byte{1});
+    CHECK_FALSE(cwt::validate_key_use(ec2, cwt::algorithm::eddsa));
 }
 
 TEST_CASE("cwt rsa and okp public keys round trip") {

@@ -89,8 +89,8 @@ template <PublicKey Key> bool valid_public_key_structure(const Key &key) {
 }
 
 // Whether this is a key the algorithm can be used with. A fully specified
-// algorithm names its curve (RFC 9864): ESP256 is P-256 and nothing else. The
-// older identifiers only say which kind of key they take
+// algorithm names its curve (RFC 9864). Legacy EdDSA accepts either Edwards
+// signature curve, and legacy ECDSA accepts EC2 keys.
 template <PublicKey Key> bool key_fits_algorithm(const Key &key, algorithm alg) {
     std::int64_t key_type{};
     std::int64_t curve{};
@@ -118,7 +118,12 @@ template <PublicKey Key> bool key_fits_algorithm(const Key &key, algorithm alg) 
     case algorithm::es256:
     case algorithm::es384:
     case algorithm::es512: key_type = 2; break;
-    case algorithm::eddsa: key_type = 1; break;
+    case algorithm::eddsa:
+        if constexpr (Key::key_type == 1) {
+            const auto *registered = std::get_if<std::int64_t>(&key.curve);
+            return registered != nullptr && (*registered == 6 || *registered == 7);
+        }
+        return false;
     default: return true;
     }
 
