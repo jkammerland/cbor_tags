@@ -38,9 +38,11 @@ relationship before signing it as a standalone asset.
 - Tags and assets use the release key committed at
   `.github/release-signing-key.asc`, fingerprint
   `7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D`.
-- A signature by a revoked key is rejected. A signature by a key that has
-  expired is rejected while a release is prepared and published; the
-  verification commands of a published release keep accepting it.
+- Verification rejects signatures from keys whose revocation is recorded in
+  the key material it checks. The offline commands check the public key
+  bundled with the release.
+- Preparation and publication reject signatures from expired keys.
+  The verification commands for published releases continue to accept them.
 - Signing requires approval through the protected `release` environment;
   package builds have no access to signing secrets.
 - Publication requires immutable releases to be enabled and verifies the
