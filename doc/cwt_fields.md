@@ -47,7 +47,7 @@ int main() {
 
 | Choice | Behavior |
 |---|---|
-| Plain destination | Its label must be present. The decoded value replaces what the destination held. |
+| Plain destination | Its label must be present. Standard owning strings and variable-length containers receive replacement contents on success, with their allocator and associative-container policies preserved. Fixed storage and other values decode through the bound destination. |
 | Optional destination | Missing labels clear it after successful decoding; a present value decodes the underlying type. |
 | Unknown label | Its value is skipped and omitted on re-encoding. |
 | Duplicate label | Rejected, including unknown input labels; duplicate schema labels fail compilation. |
