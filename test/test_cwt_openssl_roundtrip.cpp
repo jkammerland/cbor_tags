@@ -3,6 +3,11 @@
 #include <array>
 #include <sstream>
 
+#if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
+#include <cbor_tags/cwt/openssl_keys.h>
+#include <openssl/err.h>
+#endif
+
 using namespace cwt_test;
 
 TEST_SUITE("roundtrip/cwt") {
@@ -143,6 +148,57 @@ TEST_SUITE("roundtrip/cwt") {
 
 #if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
 TEST_SUITE("roundtrip/cwt") {
+    TEST_CASE("openssl diagnostics preserve a caller's error mark") {
+        auto                         key = make_p256_key();
+        const std::vector<std::byte> payload{std::byte{0x01}};
+        auto                         message = sign1<crypto_esp256_backend>(key.get(), {}, {}, payload);
+        REQUIRE(message);
+
+        // One bit of r: still two numbers of the right size, not this signature
+        message->signature.front() ^= std::byte{0x01};
+
+        // A point that is not on P-256
+        cwt::ec2_public_key off_curve;
+        off_curve.x.assign(32, std::byte{0xff});
+        off_curve.y = std::vector<std::byte>(32, std::byte{0xff});
+
+        SUBCASE("an empty queue stays empty") {
+            ERR_clear_error();
+
+            CHECK_FALSE(verify_sign1<crypto_esp256_backend>(key.get(), *message));
+            CHECK(ERR_peek_error() == 0UL);
+
+            CHECK_FALSE(cwt::import_p256_public_key(off_curve));
+            CHECK(ERR_peek_error() == 0UL);
+        }
+
+        SUBCASE("a caller's entry and its mark survive") {
+            ERR_clear_error();
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
+            ERR_raise(ERR_LIB_USER, 1);
+#else
+            ERR_put_error(ERR_LIB_USER, 0, 1, __FILE__, __LINE__);
+#endif
+            const auto queued = ERR_peek_error();
+            REQUIRE(ERR_set_mark() == 1);
+
+            CHECK_FALSE(verify_sign1<crypto_esp256_backend>(key.get(), *message));
+            CHECK_FALSE(cwt::import_p256_public_key(off_curve));
+
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
+            // Counted marks also allow the backend to clean up its own entries.
+            CHECK(ERR_peek_last_error() == queued);
+#else
+            CHECK(ERR_peek_error() == queued);
+#endif
+            CHECK(ERR_pop_to_mark() == 1);
+            const auto entry = ERR_get_error();
+            CHECK(ERR_GET_LIB(entry) == ERR_LIB_USER);
+            CHECK(ERR_GET_REASON(entry) == 1);
+            CHECK(ERR_peek_error() == 0UL);
+        }
+    }
+
     TEST_CASE("openssl consumes single pass signature input") {
         auto                                            key = make_p256_key();
         const std::vector<std::byte>                    bytes(1024, std::byte{7});

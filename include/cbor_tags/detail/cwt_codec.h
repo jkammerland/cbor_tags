@@ -254,8 +254,20 @@ template <typename Decoder>
     }
 
     if (major == major_type::Simple) {
-        double     value{};
-        const auto status = dec.decode(value, major, additional_info);
+        // A sender is free to use the shortest float that holds the date
+        double value{};
+        auto   status = status_code::success;
+        if (additional_info == std::byte{25}) {
+            float16_t half{};
+            status = dec.decode(half, major, additional_info);
+            value  = static_cast<double>(static_cast<float>(half));
+        } else if (additional_info == std::byte{26}) {
+            float single{};
+            status = dec.decode(single, major, additional_info);
+            value  = static_cast<double>(single);
+        } else {
+            status = dec.decode(value, major, additional_info);
+        }
         if (status != status_code::success) {
             return unexpected<status_code>{status};
         }

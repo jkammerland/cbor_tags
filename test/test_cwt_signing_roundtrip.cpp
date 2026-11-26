@@ -198,6 +198,35 @@ TEST_SUITE("roundtrip/cwt") {
         REQUIRE(verify_sign<toy_es256_backend>(nullptr, *message, std::size_t{1}));
     }
 
+    TEST_CASE("COSE Sign braces in the AAD position check every signature") {
+        const std::vector<std::byte> payload{std::byte{0x01}};
+
+        // One signature this backend accepts, and a copy it refuses because it is empty
+        auto message = sign<signature_presence_es256_backend>(nullptr, {}, {}, payload, header_map{});
+        REQUIRE(message);
+        REQUIRE_EQ(message->signatures.size(), 1U);
+        REQUIRE_EQ(message->signatures.front().signature, std::vector<std::byte>{std::byte{0x01}});
+        message->signatures.push_back(message->signatures.front());
+        message->signatures.back().signature.clear();
+
+        // {} is an empty AAD here, not signature 0
+        const auto every = verify_sign<signature_presence_es256_backend>(nullptr, *message, {});
+        REQUIRE_FALSE(every);
+        CHECK_EQ(every.error(), status_code::error);
+        CHECK_FALSE(verify_sign<signature_presence_es256_backend>(nullptr, *message));
+
+        // An index of any integer type picks one signature
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, std::size_t{0}));
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, 0));
+        CHECK_FALSE(verify_sign<signature_presence_es256_backend>(nullptr, *message, 1U));
+        enum signer_index { first_signer = 0 };
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, first_signer));
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, std::integral_constant<std::size_t, 0>{}));
+
+        // Behind an index {} is the AAD as well
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, std::size_t{0}, {}));
+    }
+
     TEST_CASE("cose sign rejects a matching body algorithm for signing and verification") {
         const std::vector<std::byte> payload{std::byte{0x31}};
         const header_map             body{.alg = algorithm::es256};

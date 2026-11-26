@@ -45,6 +45,10 @@ The built-in crypto backend supports **ESP256 only**: P-256, SHA-256 and COSE's
 64-byte `r || s` signature. `algorithm::esp384`, `algorithm::esp512`, `algorithm::ed25519`, and `algorithm::ed448` are wire
 identifiers, not built-in crypto implementations. Other algorithms/providers can use the custom backend contract in the signing guide.
 
+A refused signature or key is reported through the result. OpenSSL 3 and later
+discard errors added by the call, subject to the queue's capacity. On OpenSSL
+1.1 and LibreSSL, cleanup runs when the caller's queue starts empty.
+
 
 ## Build and package
 

@@ -174,7 +174,8 @@ The example's application policy requires exactly two signatures in an agreed
 order and verifies each index with its corresponding trusted key. It rejects
 a wrong key, a damaged signature and a missing signer. The no-index
 `verify_sign(key, message, aad)` overload checks every signature using that one
-key; use the indexed overload or `verify_signature` when signers have different
+key. Use the indexed overload to check one signer by position, or
+`verify_signature` when signers have different
 keys. Key selection and whether one, all or a threshold of signers is required
 remain application policy. Apply the claim policy from example 25 after that
 signature policy succeeds.
@@ -182,17 +183,9 @@ signature policy succeeds.
 ## Header policy
 
 - Signing helpers reject unprotected `alg`/`crit` and conflicting algorithms.
-  Unknown noncritical headers are discarded. Applications enforce any stricter
-  policy for duplicate labels across protected and unprotected headers from [RFC 9052 §3](https://www.rfc-editor.org/rfc/rfc9052.html#section-3),
-  checking unknown labels before discarding them. Known `kid` duplication can be
-  checked after decoding:
-
-```cpp
-auto protected_map = cwt::decode_protected_header(message.protected_header);
-if (!protected_map || (protected_map->kid && message.unprotected.kid)) {
-    return reject_message();
-}
-```
+  Unknown noncritical headers are discarded.
+- Signing and verification reject labels present in both header maps, including
+  unknown labels.
 
 ## Borrowed sending and receiving
 

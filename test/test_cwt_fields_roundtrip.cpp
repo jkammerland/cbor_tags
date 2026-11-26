@@ -1,12 +1,24 @@
+#include <array>
 #include <cbor_tags/cbor_decoder.h>
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/codec/cwt.h>
 #include <doctest/doctest.h>
+#include <list>
+#include <map>
+#include <memory>
+#include <memory_resource>
 #include <ostream>
+#include <span>
+#include <unordered_map>
+
+#if __has_include(<boost/circular_buffer.hpp>)
+#include <boost/circular_buffer.hpp>
+#endif
+#if __has_include(<flat_map>)
+#include <flat_map>
+#endif
 
 using namespace cbor::tags;
-
-#include <list>
 
 namespace custom_field_test {
 struct text {
@@ -37,6 +49,21 @@ static_assert(!CanBindTemporary<std::string>);
 using One  = decltype(cwt::field<1>(std::declval<int &>()));
 using Same = decltype(cwt::field<1U>(std::declval<int &>()));
 static_assert(!cwt::detail::unique_field_labels<One, Same>::value);
+
+struct remainder_order {
+    int  modulus{10};
+    bool operator()(int left, int right) const { return left % modulus < right % modulus; }
+};
+
+struct remainder_hash {
+    int         modulus{10};
+    std::size_t operator()(int key) const { return std::hash<int>{}(key % modulus); }
+};
+
+struct remainder_equal {
+    int  modulus{10};
+    bool operator()(int left, int right) const { return left % modulus == right % modulus; }
+};
 } // namespace
 
 TEST_SUITE("roundtrip/cwt") {
@@ -111,4 +138,98 @@ TEST_SUITE("roundtrip/cwt") {
         REQUIRE(make_decoder<codec::cwt>(buffer)(decoded_fields));
         CHECK(received == source);
     }
+
+    TEST_CASE("custom fields fill a bound span") {
+        const std::array       values{10, 20};
+        auto                   source = cwt::fields(cwt::field<1>(values));
+        std::vector<std::byte> buffer;
+        REQUIRE(make_encoder<codec::cwt>(buffer)(source));
+
+        std::array<int, 2> storage{};
+        std::span<int>     received{storage};
+        auto               destination = cwt::fields(cwt::field<1>(received));
+        REQUIRE(make_decoder<codec::cwt>(buffer)(destination));
+        CHECK(storage == values);
+        CHECK(received.data() == storage.data());
+    }
+
+    TEST_CASE("custom fields keep map policies when replacing entries") {
+        const std::map<int, int> values{{1, 100}, {11, 200}};
+        auto                     source = cwt::fields(cwt::field<1>(values));
+        std::vector<std::byte>   buffer;
+        REQUIRE(make_encoder<codec::cwt>(buffer)(source));
+
+        SUBCASE("ordered map comparator and allocator") {
+            std::pmr::monotonic_buffer_resource      resource;
+            std::pmr::map<int, int, remainder_order> received(remainder_order{100}, &resource);
+            received.emplace(9, 900);
+            auto destination = cwt::fields(cwt::field<1>(received));
+            REQUIRE(make_decoder<codec::cwt>(buffer)(destination));
+
+            CHECK(received.key_comp().modulus == 100);
+            CHECK(received.get_allocator().resource() == &resource);
+            REQUIRE(received.size() == 2);
+            CHECK(received.at(1) == 100);
+            CHECK(received.at(11) == 200);
+        }
+
+        SUBCASE("unordered map hash equality and load factor") {
+            std::unordered_map<int, int, remainder_hash, remainder_equal> received(0, remainder_hash{100}, remainder_equal{100});
+            received.max_load_factor(0.5F);
+            received.emplace(9, 900);
+            auto destination = cwt::fields(cwt::field<1>(received));
+            REQUIRE(make_decoder<codec::cwt>(buffer)(destination));
+
+            CHECK(received.hash_function().modulus == 100);
+            CHECK(received.key_eq().modulus == 100);
+            CHECK(received.max_load_factor() == 0.5F);
+            REQUIRE(received.size() == 2);
+            CHECK(received.at(1) == 100);
+            CHECK(received.at(11) == 200);
+        }
+    }
+
+#if __has_include(<boost/circular_buffer.hpp>)
+    TEST_CASE("custom fields retain a circular buffer's configured capacity") {
+        const std::array       values{7, 8};
+        const auto             source = cwt::fields(cwt::field<1>(values));
+        std::vector<std::byte> buffer;
+        REQUIRE(make_encoder<codec::cwt>(buffer)(source));
+
+        boost::circular_buffer<int> received(4);
+        auto                        destination = cwt::fields(cwt::field<1>(received));
+        REQUIRE(make_decoder<codec::cwt>(buffer)(destination));
+        CHECK(received.capacity() == 4);
+        CHECK(std::ranges::equal(received, values));
+    }
+#endif
+
+#if defined(__cpp_lib_flat_map)
+    TEST_CASE("custom fields use a flat map's configured storage allocators") {
+        const std::map         values{std::pair{1, 100}, std::pair{11, 200}};
+        const auto             source = cwt::fields(cwt::field<1>(values));
+        std::vector<std::byte> buffer;
+        REQUIRE(make_encoder<codec::cwt>(buffer)(source));
+
+        std::pmr::monotonic_buffer_resource keys;
+        std::pmr::monotonic_buffer_resource mapped;
+        using map_type = std::flat_map<int, int, std::less<int>, std::pmr::vector<int>, std::pmr::vector<int>>;
+        map_type received{std::pmr::vector<int>{&keys}, std::pmr::vector<int>{&mapped}};
+        auto     destination = cwt::fields(cwt::field<1>(received));
+
+        // Any scratch allocation must use the bound map's storage resources.
+        const auto                                                            restore_default = &std::pmr::set_default_resource;
+        std::unique_ptr<std::pmr::memory_resource, decltype(restore_default)> previous{
+            std::pmr::set_default_resource(std::pmr::null_memory_resource()), restore_default};
+        const auto decoded = make_decoder<codec::cwt>(buffer)(destination);
+        previous.reset();
+
+        REQUIRE(decoded);
+        REQUIRE(received.size() == 2);
+        CHECK(received.at(1) == 100);
+        CHECK(received.at(11) == 200);
+        CHECK(received.keys().get_allocator().resource() == &keys);
+        CHECK(received.values().get_allocator().resource() == &mapped);
+    }
+#endif
 }

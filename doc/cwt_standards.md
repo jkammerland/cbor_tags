@@ -23,7 +23,7 @@ This table lists implemented capabilities and their dedicated regression suites.
 |---|---|---|
 | Base claims, Sign1 and Sign models | `test_cwt_roundtrip.cpp`, `test_cwt_wire.cpp` | Owning and borrowed models; unknown claims are skipped. |
 | Segmented signing and verification | `test_cwt_signing_roundtrip.cpp`, `test_cwt_signing_wire.cpp` | Original protected bytes and payloads are used; caller constructs external AAD. |
-| Optional real crypto | `test_cwt_openssl_roundtrip.cpp`, `test_cwt_openssl_wire.cpp` | OpenSSL is optional; custom providers use the same segment contract. |
+| Optional real crypto | `test_cwt_openssl_roundtrip.cpp`, `test_cwt_openssl_wire.cpp`, which verifies the signed examples of RFC 8392 A.3 and RFC 9052 C.1.1 and C.2.1 | OpenSSL is optional; custom providers use the same segment contract. |
 | Caller storage and custom layouts | Examples 27–29 and CWT signing tests | Borrowed collections may allocate descriptors; source bytes remain caller-owned. |
 | Typed map/header extensions | `test_cwt_fields_*`, `test_cwt_headers_*`, examples 30–32 | Selected fields only; automatic preservation of unknown values is outside scope. |
 | Countersignatures | `test_cwt_countersignatures_*`, examples 33–35 | Initial targets: Sign1, individual signatures, and full countersignatures. |

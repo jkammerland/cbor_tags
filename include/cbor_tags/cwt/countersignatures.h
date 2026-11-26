@@ -211,8 +211,17 @@ countersign0(Key &&key, Target &target, std::span<const std::byte> aad = {},
     return Backend::sign(std::forward<Key>(key), detail::signature_parts(*input));
 }
 
-template <typename Backend, typename Key, detail::CountersignatureTarget Target, typename Output>
-    requires std::convertible_to<Output, std::span<std::byte>>
+namespace detail {
+// Storage for the signature is named as a std::span<std::byte>. Any other
+// writable byte container in its place could as well be meant as the AAD
+template <typename Output>
+concept SignatureStorage = std::same_as<std::remove_cvref_t<Output>, std::span<std::byte>>;
+
+template <typename Bytes>
+concept WritableBytesNotStorage = std::convertible_to<Bytes, std::span<std::byte>> && !SignatureStorage<Bytes>;
+} // namespace detail
+
+template <typename Backend, typename Key, detail::CountersignatureTarget Target, detail::SignatureStorage Output>
 [[nodiscard]] expected<std::size_t, status_code> countersign0(Key &&key, Target &target, Output &&output, std::span<const std::byte> aad,
                                                               std::optional<std::span<const std::byte>> detached = std::nullopt) {
     auto input = make_countersign0_tbs(target, aad, detached);
@@ -221,6 +230,13 @@ template <typename Backend, typename Key, detail::CountersignatureTarget Target,
     }
     return Backend::sign(std::forward<Key>(key), detail::signature_parts(*input), std::span<std::byte>{output});
 }
+
+// countersign0(key, target, bytes, more) with a writable container: storage
+// and AAD, or AAD and detached payload? Say which. std::span<std::byte>{bytes}
+// is storage, std::span<const std::byte>{bytes} is AAD.
+template <typename Backend, typename Key, detail::CountersignatureTarget Target, detail::WritableBytesNotStorage Bytes>
+void countersign0(Key &&, Target &, Bytes &&, std::span<const std::byte>,
+                  std::optional<std::span<const std::byte>> = std::nullopt) = delete;
 
 template <typename Backend, typename Key, detail::CountersignatureTarget Target>
 [[nodiscard]] expected<void, status_code> verify_countersignature0(Key &&key, Target &target, std::span<const std::byte> signature,

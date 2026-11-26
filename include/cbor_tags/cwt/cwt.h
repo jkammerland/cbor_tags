@@ -43,7 +43,9 @@ encode_protected_header(const basic_header_map<Borrowed, Extra> &header) {
     if (detail::validate_protected_placement(header) != status_code::success) {
         return unexpected<status_code>{status_code::error};
     }
-    if (header.empty()) {
+    // No selected field is the zero-length bstr, which RFC 9052 section 3 asks
+    // senders for. An application header has its own fields to look at
+    if (header.empty() || (!std::same_as<Extra, std::monostate> && detail::selected_header_labels(header).empty())) {
         return std::vector<std::byte>{};
     }
     return encode_to_bytes<Codecs...>(header);
@@ -193,27 +195,50 @@ validate_sign1_algorithm(const header_map &protected_header, const basic_header_
     return {};
 }
 
-template <bool BodyBorrowed, bool SignatureBorrowed>
-[[nodiscard]] inline expected<void, status_code>
-validate_sign_algorithm(const header_map &body_protected, const basic_header_map<BodyBorrowed> &body_unprotected,
-                        const header_map &signature_protected, const basic_header_map<SignatureBorrowed> &signature_unprotected,
-                        algorithm expected) {
-    if (detail::validate_header_pair(body_protected, body_unprotected) != status_code::success ||
-        detail::validate_header_pair(signature_protected, signature_unprotected) != status_code::success ||
-        detail::validate_critical_labels(body_protected.crit, body_protected.alg.has_value(), body_protected.kid.has_value()) !=
-            status_code::success ||
-        detail::validate_critical_labels(signature_protected.crit, signature_protected.alg.has_value(),
-                                         signature_protected.kid.has_value()) != status_code::success) {
+namespace detail {
+// The body headers of a COSE_Sign. Every signer shares them, so a check of all
+// signatures looks at them once
+template <bool BodyBorrowed>
+[[nodiscard]] inline expected<void, status_code> validate_sign_body(const header_map                     &body_protected,
+                                                                    const basic_header_map<BodyBorrowed> &body_unprotected) {
+    if (validate_header_pair(body_protected, body_unprotected) != status_code::success ||
+        validate_critical_labels(body_protected.crit, body_protected.alg.has_value(), body_protected.kid.has_value()) !=
+            status_code::success) {
         return unexpected<status_code>{status_code::error};
     }
     // A COSE_Sign algorithm belongs to each signer, never the shared body.
     if (body_protected.alg) {
         return unexpected<status_code>{status_code::error};
     }
+    return {};
+}
+
+// One signer's own headers
+template <bool SignatureBorrowed>
+[[nodiscard]] inline expected<void, status_code> validate_signer_algorithm(const header_map                          &signature_protected,
+                                                                           const basic_header_map<SignatureBorrowed> &signature_unprotected,
+                                                                           algorithm                                  expected) {
+    if (validate_header_pair(signature_protected, signature_unprotected) != status_code::success ||
+        validate_critical_labels(signature_protected.crit, signature_protected.alg.has_value(), signature_protected.kid.has_value()) !=
+            status_code::success) {
+        return unexpected<status_code>{status_code::error};
+    }
     if (signature_protected.alg && *signature_protected.alg != expected) {
         return unexpected<status_code>{status_code::error};
     }
     return {};
+}
+} // namespace detail
+
+template <bool BodyBorrowed, bool SignatureBorrowed>
+[[nodiscard]] inline expected<void, status_code>
+validate_sign_algorithm(const header_map &body_protected, const basic_header_map<BodyBorrowed> &body_unprotected,
+                        const header_map &signature_protected, const basic_header_map<SignatureBorrowed> &signature_unprotected,
+                        algorithm expected) {
+    if (auto body_status = detail::validate_sign_body(body_protected, body_unprotected); !body_status) {
+        return body_status;
+    }
+    return detail::validate_signer_algorithm(signature_protected, signature_unprotected, expected);
 }
 
 // Sign existing protected bytes without changing the message or owning its payload.
@@ -419,6 +444,27 @@ verify_sign1_with_policy(VerificationKey &&key, const basic_cose_sign1<Borrowed>
                            std::span<const std::byte>{message.signature.data(), message.signature.size()});
 }
 
+// The signature itself, once the headers of the body and of this signer are checked
+template <typename Backend, typename VerificationKey, bool Borrowed, bool SignatureBorrowed>
+[[nodiscard]] inline expected<void, status_code>
+verify_checked_signature(VerificationKey &&key, const basic_cose_sign<Borrowed> &message,
+                         const basic_cose_signature<SignatureBorrowed> &signature, const header_map &signature_protected,
+                         verification_algorithm_policy policy, std::span<const std::byte> external_aad,
+                         std::optional<std::span<const std::byte>> detached_payload) {
+    auto algorithm_status = validate_verification_algorithm(signature_protected.alg, Backend::algorithm_id, policy);
+    if (!algorithm_status) {
+        return unexpected<status_code>{algorithm_status.error()};
+    }
+
+    auto to_be_signed = make_sign_tbs(message, signature, external_aad, detached_payload);
+    if (!to_be_signed) {
+        return unexpected<status_code>{to_be_signed.error()};
+    }
+
+    return Backend::verify(std::forward<VerificationKey>(key), detail::signature_parts(*to_be_signed),
+                           std::span<const std::byte>{signature.signature.data(), signature.signature.size()});
+}
+
 template <typename Backend, typename VerificationKey, bool Borrowed, bool SignatureBorrowed>
 [[nodiscard]] inline expected<void, status_code>
 verify_signature_with_policy(VerificationKey &&key, const basic_cose_sign<Borrowed> &message,
@@ -437,18 +483,8 @@ verify_signature_with_policy(VerificationKey &&key, const basic_cose_sign<Borrow
     if (!algorithm_status) {
         return unexpected<status_code>{algorithm_status.error()};
     }
-    algorithm_status = validate_verification_algorithm(signature_protected->alg, Backend::algorithm_id, policy);
-    if (!algorithm_status) {
-        return unexpected<status_code>{algorithm_status.error()};
-    }
-
-    auto to_be_signed = make_sign_tbs(message, signature, external_aad, detached_payload);
-    if (!to_be_signed) {
-        return unexpected<status_code>{to_be_signed.error()};
-    }
-
-    return Backend::verify(std::forward<VerificationKey>(key), detail::signature_parts(*to_be_signed),
-                           std::span<const std::byte>{signature.signature.data(), signature.signature.size()});
+    return verify_checked_signature<Backend>(std::forward<VerificationKey>(key), message, signature, *signature_protected, policy,
+                                             external_aad, detached_payload);
 }
 
 template <typename Backend, typename VerificationKey, bool Borrowed>
@@ -470,8 +506,29 @@ verify_sign_with_policy(VerificationKey &&key, const basic_cose_sign<Borrowed> &
     if (message.signatures.empty()) {
         return unexpected<status_code>{status_code::unexpected_group_size};
     }
+    auto body_protected = decode_protected_header(message.protected_header);
+    if (!body_protected) {
+        return unexpected<status_code>{body_protected.error()};
+    }
+
+    // The body headers are the same for every signer. They are checked with
+    // the first one, where a check of that signature alone would do it
+    bool body_checked{};
     for (const auto &signature : message.signatures) {
-        auto result = verify_signature_with_policy<Backend>(key, message, signature, policy, external_aad, detached_payload);
+        auto signature_protected = decode_protected_header(signature.protected_header);
+        if (!signature_protected) {
+            return unexpected<status_code>{signature_protected.error()};
+        }
+        if (!std::exchange(body_checked, true)) {
+            if (auto body_status = validate_sign_body(*body_protected, message.unprotected); !body_status) {
+                return body_status;
+            }
+        }
+        auto result = validate_signer_algorithm(*signature_protected, signature.unprotected, Backend::algorithm_id);
+        if (!result) {
+            return result;
+        }
+        result = verify_checked_signature<Backend>(key, message, signature, *signature_protected, policy, external_aad, detached_payload);
         if (!result) {
             return result;
         }
@@ -517,22 +574,24 @@ verify_signature(VerificationKey &&key, const basic_cose_sign<Borrowed> &message
                                                          detached_payload);
 }
 
-template <typename Backend, typename VerificationKey, bool Borrowed>
+// The index is deduced, so {} in its place can only be an empty AAD and the
+// call checks every signature. A plain std::size_t there would take {} as 0
+template <typename Backend, typename VerificationKey, bool Borrowed, std::convertible_to<std::size_t> Index>
 [[nodiscard]] inline expected<void, status_code> verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message,
-                                                             std::size_t signature_index, std::span<const std::byte> external_aad = {},
+                                                             Index &&signature_index, std::span<const std::byte> external_aad = {},
                                                              std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
-    return detail::verify_sign_with_policy<Backend>(std::forward<VerificationKey>(key), message,
-                                                    detail::verification_algorithm_policy::explicit_algorithm, signature_index,
-                                                    external_aad, detached_payload);
+    return detail::verify_sign_with_policy<Backend>(
+        std::forward<VerificationKey>(key), message, detail::verification_algorithm_policy::explicit_algorithm,
+        static_cast<std::size_t>(std::forward<Index>(signature_index)), external_aad, detached_payload);
 }
 
-template <typename Backend, typename VerificationKey, bool Borrowed>
+template <typename Backend, typename VerificationKey, bool Borrowed, std::convertible_to<std::size_t> Index>
 [[nodiscard]] inline expected<void, status_code>
-verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message, std::size_t signature_index, implicit_algorithm_profile_t,
+verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message, Index &&signature_index, implicit_algorithm_profile_t,
             std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
-    return detail::verify_sign_with_policy<Backend>(std::forward<VerificationKey>(key), message,
-                                                    detail::verification_algorithm_policy::implicit_algorithm, signature_index,
-                                                    external_aad, detached_payload);
+    return detail::verify_sign_with_policy<Backend>(
+        std::forward<VerificationKey>(key), message, detail::verification_algorithm_policy::implicit_algorithm,
+        static_cast<std::size_t>(std::forward<Index>(signature_index)), external_aad, detached_payload);
 }
 
 template <typename Backend, typename VerificationKey, bool Borrowed>

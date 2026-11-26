@@ -116,7 +116,7 @@ int main() {
 | Compute a thumbprint | Hashes required public parameters only; text curves need resolution and compressed EC2 points need expansion. |
 | Supply a SHA-256 backend | Implement `digest(parts, output)` returning `expected<void, status_code>`; consume byte spans once and write 32 bytes. |
 | Import a P-256 key | Checks the point, algorithm, and verification permission; the OpenSSL handle retains the algorithm restriction. |
-| Validate key use | Checks representation and metadata restrictions, not mathematical validity; absent operations are unrestricted, an empty list permits none. |
+| Validate key use | Checks key representation and metadata. An absent operation list permits any operation. An empty list permits none. The key type must match the algorithm. Fully specified algorithms require their registered curve, and legacy `eddsa` accepts Ed25519 or Ed448. |
 
 ## Confirm the presenter's key
 

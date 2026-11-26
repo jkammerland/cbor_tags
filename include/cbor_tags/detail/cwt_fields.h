@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cbor_tags/cbor_detail.h"
 #include "cbor_tags/cwt/fields.h"
 #include "cbor_tags/detail/cwt_codec.h"
 
@@ -30,6 +31,46 @@ template <typename Encoder, typename Map> void encode_fields(Encoder &enc, const
             enc.encode(*binding.value);
         }
     });
+}
+
+template <typename Value>
+concept UnorderedFieldContainer = requires(const Value &current, Value &staged) {
+    Value(typename Value::size_type{}, current.hash_function(), current.key_eq(), current.get_allocator());
+    staged.max_load_factor(current.max_load_factor());
+};
+
+template <typename Value>
+concept AllocatedOrderedFieldContainer = requires(const Value &current) { Value(current.key_comp(), current.get_allocator()); };
+
+template <typename Value>
+concept AssociativeFieldContainer =
+    requires(const Value &current) { current.key_comp(); } || requires(const Value &current) { current.key_eq(); };
+
+template <typename Value>
+concept FixedCapacityFieldContainer = requires(const Value &current) {
+    { current.full() } -> std::convertible_to<bool>;
+    current.capacity();
+};
+
+// Fixed-capacity containers and associative containers whose storage cannot
+// be reconstructed through their allocator keep the caller's destination.
+template <typename Value>
+concept ReplaceableFieldContainer = std::ranges::range<Value> && (IsString<Value> || IsRangeOfCborValues<Value>) && !IsView<Value> &&
+                                    !IsFixedArray<Value> && !FixedCapacityFieldContainer<Value> && std::assignable_from<Value &, Value> &&
+                                    (UnorderedFieldContainer<Value> || AllocatedOrderedFieldContainer<Value> ||
+                                     (!AssociativeFieldContainer<Value> && std::default_initializable<Value>));
+
+// Stage a replacement using the destination's container policies.
+template <ReplaceableFieldContainer Value> Value empty_like(const Value &current) {
+    if constexpr (UnorderedFieldContainer<Value>) {
+        Value staged(0, current.hash_function(), current.key_eq(), current.get_allocator());
+        staged.max_load_factor(current.max_load_factor());
+        return staged;
+    } else if constexpr (AllocatedOrderedFieldContainer<Value>) {
+        return Value(current.key_comp(), current.get_allocator());
+    } else {
+        return tags::detail::make_decode_value_for<Value>(current);
+    }
 }
 
 template <typename Decoder, typename Observer, typename ReadValue, typename... Bindings>
@@ -73,7 +114,15 @@ status_code decode_fields(Decoder &dec, field_map<Bindings...> &map, major_type 
                     if (result == status_code::success) {
                         *binding.value = std::move(decoded);
                     }
+                } else if constexpr (ReplaceableFieldContainer<Value>) {
+                    // Ordinary variable-length containers accumulate entries.
+                    auto decoded = empty_like(*binding.value);
+                    result       = read_value(*label, decoded);
+                    if (result == status_code::success) {
+                        *binding.value = std::move(decoded);
+                    }
                 } else {
+                    // Fixed storage and custom values use the bound destination.
                     result = read_value(*label, *binding.value);
                 }
             }

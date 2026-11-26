@@ -79,4 +79,97 @@ TEST_SUITE("cbor_wire/cwt") {
         }
     }
 
+    TEST_CASE("a label in both the protected and the unprotected header is refused") {
+        const auto verify = [](std::string_view hex) {
+            const auto bytes = to_bytes(hex);
+
+            cose_sign1 message;
+            auto       decoder = make_decoder<codec::cwt>(bytes);
+            auto       decoded = decoder(message);
+            REQUIRE(decoded);
+            return verify_sign1<signature_presence_es256_backend>(nullptr, message);
+        };
+
+        // [h'{1: -7}', {4: h'02'}, h'a0', h'51']: the kid is only in the unprotected header
+        CHECK(verify("8443a10126a104410241a04151"));
+
+        // [h'{1: -7, 4: h'01'}', {4: h'02'}, ...]: a kid in both
+        const auto known = verify("8446a20126044101a104410241a04151");
+        REQUIRE_FALSE(known);
+        CHECK_EQ(known.error(), status_code::error);
+
+        // [h'{1: -7, 99: 1}', {99: 2}, ...]: a label the library does not know, in both
+        const auto unknown = verify("8446a20126186301a118630241a04151");
+        REQUIRE_FALSE(unknown);
+        CHECK_EQ(unknown.error(), status_code::error);
+    }
+
+    TEST_CASE("a header with many labels verifies and a label in both buckets is still refused") {
+        // 19 hh ll 00 for every label: the label in 2 bytes, 0 as its value
+        const auto labels = [](unsigned first, unsigned count) {
+            static constexpr std::string_view digits{"0123456789abcdef"};
+            std::string                       hex;
+            for (unsigned label = first; label < first + count; ++label) {
+                hex += "19";
+                for (const auto shift : {12U, 8U, 4U, 0U}) {
+                    hex += digits[(label >> shift) & 0xfU];
+                }
+                hex += "00";
+            }
+            return hex;
+        };
+
+        // [protected, {1000: 0 ... 20999: 0}, h'a0', h'00']. b9 4e 20 opens a map of 20,000
+        const auto verify = [&](std::string_view protected_hex) {
+            const auto bytes = to_bytes(std::string{"84"} + std::string{protected_hex} + "b94e20" + labels(1000, 20000) + "41a04100");
+
+            cose_sign1 message;
+            auto       decoder = make_decoder<codec::cwt>(bytes);
+            auto       decoded = decoder(message);
+            REQUIRE(decoded);
+            return verify_sign1<signature_presence_es256_backend>(nullptr, message);
+        };
+
+        // {1: -7}
+        CHECK(verify("43a10126"));
+
+        // {1: -7, 20999: 0}: 20999 is in the unprotected map as well
+        const auto both = verify("47a2012619520700");
+        REQUIRE_FALSE(both);
+        CHECK_EQ(both.error(), status_code::error);
+    }
+
+    TEST_CASE("every signature of a message with many body labels verifies") {
+        // 19 hh ll 00 for the labels 1000 to 2999
+        std::string body_labels;
+        for (unsigned label = 1000; label < 3000; ++label) {
+            static constexpr std::string_view digits{"0123456789abcdef"};
+            body_labels += "19";
+            for (const auto shift : {12U, 8U, 4U, 0U}) {
+                body_labels += digits[(label >> shift) & 0xfU];
+            }
+            body_labels += "00";
+        }
+
+        // [h'', {2,000 labels}, h'a0', [100 times [h'a10126', {}, h'51']]]
+        std::string hex = "8440b907d0" + body_labels + "41a09864";
+        for (int signer = 0; signer < 100; ++signer) {
+            hex += "8343a10126a04151";
+        }
+        const auto bytes = to_bytes(hex);
+
+        cose_sign message;
+        auto      decoder = make_decoder<codec::cwt>(bytes);
+        auto      decoded = decoder(message);
+        REQUIRE(decoded);
+        REQUIRE_EQ(message.signatures.size(), 100U);
+
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, message));
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, message, std::size_t{99}));
+
+        // An empty signature at the end is still found
+        message.signatures.back().signature.clear();
+        CHECK_FALSE(verify_sign<signature_presence_es256_backend>(nullptr, message));
+    }
+
 } // TEST_SUITE("cbor_wire/cwt")

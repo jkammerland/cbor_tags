@@ -57,7 +57,8 @@ template <bool B> expected<std::array<unsigned char, 65>, status_code> p256_poin
 } // namespace detail
 
 template <bool B> [[nodiscard]] expected<ec2_public_key, status_code> expand_p256_public_key(const basic_ec2_public_key<B> &key) {
-    auto point = detail::p256_point_bytes(key);
+    const detail::openssl_error_scope errors;
+    auto                              point = detail::p256_point_bytes(key);
     if (!point)
         return unexpected<status_code>{point.error()};
 
@@ -76,7 +77,8 @@ template <bool B> [[nodiscard]] expected<ec2_public_key, status_code> expand_p25
 template <bool B>
 [[nodiscard]] expected<openssl_verification_key, status_code> import_p256_public_key(const basic_ec2_public_key<B> &key,
                                                                                      algorithm alg = algorithm::esp256) {
-    auto permitted = validate_key_use(key, alg);
+    const detail::openssl_error_scope errors;
+    auto                              permitted = validate_key_use(key, alg);
     if (!permitted || (alg != algorithm::esp256 && alg != algorithm::es256))
         return unexpected<status_code>{status_code::error};
     auto point = detail::p256_point_bytes(key);

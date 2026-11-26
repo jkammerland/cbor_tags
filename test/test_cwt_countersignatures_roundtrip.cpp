@@ -142,8 +142,8 @@ TEST_SUITE("roundtrip/cwt/countersignatures") {
 
         std::array<std::byte, 63> short_storage;
         CHECK_FALSE(countersign<openssl_esp256_backend>(key.get(), *target, countersignature, short_storage));
-        CHECK_FALSE(countersign0<openssl_esp256_backend>(key.get(), *target, short_storage, {}));
-        REQUIRE(countersign0<openssl_esp256_backend>(key.get(), *target, storage, {}));
+        CHECK_FALSE(countersign0<openssl_esp256_backend>(key.get(), *target, std::span<std::byte>{short_storage}, {}));
+        REQUIRE(countersign0<openssl_esp256_backend>(key.get(), *target, std::span<std::byte>{storage}, {}));
         REQUIRE(verify_countersignature0<openssl_esp256_backend>(key.get(), *target, storage));
     }
     TEST_CASE("countersignature verification publishes custom critical headers only after authentication") {

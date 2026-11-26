@@ -2,6 +2,7 @@
 
 #include "cbor_tags/cwt/cwt.h"
 
+#include <openssl/err.h>
 #include <openssl/obj_mac.h>
 #include <openssl/objects.h>
 #include <openssl/opensslv.h>
@@ -19,6 +20,28 @@
 namespace cbor::tags::cwt::detail {
 
 template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, decltype(FreeFn)>;
+
+struct openssl_error_scope {
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
+    openssl_error_scope() noexcept { ERR_set_mark(); }
+    ~openssl_error_scope() { ERR_pop_to_mark(); }
+#else
+    // Single-bit marks cannot be nested on a caller's queue entry.
+    openssl_error_scope() noexcept = default;
+    ~openssl_error_scope() {
+        if (initially_empty)
+            ERR_clear_error();
+    }
+#endif
+
+    openssl_error_scope(const openssl_error_scope &)            = delete;
+    openssl_error_scope &operator=(const openssl_error_scope &) = delete;
+
+#if OPENSSL_VERSION_NUMBER < 0x30000000L || defined(LIBRESSL_VERSION_NUMBER)
+  private:
+    bool initially_empty = ERR_peek_error() == 0UL;
+#endif
+};
 
 [[nodiscard]] inline expected<void, status_code> validate_openssl_es256_key(EVP_PKEY *key) {
     if (key == nullptr) {
@@ -146,6 +169,7 @@ template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, d
 
 template <typename Key, SignatureParts Parts>
 [[nodiscard]] inline expected<std::size_t, status_code> openssl_compat_es256_sign(Key *key, Parts &&parts, std::span<std::byte> output) {
+    const openssl_error_scope errors;
     if (output.size() < 64U) {
         return unexpected<status_code>{status_code::size_limit_exceeded};
     }
@@ -186,7 +210,8 @@ template <typename Key, SignatureParts Parts>
 template <typename Key, SignatureParts Parts>
 [[nodiscard]] inline expected<void, status_code> openssl_compat_es256_verify(Key *key, Parts &&parts,
                                                                              std::span<const std::byte> signature) {
-    auto key_status = validate_openssl_es256_key(key);
+    const openssl_error_scope errors;
+    auto                      key_status = validate_openssl_es256_key(key);
     if (!key_status) {
         return unexpected<status_code>{key_status.error()};
     }

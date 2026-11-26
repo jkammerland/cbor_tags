@@ -125,7 +125,8 @@ auto result = cwt::decode_protected_header(message.protected_header, headers);
 ```
 
 The input must be a named buffer whose storage remains valid while its views are
-used. Empty protected bytes produce an empty map. The helper rejects trailing
+used. Empty protected bytes produce an empty map, and `encode_protected_header`
+writes no bytes for a header without selected fields. The helper rejects trailing
 bytes and replaces the destination only on success. Use `header_map` as the
 destination to copy the fields instead, or keep the existing owning-result
 `decode_protected_header(bytes)` convenience.
@@ -174,10 +175,9 @@ public third-party dependencies. Conan's aggregate target is `cbor::all`.
   preserves it; the decoder cursor remains terminal, without rollback.
 - Duplicate integer or text claim labels are rejected, including unknown and
   noncanonical spellings. Unknown integer and text claims are consumed and discarded.
-- Integer dates must fit `int64_t`; floating dates must be finite.
-- Header labels accept integers or text. Duplicate labels within each map,
-  unsupported/empty `crit`, absent critical targets and trailing protected-header
-  bytes are rejected. Supported critical targets are `alg` (1) and `kid` (4).
+- Integer dates must fit `int64_t`; floating dates of any width must be finite.
+- Header labels accept integers or text. Duplicate labels within each map, unsupported/empty `crit`,
+  absent critical targets and trailing protected-header bytes are rejected. Supported critical targets are `alg` (1) and `kid` (4).
 
 ## Signing and verification
 

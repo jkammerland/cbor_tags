@@ -87,12 +87,68 @@ template <PublicKey Key> bool valid_public_key_structure(const Key &key) {
         return true;
     }
 }
+
+// Whether this is a key the algorithm can be used with. A fully specified
+// algorithm names its curve (RFC 9864). Legacy EdDSA accepts either Edwards
+// signature curve.
+template <PublicKey Key> bool key_fits_algorithm(const Key &key, algorithm alg) {
+    std::int64_t key_type{};
+    std::int64_t curve{};
+    switch (alg) {
+    case algorithm::esp256:
+        key_type = 2;
+        curve    = 1;
+        break;
+    case algorithm::esp384:
+        key_type = 2;
+        curve    = 2;
+        break;
+    case algorithm::esp512:
+        key_type = 2;
+        curve    = 3;
+        break;
+    case algorithm::ed25519:
+        key_type = 1;
+        curve    = 6;
+        break;
+    case algorithm::ed448:
+        key_type = 1;
+        curve    = 7;
+        break;
+    case algorithm::es256:
+    case algorithm::es384:
+    case algorithm::es512:
+        if constexpr (Key::key_type == 2) {
+            // RFC 8812 reserves secp256k1 for ES256K.
+            const auto *registered = std::get_if<std::int64_t>(&key.curve);
+            return registered == nullptr || *registered != 8;
+        }
+        return false;
+    case algorithm::eddsa:
+        if constexpr (Key::key_type == 1) {
+            const auto *registered = std::get_if<std::int64_t>(&key.curve);
+            return registered != nullptr && (*registered == 6 || *registered == 7);
+        }
+        return false;
+    default: return true;
+    }
+
+    if (Key::key_type != key_type)
+        return false;
+    if constexpr (Key::key_type == 3) {
+        return false;
+    } else {
+        // A curve with a name of its own is none of the registered ones
+        const auto *registered = std::get_if<std::int64_t>(&key.curve);
+        return registered != nullptr && *registered == curve;
+    }
+}
 } // namespace detail
 
 // Key metadata is an admission restriction, not a cryptographic validity proof.
 template <detail::PublicKey Key>
 [[nodiscard]] expected<void, status_code> validate_key_use(const Key &key, algorithm alg, std::int64_t operation = 2) {
-    if (!detail::valid_public_key_structure(key) || (key.alg && *key.alg != alg))
+    if (!detail::valid_public_key_structure(key) || (key.alg && *key.alg != alg) || !detail::key_fits_algorithm(key, alg))
         return unexpected<status_code>{status_code::error};
     if (key.key_ops && std::ranges::find(*key.key_ops, operation) == key.key_ops->end())
         return unexpected<status_code>{status_code::error};
