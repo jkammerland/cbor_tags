@@ -1120,10 +1120,7 @@ The package features install the optional dependencies; still configure
 
 ### Release Artifacts
 
-New releases provide signed TGZ and ZIP CMake install trees, SHA-256 and
-SHA-512 checksums, an SPDX SBOM, and the public verification key. See
-[Releases](doc/releases.md) for the asset contract, verification model,
-repository setup, and publishing procedure.
+See [Releases](doc/releases.md) for source archives and verification instructions.
 
 ## 💡 CMake Integration
 

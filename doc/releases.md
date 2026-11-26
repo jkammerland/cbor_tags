@@ -5,7 +5,7 @@ publishes the verified candidate with `scripts/publish-release.sh`.
 
 ## Release Assets
 
-For version `X.Y.Z`, the workflow publishes exactly 12 assets:
+For version `X.Y.Z`, the release contains 12 assets:
 
 - `cbor_tags-X.Y.Z.tar.gz` and `.zip` reproducible source trees;
 - `.sha256` and `.sha512` files for both archives;
@@ -14,27 +14,10 @@ For version `X.Y.Z`, the workflow publishes exactly 12 assets:
 - `cbor_tags-X.Y.Z.release-manifest` and its detached `.sig`.
 
 One signed manifest binds all assets to the repository, version, signed tag, and
-commit. Verification requires the expected release identity; a downloaded manifest cannot choose it.
+commit.
 
-The archives contain the exact tracked source snapshot for the signed release
-commit. They do not contain a pre-installed CMake tree. The workflow extracts
-both archives, compares every file digest and executable bit against the
-canonical Git snapshot, and runs a round-trip consumer against each archive.
-It separately stages one internal install and builds `test_package` against it
-to keep the CMake package metadata covered without publishing that install tree.
-
-The build uses workflow-commit tooling and a separate, clean checkout of the
-verified release commit. Signing and candidate audits also use workflow-commit
-tooling; signing reads project versions from the verified release commit.
-Archive validation is independent of example names.
-
-The release driver normalizes ZIP metadata to UTC so the unsigned packages are
-byte-reproducible regardless of the operator's local timezone.
-
-The SBOM is SPDX 3 JSON-LD generated from the installed target. The release
-driver checks its document name, CC0-1.0 data license, MIT project license,
-root package, direct dependency packages, dependency versions, and `dependsOn`
-relationship before including its digest in the signed manifest.
+The archives contain the tracked source at the signed release commit. The SBOM
+uses SPDX 3 JSON-LD.
 
 ## Trust Model
 
@@ -44,36 +27,23 @@ relationship before including its digest in the signed manifest.
 - Tags and assets use the release key committed at
   `.github/release-signing-key.asc`, fingerprint
   `7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D`.
+- Verification rejects signatures from keys whose revocation is recorded in
+  the key material it checks. The offline commands check the public key
+  bundled with the release.
+- Preparation and publication reject signatures from expired keys.
+  Audits and offline verification of published releases accept signatures from
+  expired keys.
 - Signing requires approval through the protected `release` environment;
   package builds have no access to signing secrets.
 - Publication requires immutable releases to be enabled and verifies the
   published assets and GitHub release attestation.
 
-To verify a download, run the release notes' verification commands with Bash
-3.2 or newer, GPG, and either GNU `sha256sum`/`sha512sum` or `shasum` (included
-with macOS). Run them in the directory containing all 12 release assets. They
-require the fingerprint above; the downloaded public key is not itself a source
-of trust. Verification rejects altered, missing, or unexpected assets, including
-symlinks and noncanonical checksum records.
-
-## One-Time Repository Setup
-
-Before publishing:
-
-1. Enable immutable releases under **Settings > General > Releases**.
-2. Create an environment named `release` under **Settings > Environments**.
-3. Require the release owner as a reviewer, allow self-review, disable
-   administrator bypass, and allow deployments only from the selected `master`
-   branch.
-4. Add `GPG_PRIVATE_KEY`, `GPG_SIGNING_KEY`, and `GPG_PASSPHRASE` as environment
-   secrets. Do not keep repository-level duplicates.
-5. Create an active tag ruleset for `v*` that restricts tag creation, update,
-   and deletion. Give repository administrators an explicit bypass for the
-   controlled signed-tag operation.
-
-`GPG_PRIVATE_KEY` is the armored private key, `GPG_SIGNING_KEY` is the fingerprint
-above, and `GPG_PASSPHRASE` is its passphrase. Enter secrets through GitHub settings
-or `gh secret set` prompts, not shell command arguments.
+To verify a download, put all 12 release assets into an otherwise empty
+directory and run the release notes' verification commands there. They need Bash
+3.2 or newer, GPG, and `sha256sum`/`sha512sum` or `shasum`. They require the
+fingerprint above; the downloaded public key is not itself a source of trust.
+Altered, missing, and additional files are rejected. The commands print
+`cbor_tags X.Y.Z: release assets verified`, or return a nonzero status. They run in a separate Bash process.
 
 ## Publishing A Release
 
@@ -93,20 +63,23 @@ or `gh secret set` prompts, not shell command arguments.
    checksum and tag, and push only that tag as a ruleset-bypass administrator:
 
    ```bash
-   gh run download RUN_ID \
-     --repo jkammerland/cbor_tags \
-     --name signed-release-tag-vX.Y.Z \
-     --dir build/release-tag
-   (cd build/release-tag && sha256sum -- vX.Y.Z.bundle | cmp - vX.Y.Z.bundle.sha256)
+   (
+     set -euo pipefail
+     gh run download RUN_ID \
+       --repo jkammerland/cbor_tags \
+       --name signed-release-tag-vX.Y.Z \
+       --dir build/release-tag
+     (cd build/release-tag && sha256sum -- vX.Y.Z.bundle | cmp - vX.Y.Z.bundle.sha256)
 
-   git fetch build/release-tag/vX.Y.Z.bundle \
-     refs/tags/vX.Y.Z:refs/tags/vX.Y.Z
-   git fetch origin \
-     "+refs/heads/master:refs/remotes/origin/master"
-   bash scripts/release.sh verify-tag \
-     --tag vX.Y.Z \
-     --trusted-ref origin/master
-   git push origin refs/tags/vX.Y.Z
+     git fetch build/release-tag/vX.Y.Z.bundle \
+       refs/tags/vX.Y.Z:refs/tags/vX.Y.Z
+     git fetch origin \
+       "+refs/heads/master:refs/remotes/origin/master"
+     bash scripts/release.sh verify-tag \
+       --tag vX.Y.Z \
+       --trusted-ref refs/remotes/origin/master
+     git push origin refs/tags/vX.Y.Z
+   )
    ```
 
 5. Dispatch the candidate workflow from `master` and approve the `release`
@@ -131,14 +104,14 @@ or `gh secret set` prompts, not shell command arguments.
    tag_object="$(git rev-parse refs/tags/vX.Y.Z)"
    commit="$(git rev-list -n 1 refs/tags/vX.Y.Z)"
    tooling_worktree="$(mktemp -d /tmp/cbor-tags-release-tools.XXXXXX)"
-   git worktree add --detach "${tooling_worktree}" origin/master
+   git worktree add --detach "${tooling_worktree}" refs/remotes/origin/master
    cd "${tooling_worktree}"
    source_worktree="$(mktemp -d /tmp/cbor-tags-release-source.XXXXXX)"
    git worktree add --detach "${source_worktree}" "${commit}"
 
    bash scripts/release.sh verify-tag \
      --tag vX.Y.Z \
-     --trusted-ref origin/master
+     --trusted-ref refs/remotes/origin/master
 
    gh run download RUN_ID \
      --repo jkammerland/cbor_tags \

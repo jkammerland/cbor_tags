@@ -48,8 +48,11 @@ case "${command_name}" in
             printf '[GNUPG:] BADSIG fake\n' >&2
             exit 1
         fi
+        # Git prints the raw GnuPG statuses and rejects both key verdicts.
         fingerprint="${FAKE_TAG_FINGERPRINT:-7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D}"
+        printf '[GNUPG:] %s %s cbor_tags release\n' "${FAKE_TAG_VERDICT:-GOODSIG}" "${fingerprint:24}" >&2
         printf '[GNUPG:] VALIDSIG %s 2026-01-01 0 4 0 19 10 00 %s\n' "${fingerprint}" "${fingerprint}" >&2
+        [[ "${FAKE_TAG_VERDICT:-GOODSIG}" == GOODSIG ]]
         ;;
     rev-list)
         printf '%s\n' "0123456789abcdef0123456789abcdef01234567"
@@ -119,11 +122,24 @@ echo "valid-release-tag: OK"
 expect_failure "lightweight-tag" "must be an annotated tag" FAKE_TAG_TYPE=commit
 expect_failure "invalid-signature" "does not have a valid signature" FAKE_VERIFY_FAIL=1
 expect_failure "unexpected-signing-key" "was signed by" FAKE_TAG_FINGERPRINT=1111222233334444555566667777888899990000
+expect_failure "revoked-signing-key" "does not have a valid signature" FAKE_TAG_VERDICT=REVKEYSIG
+expect_failure "expired-signing-key" "was signed by an expired key" FAKE_TAG_VERDICT=EXPKEYSIG
 expect_failure "wrong-public-key" "release public key fingerprint is" FAKE_PUBLIC_FINGERPRINT=1111222233334444555566667777888899990000
 expect_failure "tag-outside-master" "is not contained in" FAKE_OFF_MASTER=1
 expect_failure "cmake-version-mismatch" "does not match CMake project version" FAKE_CMAKE_VERSION=0.21.0
 expect_failure "vcpkg-version-mismatch" "does not match vcpkg.json version" FAKE_VCPKG_VERSION=0.21.0
 expect_failure "conan-version-mismatch" "does not match conanfile.py version" FAKE_CONAN_VERSION=0.21.0
+
+# A branch or a tag can be called origin/master as well, and Git resolves the
+# short name to it before the remote-tracking ref. The guide's commands are
+# pasted, so they name the ref in full
+release_guide="${repo_root}/doc/releases.md"
+grep -F -- '--trusted-ref refs/remotes/origin/master' "${release_guide}" >/dev/null
+if sed 's#refs/remotes/origin/master##g' "${release_guide}" | grep -n 'origin/master' >&2; then
+    echo "guide-full-trusted-ref: doc/releases.md names origin/master without refs/remotes/" >&2
+    exit 1
+fi
+echo "guide-full-trusted-ref: OK"
 
 invalid_name_output="${test_root}/invalid-name-output"
 if env PATH="${fake_bin}:${PATH}" bash "${repo_root}/scripts/release.sh" verify-tag --tag release-0.22.0 >"${invalid_name_output}" 2>&1; then

@@ -70,7 +70,9 @@ if ! verification_output="$(
     printf '%s\n' "${verification_output}" >&2
     die "dependency archive does not have a valid signature"
 fi
-authenticate_release_signature "${verification_output}" "${dependency_fingerprint}" 'dependency archive'
+# A published release: its archive is pinned by digest above, and its signature
+# stays what it is when the key expires
+authenticate_release_signature "${verification_output}" "${dependency_fingerprint}" 'dependency archive' accept-expired-key
 
 required_member="target_install_package-${dependency_version}-cmake/usr/share/cmake/target_install_package/target_install_packageConfig.cmake"
 tar -tzf "${verify_dir}/${dependency_archive}" | grep -Fx -- "${required_member}" >/dev/null ||
