@@ -127,6 +127,7 @@ release_state() {
     if [[ "$(jq -r .draft <<<"${metadata}")" == "true" ]]; then
         printf 'draft\n'
     else
+        [[ "$(jq -r .immutable <<<"${metadata}")" == "true" ]] || die "release ${tag} is not immutable"
         printf 'published\n'
     fi
 }
@@ -338,11 +339,12 @@ audit_release() {
     fi
     validate_release_target "${metadata}" "${tag}" "${commit}"
     [[ "$(jq -r .draft <<<"${metadata}")" == "false" ]] || die "release ${tag} is still a draft"
+    [[ "$(jq -r .immutable <<<"${metadata}")" == "true" ]] || die "release ${tag} is not immutable"
 
     rm -rf -- "${download_dir}"
     mkdir -p -- "${download_dir}"
     gh release download "${tag}" --dir "${download_dir}"
-    bash "${release_driver}" verify-assets --package-dir "${download_dir}" --version "${version}"
+    bash "${release_driver}" verify-assets --published --package-dir "${download_dir}" --version "${version}"
     compare_remote_digests "${tag}" "${download_dir}" "${release_id}"
     if [[ -n "${expected_unsigned_dir}" ]]; then
         compare_unsigned_payloads "${version}" "${expected_unsigned_dir}" "${download_dir}"
