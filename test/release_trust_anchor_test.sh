@@ -69,8 +69,8 @@ write_signed_packages() {
 # The commands a consumer pastes, with the fingerprint they got elsewhere
 write_consumer_commands() {
     local fingerprint="$1"
-    printf 'expected_fingerprint=%q\n' "${fingerprint}"
-    write_release_verification_commands 0.28.0 | tail -n +2
+    write_release_verification_commands 0.28.0 |
+        sed "s/^expected_fingerprint=.*/expected_fingerprint=${fingerprint}/"
 }
 
 for bad_key in attacker extra-primary; do
@@ -143,10 +143,7 @@ grep -Fx 'expected_fingerprint=7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D' "${test
 bash -n "${test_root}/generated.sh"
 # Substitute only the independently trusted fixture fingerprint; do not derive
 # the expected identity from the downloaded public key.
-{
-    printf 'expected_fingerprint=%q\n' "${fixture_fingerprint}"
-    tail -n +2 "${test_root}/generated.sh"
-} >"${test_root}/fixture-commands.sh"
+write_consumer_commands "${fixture_fingerprint}" >"${test_root}/fixture-commands.sh"
 (cd -- "${package_dir}" && bash "${test_root}/fixture-commands.sh")
 echo 'generated consumer commands: OK'
 [[ "$(ambient_keys)" == "${attacker_fingerprint}" ]]
@@ -157,8 +154,7 @@ expect_failure 'consumer wrong key' bash -c 'cd -- "$1" && bash "$2"' _ "${packa
 cp -- "${test_root}/extra-primary.asc" "${package_dir}/cbor_tags-release-public-key.asc"
 expect_failure 'consumer extra primary' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
 
-# The pasted commands print no reason. A refusal at inspection and an import
-# that fails later look the same from outside, so record what gpg is asked to do
+# Check that verification inspects the key file before attempting to import it.
 recording_bin="${test_root}/recording-bin"
 mkdir -- "${recording_bin}"
 printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >>"${GPG_CALLS}"' "exec $(printf '%q' "$(command -v gpg)") \"\$@\"" \
@@ -225,6 +221,16 @@ write_signed_packages "${expired_packages}" "${test_root}/expired.asc" "${expire
     --faked-system-time 20240101T010000 2>/dev/null
 expect_rejection 'signature by an expired key' 'was signed by an expired key' \
     verify_signed_assets "${expired_packages}" 0.28.0 "${expired_fingerprint}"
+# The committed key and the archived export can have different armor.
+{
+    IFS= read -r armor_header
+    printf '%s\n' "${armor_header}" 'Comment: current key export'
+    cat
+} <"${test_root}/expired.asc" >"${test_root}/current.asc"
+expect_rejection 'new candidate requires the canonical key export' 'differs from the canonical committed key' \
+    verify_signed_assets "${expired_packages}" 0.28.0 "${expired_fingerprint}" "${test_root}/current.asc"
+verify_signed_assets "${expired_packages}" 0.28.0 "${expired_fingerprint}" "${test_root}/current.asc" accept-expired-key
+echo 'audit accepts the archived key export for the pinned fingerprint: OK'
 write_consumer_commands "${expired_fingerprint}" >"${test_root}/expired-commands.sh"
 (cd -- "${expired_packages}" && bash "${test_root}/expired-commands.sh")
 echo 'consumer signature by a key that expired later: OK'

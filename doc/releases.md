@@ -5,30 +5,15 @@ publishes the verified candidate with `scripts/publish-release.sh`.
 
 ## Release Assets
 
-For version `X.Y.Z`, the workflow publishes exactly 13 assets:
+For version `X.Y.Z`, the release contains 13 assets:
 
 - `cbor_tags-X.Y.Z.tar.gz` and `.zip` reproducible source trees;
 - detached `.sig`, `.sha256`, and `.sha512` files for both archives;
 - `cbor_tags-X.Y.Z.spdx.json`, with its detached signature and checksums;
 - `cbor_tags-release-public-key.asc` for offline signature verification.
 
-The archives contain the exact tracked source snapshot for the signed release
-commit. They do not contain a pre-installed CMake tree. The workflow extracts
-both archives, compares every file digest and executable bit against the
-canonical Git snapshot, and runs a round-trip consumer against each archive.
-It separately stages one internal install and builds `test_package` against it
-to keep the CMake package metadata covered without publishing that install tree.
-
-The build uses workflow-commit tooling and a separate, clean checkout of the
-verified release commit. Archive validation is independent of example names.
-
-The release driver normalizes ZIP metadata to UTC so the unsigned packages are
-byte-reproducible regardless of the operator's local timezone.
-
-The SBOM is SPDX 3 JSON-LD generated from the installed target. The release
-driver checks its document name, CC0-1.0 data license, MIT project license,
-root package, direct dependency packages, dependency versions, and `dependsOn`
-relationship before signing it as a standalone asset.
+The archives contain the tracked source at the signed release commit. The SBOM
+uses SPDX 3 JSON-LD.
 
 ## Trust Model
 
@@ -42,7 +27,8 @@ relationship before signing it as a standalone asset.
   the key material it checks. The offline commands check the public key
   bundled with the release.
 - Preparation and publication reject signatures from expired keys.
-  The verification commands for published releases continue to accept them.
+  Audits and offline verification of published releases accept signatures from
+  expired keys.
 - Signing requires approval through the protected `release` environment;
   package builds have no access to signing secrets.
 - Publication requires immutable releases to be enabled and verifies the
@@ -70,20 +56,23 @@ the downloaded public key is not itself a source of trust.
    checksum and tag, and push only that tag as a ruleset-bypass administrator:
 
    ```bash
-   gh run download RUN_ID \
-     --repo jkammerland/cbor_tags \
-     --name signed-release-tag-vX.Y.Z \
-     --dir build/release-tag
-   (cd build/release-tag && sha256sum -- vX.Y.Z.bundle | cmp - vX.Y.Z.bundle.sha256)
+   (
+     set -euo pipefail
+     gh run download RUN_ID \
+       --repo jkammerland/cbor_tags \
+       --name signed-release-tag-vX.Y.Z \
+       --dir build/release-tag
+     (cd build/release-tag && sha256sum -- vX.Y.Z.bundle | cmp - vX.Y.Z.bundle.sha256)
 
-   git fetch build/release-tag/vX.Y.Z.bundle \
-     refs/tags/vX.Y.Z:refs/tags/vX.Y.Z
-   git fetch origin \
-     "+refs/heads/master:refs/remotes/origin/master"
-   bash scripts/release.sh verify-tag \
-     --tag vX.Y.Z \
-     --trusted-ref origin/master
-   git push origin refs/tags/vX.Y.Z
+     git fetch build/release-tag/vX.Y.Z.bundle \
+       refs/tags/vX.Y.Z:refs/tags/vX.Y.Z
+     git fetch origin \
+       "+refs/heads/master:refs/remotes/origin/master"
+     bash scripts/release.sh verify-tag \
+       --tag vX.Y.Z \
+       --trusted-ref origin/master
+     git push origin refs/tags/vX.Y.Z
+   )
    ```
 
 5. Dispatch the candidate workflow from `master` and approve the `release`
