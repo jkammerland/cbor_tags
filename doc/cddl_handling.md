@@ -182,7 +182,7 @@ namespace ct = cbor::tags;
 
 std::vector<int> values{1, 2, 3};
 auto enc = ct::make_encoder(output);
-auto result = enc(ct::as_bounded_size<1, 3>(values));
+if (!enc(ct::as_bounded_size<1, 3>(values))) return 1;
 ```
 
 Use `dynamic_bounded_size<T>` when the limits are application state rather than
@@ -196,7 +196,7 @@ std::size_t max_scores = load_configured_score_limit();
 std::vector<int> scores;
 
 auto dec = ct::make_decoder(input);
-auto result = dec(ct::as_bounded_size(scores, 1, max_scores));
+if (!dec(ct::as_bounded_size(scores, 1, max_scores))) return 1;
 ```
 
 Runtime wrappers have no default constructor because a decoder must never
@@ -216,7 +216,7 @@ RuntimePerson person{
         std::vector<int>{}, 0, max_scores},
 };
 
-auto result = dec(person);
+if (!dec(person)) return 1;
 ```
 
 `min > max` throws `std::invalid_argument` when a runtime wrapper is created.
@@ -249,7 +249,7 @@ std::vector<int> values{1, 2, 3, 4};
 
 auto view = ct::as_array_range(values);
 auto bounded_view = ct::as_bounded_size<0, 4>(view);
-enc(bounded_view);
+if (!enc(bounded_view)) return 1;
 // CDDL: [0*4 int]
 ```
 
@@ -262,10 +262,10 @@ namespace ct = cbor::tags;
 
 auto evens = values | std::views::filter(is_even);
 
-enc(ct::as_array_range(evens));
+if (!enc(ct::as_array_range(evens))) return 1;
 
 // Unsupported: evens has no constant-time size().
-enc(ct::as_bounded_size<0, 4>(ct::as_array_range(evens)));
+// enc(ct::as_bounded_size<0, 4>(ct::as_array_range(evens)));
 ```
 
 `as_indefinite(container)` is also supported when the underlying container is a
@@ -276,7 +276,7 @@ indefinite:
 namespace ct = cbor::tags;
 
 std::vector<int> values{1, 2, 3};
-enc(ct::as_bounded_size<0, 3>(ct::as_indefinite{values}));
+if (!enc(ct::as_bounded_size<0, 3>(ct::as_indefinite{values}))) return 1;
 // 9f 01 02 03 ff
 ```
 
@@ -303,18 +303,19 @@ using bounded_rows = ct::max_size<std::vector<bounded_row>, 16>;
 Static and runtime bounds describe the cardinality of one encoded or decoded
 CBOR item. They are not persistent invariants on the backing C++ container.
 Decoding into an existing mutable destination validates only the incoming item,
-then follows the core decoder's append/insert contract:
+then follows the core decoder's
+[destination contract](decoder_resource_limits.md#decoder-contract):
 
 ```cpp
 namespace ct = cbor::tags;
 
 std::vector<int> incoming{1, 2};
 std::vector<std::byte> input;
-ct::make_encoder(input)(incoming);
+if (!ct::make_encoder(input)(incoming)) return 1;
 
 std::vector<int> destination{9, 8, 7};
-auto result = ct::make_decoder(input)(ct::as_bounded_size<2, 2>(destination));
-// result succeeds; destination is now {9, 8, 7, 1, 2}.
+if (!ct::make_decoder(input)(ct::as_bounded_size<2, 2>(destination))) return 1;
+// destination is now {9, 8, 7, 1, 2}.
 // Its final size may exceed the configured maximum because that maximum
 // constrained the incoming CBOR array.
 ```
@@ -490,7 +491,7 @@ struct Person {
 Person person{.age = 42, .name = "Ada", .employer = "AcmeCo"};
 std::vector<std::byte> buffer;
 auto enc = ct::make_encoder(buffer);
-enc(ct::as_named_map{person});
+if (!enc(ct::as_named_map{person})) return 1;
 
 fmt::memory_buffer schema;
 cddl::schema_to<ct::as_named_map<Person>>(

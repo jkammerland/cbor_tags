@@ -128,3 +128,19 @@ TEST_CASE("core roundtrip replaces preseeded scalar optional and variant state")
     test_support::roundtrip_into(input, output);
     CHECK(output == input);
 }
+
+TEST_CASE("core map decoding follows the destination's insertion policy") {
+    const std::map<int, int> source{{1, 10}, {2, 20}};
+
+    SUBCASE("a map updates existing keys") {
+        std::map<int, int> destination{{1, 99}, {7, 70}};
+        test_support::roundtrip_into(source, destination);
+        CHECK(destination == std::map<int, int>{{1, 10}, {2, 20}, {7, 70}});
+    }
+
+    SUBCASE("a multimap retains every entry") {
+        std::multimap<int, int> destination{{1, 99}, {7, 70}};
+        test_support::roundtrip_into(source, destination);
+        CHECK(destination == std::multimap<int, int>{{1, 99}, {1, 10}, {2, 20}, {7, 70}});
+    }
+}

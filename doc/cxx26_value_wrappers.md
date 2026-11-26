@@ -10,9 +10,10 @@ namespace ct = cbor::tags;
 
 std::indirect<int> value(42);
 std::vector<std::byte> bytes;
-auto encoded = ct::make_encoder<ct::codec::std_indirect>(bytes)(value);
+if (!ct::make_encoder<ct::codec::std_indirect>(bytes)(value)) return 1;
+
 std::indirect<int> decoded;
-auto result = ct::make_decoder<ct::codec::std_indirect>(bytes)(decoded);
+if (!ct::make_decoder<ct::codec::std_indirect>(bytes)(decoded)) return 1;
 // On success, *decoded == 42.
 ```
 

@@ -110,7 +110,8 @@ struct message {
 int main() {
     const message sent{42, "ready"};
     std::vector<std::byte> wire;
-    const auto encoded = ct::make_encoder(wire)(sent);
+    auto encoder = ct::make_encoder(wire);
+    const auto encoded = encoder(sent);
     if (!encoded) return 1;
 
     // Start with a fresh destination for each message.
@@ -133,7 +134,7 @@ other CBOR implementations agree on that tag and schema.
 
 | Concern | Ordinary API contract |
 | --- | --- |
-| Destinations | Owning strings and sequences append; maps insert. Start empty for a fresh value. Fixed destinations assign elements; typed-array destination wrappers replace contents. See [destination rules](doc/decoder_resource_limits.md#decoder-contract) and [typed arrays](doc/rfc8746_typed_arrays.md). |
+| Destinations | Growable owning strings and sequences append. Maps follow their insertion policy. Fixed destinations assign elements, and typed-array destination wrappers replace contents. See [destination rules](doc/decoder_resource_limits.md#decoder-contract) and [typed arrays](doc/rfc8746_typed_arrays.md). |
 | Trailing bytes | A call reads its requested items and leaves trailing input unread. Compare `tell()` with the supplied end when the message must consume the buffer. |
 | Numeric conversion | Default integer decoding permits narrowing; [strict integer options](doc/options.md#strict-integer-decode) require representability. Floating-point destinations require the matching wire width. |
 | Validation | Typed decoding is distinct from [structural/text validation](doc/traversal.md). Neither implies an application profile or duplicate-key rejection. |
@@ -147,7 +148,6 @@ Choose the next example by task:
 | Fixed storage or bounded destinations | [Decoder resource limits](doc/decoder_resource_limits.md) |
 | Borrow a view | [Byte-view example](examples/20_experimental_byte_view.cpp) |
 | Process consecutive items | [Basic values](examples/01_basic_values.cpp) and [per-call byte counts](doc/options.md#return-byte-counts) |
-| Resume an incoming stream | [Resumable API proposal](https://github.com/jkammerland/cbor_tags/pull/225) |
 | Add a custom codec | [Codec extensions](doc/codec_extensions.md) |
 
 ### Advanced Type Support
@@ -336,52 +336,37 @@ int main() {
     auto data = std::vector<std::byte>{};
     auto enc = make_encoder(data);
 
-    // Encode Api1 with a tag of 0x10 - note that the tag does not have to be part of the struct
-    enc(make_tag_pair(static_tag<0x10>{}, Api1{.a = 42, .b = 43}));
-
-    // Encode a 0 length binary string in the middle of the buffer
-    enc(std::vector<std::byte>{});
-
-    // Encode Api2 with a tag of 0x20
-    enc(make_tag_pair(static_tag<0x20>{}, Api2{"hello", "world"}));
+    // Write two tagged items with an empty byte string between them.
+    if (!enc(make_tag_pair(static_tag<0x10>{}, Api1{.a = 42, .b = 43}),
+             std::vector<std::byte>{},
+             make_tag_pair(static_tag<0x20>{}, Api2{"hello", "world"}))) return 1;
 
     // Decoding - accept bstr and any tagged value
     auto dec = make_decoder(data);
     std::variant<std::vector<std::byte>, as_tag_any> value;
 
-    // Define a visitor for our variant type
     auto visitor = [&dec](auto&& value) {
         if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, as_tag_any>) {
             if (value.tag == 0x10) {
-                Api1 a;
-                if (dec(a)) {
-                    std::cout << "Api1: a=" << a.a << ", b=" << a.b << "\n";
-                }
+                Api1 item;
+                if (!dec(item)) return false;
+                std::cout << "Api1: a=" << item.a << ", b=" << item.b << "\n";
             } else if (value.tag == 0x20) {
-                Api2 a;
-                if (dec(a)) {
-                    std::cout << "Api2: a=" << a.a << ", b=" << a.b << "\n";
-                }
+                Api2 item;
+                if (!dec(item)) return false;
+                std::cout << "Api2: a=" << item.a << ", b=" << item.b << "\n";
             } else {
-                std::cout << "Unknown tag: " << value.tag << "\n";
+                std::cerr << "Unknown tag: " << value.tag << "\n";
+                return false;
             }
         } else {
-            // Since it was not a tag, it must be a bstr, otherwise the decoding would return the unexpected type.
             std::cout << "Binary data received (aka bstr)\n";
         }
+        return true;
     };
 
-    // Decode the three items
-    if (dec(value)) {
-        std::visit(visitor, value);
-    }
-
-    if (dec(value)) {
-        std::visit(visitor, value);
-    }
-
-    if (dec(value)) {
-        std::visit(visitor, value);
+    for (int i = 0; i < 3; ++i) {
+        if (!dec(value) || !std::visit(visitor, value)) return 1;
     }
 
     return 0;
@@ -1010,11 +995,11 @@ auto value = std::make_shared<int>(42);
 std::vector<std::shared_ptr<int>> sent{value, value};
 
 auto enc = make_encoder<codec::shared_ptr>(buffer);
-enc(sent);
+if (!enc(sent)) return 1;
 
 std::vector<std::shared_ptr<int>> received;
 auto dec = make_decoder<codec::shared_ptr>(buffer);
-dec(received);
+if (!dec(received)) return 1;
 
 // received[0].get() == received[1].get(): both point to the same int.
 ```

@@ -20,20 +20,8 @@ For small, compiled programs with CDDL and executable checks, start with the
 They introduce range encoding, borrowed decode views, segmented output and encoded-view
 forwarding separately.
 
-If you only want to encode normal C++ containers, you usually do not need this
-page.
-
-```cpp
-std::vector<std::byte> out;
-auto enc = make_encoder(out);
-
-enc(std::vector<int>{1, 2, 3});              // CBOR array
-enc(std::map<int, int>{{1, 10}, {2, 20}});   // CBOR map
-enc(std::string{"Ada"});                    // CBOR text string
-```
-
-The range wrappers are for cases where a plain C++ range does not say enough
-about the CBOR type you want.
+Use normal containers for ordinary array, map and string encoding. Range
+wrappers choose the CBOR type for an existing C++ range.
 
 The examples assume:
 
@@ -62,7 +50,7 @@ auto enc = make_encoder(out);
 
 std::vector<int> values{1, 2, 3};
 
-enc(as_array_range(values)); // writes 83 01 02 03 into out here
+if (!enc(as_array_range(values))) return 1; // writes 83 01 02 03 into out here
 ```
 
 The wrapper exists because some ranges are ambiguous:
@@ -70,8 +58,8 @@ The wrapper exists because some ranges are ambiguous:
 ```cpp
 std::vector<std::pair<int, int>> pairs{{1, 10}, {2, 20}};
 
-enc(as_array_range(pairs)); // array containing pair-like values
-enc(as_map_range(pairs));   // map: 1 => 10, 2 => 20
+if (!enc(as_array_range(pairs))) return 1; // array containing pair-like values
+if (!enc(as_map_range(pairs))) return 1;   // map: 1 => 10, 2 => 20
 ```
 
 Byte ranges have the same problem:
@@ -79,8 +67,8 @@ Byte ranges have the same problem:
 ```cpp
 std::vector<unsigned char> payload{1, 2, 3};
 
-enc(as_array_range(payload)); // array of integer values
-enc(as_bstr_range(payload));  // CBOR byte string
+if (!enc(as_array_range(payload))) return 1; // array of integer values
+if (!enc(as_bstr_range(payload))) return 1;  // CBOR byte string
 ```
 
 So the wrappers make the CBOR major type explicit:
@@ -103,7 +91,7 @@ auto evens = values | std::views::filter([](int value) {
     return (value % 2) == 0;
 });
 
-enc(as_array_range(evens)); // encodes 2, 4, 6 without building a new vector
+if (!enc(as_array_range(evens))) return 1; // encodes 2, 4, 6 without building a new vector
 ```
 
 A generated map can be encoded without building a `std::map`:
@@ -114,7 +102,7 @@ auto pairs = std::views::iota(1, 4)
                  return std::pair{value, value * 10};
              });
 
-enc(as_map_range(pairs)); // a3 01 0a 02 14 03 18 1e
+if (!enc(as_map_range(pairs))) return 1; // a3 01 0a 02 14 03 18 1e
 ```
 
 A transformed byte or character stream can be encoded without first building an
@@ -127,7 +115,7 @@ auto bytes = source | std::views::transform([](unsigned char value) {
     return static_cast<std::byte>(value);
 });
 
-enc(as_bstr_range(bytes)); // 45 00 01 02 03 04
+if (!enc(as_bstr_range(bytes))) return 1; // 45 00 01 02 03 04
 ```
 
 `as_tstr_range` accepts character ranges. It does not validate UTF-8; it only
@@ -140,7 +128,7 @@ auto upper = name | std::views::transform([](char value) {
     return static_cast<char>(value >= 'a' && value <= 'z' ? value - 'a' + 'A' : value);
 });
 
-enc(as_tstr_range(upper)); // 63 41 44 41
+if (!enc(as_tstr_range(upper))) return 1; // 63 41 44 41
 ```
 
 ## Sized And Non-Sized Ranges
@@ -153,7 +141,7 @@ or map:
 ```cpp
 std::array<int, 3> values{1, 2, 3};
 
-enc(as_array_range(values)); // 83 01 02 03
+if (!enc(as_array_range(values))) return 1; // 83 01 02 03
 ```
 
 If the C++ range does not have a known size, the wrapper emits an indefinite
@@ -166,7 +154,7 @@ auto evens = values | std::views::filter([](int value) {
     return (value % 2) == 0;
 });
 
-enc(as_array_range(evens)); // 9f ... ff
+if (!enc(as_array_range(evens))) return 1; // 9f ... ff
 ```
 
 Text and byte strings behave similarly, but CBOR requires indefinite strings to
@@ -181,7 +169,7 @@ auto every_char = name | std::views::filter([](char) {
     return true;
 });
 
-enc(as_tstr_range(every_char, 2)); // 7f 62 41 64 61 61 ff
+if (!enc(as_tstr_range(every_char, 2))) return 1; // 7f 62 41 64 61 61 ff
 ```
 
 `chunk_size` defaults to `4096` and must be greater than zero.
@@ -197,7 +185,7 @@ namespace ct = cbor::tags;
 
 std::vector<int> values{1, 2, 3};
 
-enc(ct::as_bounded_size<0, 3>(ct::as_array_range(values)));
+if (!enc(ct::as_bounded_size<0, 3>(ct::as_array_range(values)))) return 1;
 // CDDL: [0*3 int]
 ```
 
@@ -205,8 +193,7 @@ Limits selected at runtime use the same sized-range path:
 
 ```cpp
 std::size_t max_values = configured_limit();
-enc(ct::as_bounded_size(
-    ct::as_array_range(values), 0, max_values));
+if (!enc(ct::as_bounded_size(ct::as_array_range(values), 0, max_values))) return 1;
 ```
 
 The runtime form checks `size()` once before encoding and does not describe a
@@ -224,9 +211,7 @@ auto evens = values | std::views::filter([](int value) {
     return (value % 2) == 0;
 });
 
-enc(ct::as_array_range(evens));                            // supported
-enc(ct::as_bounded_size<0, 2>(ct::as_array_range(evens))); // unsupported
-enc(ct::as_bounded_size(ct::as_array_range(evens), 0, 2)); // unsupported
+if (!enc(ct::as_array_range(evens))) return 1;
 ```
 
 ```cpp
@@ -240,7 +225,7 @@ auto odd_bytes = source | std::views::filter([](unsigned char value) {
     return static_cast<std::byte>(value);
 });
 
-enc(ct::as_bstr_range(odd_bytes, 2)); // 5f 42 01 03 ff
+if (!enc(ct::as_bstr_range(odd_bytes, 2))) return 1; // 5f 42 01 03 ff
 ```
 
 Use a sized byte range when bounded encoding is required. CDDL generation can
@@ -257,7 +242,7 @@ The wrapper stores a C++ view of the range. If you encode immediately, this is
 usually invisible:
 
 ```cpp
-enc(as_array_range(values));
+if (!enc(as_array_range(values))) return 1;
 ```
 
 If you store the wrapper and encode it later, the usual C++ range lifetime rules
@@ -267,7 +252,7 @@ matter.
 auto wrapped = as_array_range(values);
 
 // values must still exist when wrapped is encoded.
-enc(wrapped);
+if (!enc(wrapped)) return 1;
 ```
 
 Temporaries are accepted only when `std::views::all` can store them safely for
@@ -275,7 +260,7 @@ the current standard library implementation.
 
 ```cpp
 auto wrapped = as_array_range(std::vector<int>{1, 2, 3});
-enc(wrapped);
+if (!enc(wrapped)) return 1;
 ```
 
 ## Borrowed Decode Views
@@ -289,11 +274,11 @@ copying the payload into a new `std::string` or `std::vector`.
 ```cpp
 std::vector<std::byte> data;
 auto enc = make_encoder(data);
-enc(std::string{"hello"});
+if (!enc(std::string{"hello"})) return 1;
 
 auto dec = make_decoder(data);
 std::string_view text;
-dec(text);
+if (!dec(text)) return 1;
 ```
 
 `text` points into `data`. Keep `data` alive and do not invalidate it while
@@ -304,11 +289,11 @@ Use `std::span<const std::byte>` for a contiguous borrowed byte-string payload:
 ```cpp
 std::vector<std::byte> data;
 auto enc = make_encoder(data);
-enc(std::vector<std::byte>{std::byte{1}, std::byte{2}});
+if (!enc(std::vector<std::byte>{std::byte{1}, std::byte{2}})) return 1;
 
 auto dec = make_decoder(data);
 std::span<const std::byte> bytes;
-dec(bytes);
+if (!dec(bytes)) return 1;
 ```
 
 `bytes` borrows from `data` with the same lifetime requirements as `text`.
@@ -326,11 +311,11 @@ For non-contiguous input buffers, use the decoder-provided aliases:
 ```cpp
 std::deque<std::byte> data;
 auto enc = make_encoder(data);
-enc(std::string{"hello"});
+if (!enc(std::string{"hello"})) return 1;
 
 auto dec = make_decoder(data);
 decltype(dec)::tstr_view_t text;
-dec(text);
+if (!dec(text)) return 1;
 ```
 
 ## Encoded Item Views
@@ -343,15 +328,15 @@ decoding it into a C++ value and encoding it again.
 ```cpp
 std::vector<std::byte> data;
 auto enc = make_encoder(data);
-enc(std::vector<int>{1, 2, 3});
+if (!enc(std::vector<int>{1, 2, 3})) return 1;
 
 auto dec = make_decoder(data);
 decltype(dec)::encoded_array_view encoded;
-dec(encoded);
+if (!dec(encoded)) return 1;
 
 std::vector<std::byte> forwarded;
 auto out = make_encoder(forwarded);
-out(encoded); // re-emits the same encoded array bytes
+if (!out(encoded)) return 1; // re-emits the same encoded array bytes
 ```
 
 The encoded view borrows from the decoder input. For contiguous input, `encoded.span()`
@@ -374,7 +359,7 @@ for (const auto& match : matches) {
     }
 
     MyPayload payload{};
-    auto result = match.decode(payload);
+    if (!match.decode(payload)) return 1;
 }
 
 if (matches.failed()) {
@@ -434,7 +419,7 @@ You can also use segments as the encoder output backend:
 ```cpp
 byte_segments segments;
 auto enc = make_encoder(segments);
-enc(as_array{2}, 1, 2);
+if (!enc(as_array{2}, 1, 2)) return 1;
 
 auto contiguous = segments.flatten();
 ```
@@ -462,8 +447,8 @@ std::vector<std::byte> copy(bytes.begin(), bytes.end());
 segment.append_owned(copy);
 ```
 
-Flattening always copies. Borrowed segment payloads must outlive the segment
-container.
+Flattening copies the bytes. Keep borrowed payload storage alive and unchanged
+until the segments are written or flattened.
 
 ## Convert Encoded Views To Segments
 
@@ -472,7 +457,7 @@ Use `copy_segments` when the segment output should own a copy of the encoded byt
 ```cpp
 auto dec = make_decoder(buffer);
 decltype(dec)::encoded_array_view encoded;
-dec(encoded);
+if (!dec(encoded)) return 1;
 
 auto owned = copy_segments(encoded);
 ```
@@ -484,7 +469,7 @@ that will outlive the segments.
 std::vector<std::byte> buffer{std::byte{0x82}, std::byte{0x01}, std::byte{0x02}};
 auto dec = make_decoder(buffer);
 decltype(dec)::encoded_array_view encoded;
-dec(encoded);
+if (!dec(encoded)) return 1;
 
 auto borrowed = borrow_segments(encoded);
 ```
@@ -501,57 +486,5 @@ auto encoded = encode_item_segments(values);
 std::vector<std::byte> output;
 auto enc = make_encoder(output);
 
-if (encoded) {
-    enc(as_bstr(*encoded));
-}
+if (!encoded || !enc(as_bstr(*encoded))) return 1;
 ```
-
-## Which API Should I Use?
-
-Use normal containers when you already have the value in the shape you want:
-
-```cpp
-enc(std::vector<int>{1, 2, 3});
-enc(std::string{"Ada"});
-```
-
-Use range wrappers when you have a view, generator, transform, filter, span, or
-ambiguous range and need to say which CBOR type to emit:
-
-```cpp
-enc(as_array_range(filtered_values));
-enc(as_map_range(generated_pairs));
-enc(as_tstr_range(characters));
-enc(as_bstr_range(bytes));
-```
-
-Use borrowed decode views when the input buffer already exists and you want a
-view into it instead of a copied string or byte vector.
-
-Use encoded item views when the payload is already CBOR and you want to forward
-it without decoding it.
-
-Use lazy tag scanning when you have a larger CBOR document and only care about
-specific tagged payloads.
-
-Use `byte_segments` when the output should be written as pieces and large
-payloads should not be copied into one contiguous output vector.
-
-## Rules To Remember
-
-- Range wrappers encode immediately when passed to the encoder.
-- Range wrappers select CBOR shape explicitly: array, map, text string, or byte
-  string.
-- Sized ranges emit definite arrays, maps, text strings, or byte strings.
-- Non-sized array and map ranges emit indefinite arrays and maps.
-- Non-sized text and byte ranges emit indefinite strings made from definite
-  chunks.
-- Borrowed decode views, encoded item views, lazy tag matches, and borrowed
-  segments reference the original buffer.
-- Borrowed decode views for text and byte strings require definite string
-  payloads; use owning strings or byte containers for indefinite strings.
-- Segment-backed encoders may borrow contiguous lvalue range payloads; keep the
-  source alive and unchanged until the segments are flattened or written.
-- `payload_span()` and `borrow_segments()` require contiguous input.
-- Non-contiguous text and byte views use decoder-provided aliases.
-- `flatten_segments(...)` produces a contiguous copy.
