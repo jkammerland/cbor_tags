@@ -99,7 +99,8 @@ authenticate_release_signature() {
 
 validate_release_identity() {
     local version="$1" repository="$2" tag="$3" tag_object="$4" commit="$5"
-    [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?$ ]] || die "invalid release version"
+    local version_pattern='^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?$'
+    [[ "${version}" =~ ${version_pattern} ]] || die "invalid release version"
     [[ "${repository}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "release repository must identify owner/name"
     [[ "${tag}" == "v${version}" ]] || die "release tag must match version"
     [[ "${tag_object}" =~ ^[0-9a-f]{40}$ && "${commit}" =~ ^[0-9a-f]{40}$ ]] || die "release tag object and commit must be full lowercase Git object IDs"
