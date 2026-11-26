@@ -38,7 +38,7 @@ Usage: scripts/release.sh <command> [options]
 
 Commands:
   verify-tag --tag <tag> [--trusted-ref <ref>] [--public-key <path>]
-             [--expected-fingerprint <fingerprint>]
+             [--expected-fingerprint <fingerprint>] [--published]
       Verify the annotated tag signature, master ancestry, and all project versions.
 
   build [--source-dir <dir>] [--package-dir <dir>]
@@ -52,7 +52,7 @@ Commands:
       Validate the version against metadata at the specified release commit.
 
   verify-assets --repository <owner/name> --version <version> --tag <tag>
-                --tag-object <object> --commit <commit> [--package-dir <dir>]
+                --tag-object <object> --commit <commit> [--package-dir <dir>] [--published]
       Verify the exact asset set, trusted key, signed manifest, and checksums.
 
   check-versions
@@ -122,6 +122,7 @@ verify_tag() {
     local public_key="${repo_root}/.github/release-signing-key.asc"
     local expected_fingerprint="${release_signing_fingerprint}"
 
+    local expired_key=reject-expired-key
     while (($#)); do
         case "$1" in
             --tag)
@@ -143,6 +144,10 @@ verify_tag() {
                 [[ $# -ge 2 ]] || die "--expected-fingerprint requires a value"
                 expected_fingerprint="$(printf '%s' "$2" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
                 shift 2
+                ;;
+            --published)
+                expired_key=accept-expired-key
+                shift
                 ;;
             -h | --help)
                 usage
@@ -176,13 +181,16 @@ verify_tag() {
         'exec gpg --no-options --batch --no-autostart --no-auto-key-retrieve --auto-key-locate clear "$@"' >"${gnupg_home}/verify-gpg"
     chmod 700 "${gnupg_home}/verify-gpg"
 
+    # Git rejects EXPKEYSIG. Apply the published key policy after checking the
+    # raw status and the signing fingerprint.
     local verification_output
-    if ! verification_output="$(GNUPGHOME="${gnupg_home}" git -c "gpg.program=${gnupg_home}/verify-gpg" verify-tag --raw "${tag_ref}" 2>&1)"; then
+    if ! verification_output="$(GNUPGHOME="${gnupg_home}" git -c "gpg.program=${gnupg_home}/verify-gpg" verify-tag --raw "${tag_ref}" 2>&1)" &&
+        ! release_has_status "${verification_output}" EXPKEYSIG; then
         printf '%s\n' "${verification_output}" >&2
         die "release tag ${tag} does not have a valid signature"
     fi
 
-    authenticate_release_signature "${verification_output}" "${expected_fingerprint}" "release tag ${tag}"
+    authenticate_release_signature "${verification_output}" "${expected_fingerprint}" "release tag ${tag}" "${expired_key}"
 
     local tag_commit
     tag_commit="$(git rev-list -n 1 "${tag_ref}")"
@@ -927,6 +935,7 @@ verify_assets() {
     local package_dir="${repo_root}/build/release-packages"
     local version=""
     local repository="" tag="" tag_object="" commit=""
+    local expired_key=reject-expired-key
     while (($#)); do
         case "$1" in
             --package-dir)
@@ -949,6 +958,10 @@ verify_assets() {
                 esac
                 shift 2
                 ;;
+            --published)
+                expired_key=accept-expired-key
+                shift
+                ;;
             -h | --help)
                 usage
                 return 0
@@ -965,7 +978,7 @@ verify_assets() {
         "${version}" \
         "${release_signing_fingerprint}" \
         "${repo_root}/.github/release-signing-key.asc" \
-        "${repository}" "${tag}" "${tag_object}" "${commit}"
+        "${repository}" "${tag}" "${tag_object}" "${commit}" "${expired_key}"
     log "Published release assets validated"
 }
 

@@ -34,6 +34,29 @@ authenticate_release_key() {
     release_gpg "${verification_home}" --quiet --import "${verification_key_file}" || die "could not import authenticated release key"
 }
 
+release_has_status() {
+    awk -v status="$2" '/^\[GNUPG:\] / && $2 == status { found = 1 }
+        END { exit !found }' <<<"$1"
+}
+
+authenticate_release_asset_keys() {
+    local verification_home="$1" bundled_key="$2" expected_fingerprint="$3"
+    local canonical_key="$4" expired_key="$5"
+
+    if [[ -n "${canonical_key}" ]]; then
+        [[ -f "${canonical_key}" && ! -L "${canonical_key}" ]] ||
+            die "canonical release public key not found: ${canonical_key}"
+        if [[ "${expired_key}" == accept-expired-key ]]; then
+            # Include revocations that the archived export may predate.
+            authenticate_release_key "${verification_home}" "${canonical_key}" "${expected_fingerprint}"
+        else
+            cmp "${canonical_key}" "${bundled_key}" ||
+                die "release asset public key differs from the canonical committed key"
+        fi
+    fi
+    authenticate_release_key "${verification_home}" "${bundled_key}" "${expected_fingerprint}"
+}
+
 # A signature by a key that has expired since is refused, unless the fourth
 # argument is accept-expired-key: for a release that is already published, whose
 # key file cannot change any more.
@@ -43,6 +66,11 @@ authenticate_release_signature() {
     expected_fingerprint="$(printf '%s' "$2" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
     local description="$3"
     local expired_key="${4:-reject-expired-key}"
+
+    # Expiry can take precedence in the verdict while revocation is still reported.
+    if release_has_status "${verification_output}" KEYREVOKED; then
+        die "${description} was signed by a revoked key"
+    fi
 
     # GnuPG exits 0 and prints VALIDSIG for a signature by a revoked or an
     # expired key as well. What it makes of the key is on this line.
@@ -204,14 +232,10 @@ verify_signed_assets() {
     (
         local gnupg_home
         gnupg_home="$(mktemp -d)"
-        chmod 700 "${gnupg_home}"
         trap 'rm -rf -- "${gnupg_home}"' EXIT
-        if [[ -n "${canonical_public_key}" ]]; then
-            [[ -f "${canonical_public_key}" && ! -L "${canonical_public_key}" ]] || die "canonical release public key not found: ${canonical_public_key}"
-            cmp "${canonical_public_key}" "${package_dir}/cbor_tags-release-public-key.asc" ||
-                die "release asset public key differs from the canonical committed key"
-        fi
-        authenticate_release_key "${gnupg_home}" "${package_dir}/cbor_tags-release-public-key.asc" "${expected_fingerprint}"
+        chmod 700 "${gnupg_home}"
+        authenticate_release_asset_keys "${gnupg_home}" "${package_dir}/cbor_tags-release-public-key.asc" \
+            "${expected_fingerprint}" "${canonical_public_key}" "${expired_key}"
 
         local manifest="cbor_tags-${version}.release-manifest" verification_output
         if ! verification_output="$(release_gpg "${gnupg_home}" --status-fd 1 --verify \
@@ -236,19 +260,19 @@ verify_signed_assets() {
 write_release_verification_commands() {
     local version="$1" repository="$2" tag="$3" tag_object="$4" commit="$5"
     validate_release_identity "${version}" "${repository}" "${tag}" "${tag_object}" "${commit}"
-    # Keep the pasted commands' variables, functions and options in the subshell.
-    printf '%s\n' '(' 'set -euo pipefail'
+    # A fresh Bash preserves fail-fast verification even when sourced by a caller's conditional.
+    printf '%s\n' "BASH_ENV= bash --noprofile --norc <<'CBOR_TAGS_VERIFY'" 'set -euo pipefail'
     printf 'expected_fingerprint=%q\n' '7A9DA5E43CC1A9ECB9745CBE3A209DA2768BE08D'
     # Emit the shared verifier so consumer instructions and local validation use
     # the same canonical format without maintaining a second shell program.
-    declare -f die release_gpg authenticate_release_key authenticate_release_signature \
+    declare -f die release_gpg authenticate_release_key release_has_status authenticate_release_signature \
+        authenticate_release_asset_keys \
         validate_release_identity expected_unsigned_assets expected_signed_assets \
         list_release_assets release_digest write_release_checksum \
         require_exact_assets verify_checksums write_release_manifest verify_signed_assets
     # These are pasted for a published release, also after its key has expired
     printf 'verify_signed_assets . %q "${expected_fingerprint}" %q %q %q %q %q accept-expired-key\n' \
         "${version}" '' "${repository}" "${tag}" "${tag_object}" "${commit}"
-    # The shell stays open either way now, so say which way it went
     printf 'echo %q\n' "cbor_tags ${version}: release assets verified"
-    printf '%s\n' ')'
+    printf '%s\n' 'CBOR_TAGS_VERIFY'
 }

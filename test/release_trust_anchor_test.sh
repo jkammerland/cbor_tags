@@ -163,21 +163,37 @@ echo 'ambient keyring unchanged by the consumer commands: OK'
 pasted_into_a_shell() {
     bash --norc --noprofile -c '
         cd -- "$1"
-        options_before="$(set +o)"
+        options_before="$- $(set +o)"
         expected_fingerprint=caller-fingerprint
 
-        source "$2" >/dev/null 2>&1
-        pasted_status=$?
+        if source "$2" >"$3" 2>&1; then
+            pasted_status=0
+        else
+            pasted_status=$?
+            if grep -Fq "release assets verified" "$3"; then
+                echo "verification printed success on failure" >&2
+                exit 1
+            fi
+        fi
 
-        [[ "$(set +o)" == "${options_before}" ]] || { echo "shell options changed"; exit 0; }
+        [[ "$- $(set +o)" == "${options_before}" ]] || { echo "shell options changed"; exit 0; }
         [[ -z "$(declare -F verify_signed_assets die)" ]] || { echo "functions left behind"; exit 0; }
         [[ "${expected_fingerprint}" == caller-fingerprint ]] || { echo "fingerprint variable changed" >&2; exit 1; }
         echo "status ${pasted_status}"
-    ' _ "$1" "$2"
+    ' _ "$1" "$2" "${test_root}/pasted-output"
 }
 [[ "$(pasted_into_a_shell "${package_dir}" "${test_root}/fixture-commands.sh")" == 'status 0' ]]
 [[ "$(cd -- "${package_dir}" && bash "${test_root}/fixture-commands.sh")" == 'cbor_tags 0.28.0: release assets verified' ]]
 echo 'pasted consumer commands leave the shell as it was: OK'
+
+# A setup command failure must stop verification even when source is conditional.
+failure_bin="${test_root}/failure-bin"
+mkdir -- "${failure_bin}"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 42' >"${failure_bin}/chmod"
+chmod +x "${failure_bin}/chmod"
+[[ "$(PATH="${failure_bin}:${PATH}" pasted_into_a_shell "${package_dir}" "${test_root}/fixture-commands.sh")" == 'status 42' ]]
+echo 'conditional source preserves setup failure: OK'
+
 
 cp -- "${test_root}/attacker.asc" "${package_dir}/cbor_tags-release-public-key.asc"
 expect_failure 'consumer wrong key' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
@@ -186,8 +202,7 @@ echo 'pasted consumer commands with a wrong key keep the shell open: OK'
 cp -- "${test_root}/extra-primary.asc" "${package_dir}/cbor_tags-release-public-key.asc"
 expect_failure 'consumer extra primary' bash -c 'cd -- "$1" && bash "$2"' _ "${package_dir}" "${test_root}/fixture-commands.sh"
 
-# The pasted commands print no reason. A refusal at inspection and an import
-# that fails later look the same from outside, so record what gpg is asked to do
+# Check that verification inspects the key file before attempting to import it.
 recording_bin="${test_root}/recording-bin"
 mkdir -- "${recording_bin}"
 printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >>"${GPG_CALLS}"' "exec $(printf '%q' "$(command -v gpg)") \"\$@\"" \
@@ -254,6 +269,16 @@ write_signed_packages "${expired_packages}" "${test_root}/expired.asc" "${expire
     --faked-system-time 20240101T010000 2>/dev/null
 expect_rejection 'signature by an expired key' 'was signed by an expired key' \
     verify_signed_assets "${expired_packages}" 0.28.0 "${expired_fingerprint}" '' "${identity[@]}"
+# The committed key and the archived export can have different armor.
+{
+    IFS= read -r armor_header
+    printf '%s\n' "${armor_header}" 'Comment: current key export'
+    cat
+} <"${test_root}/expired.asc" >"${test_root}/current.asc"
+expect_rejection 'new candidate requires the canonical key export' 'differs from the canonical committed key' \
+    verify_signed_assets "${expired_packages}" 0.28.0 "${expired_fingerprint}" "${test_root}/current.asc" "${identity[@]}"
+verify_signed_assets "${expired_packages}" 0.28.0 "${expired_fingerprint}" "${test_root}/current.asc" "${identity[@]}" accept-expired-key
+echo 'audit accepts the archived key export for the pinned fingerprint: OK'
 write_consumer_commands "${expired_fingerprint}" >"${test_root}/expired-commands.sh"
 (cd -- "${expired_packages}" && bash "${test_root}/expired-commands.sh")
 echo 'consumer signature by a key that expired later: OK'

@@ -57,6 +57,7 @@ elif [[ "$1" == verify-assets ]]; then
             --tag-object) tag_object="$2" ;;
             --commit) commit="$2" ;;
             --package-dir) ;;
+            --published) shift; continue ;;
             *) exit 2 ;;
         esac
         shift 2
@@ -140,15 +141,17 @@ if [[ "${command_name}" == api ]]; then
                 release_id="$(<"${release_id_file}")"
                 if [[ "${state}" == draft ]]; then
                     draft=true
+                    immutable=false
                 else
                     draft=false
+                    immutable="${FAKE_PUBLISHED_IMMUTABLE:-true}"
                 fi
                 if [[ "${FAKE_DUPLICATE_RELEASES:-0}" == 1 ]]; then
                     printf '[[{"id":41,"tag_name":"%s","draft":%s,"target_commitish":"%s"}],[{"id":42,"tag_name":"%s","draft":%s,"target_commitish":"%s"}]]\n' \
                         "${FAKE_TAG}" "${draft}" "${target}" "${FAKE_TAG}" "${draft}" "${target}"
                 else
-                    printf '[[{"id":7,"tag_name":"v9.9.9","draft":false,"target_commitish":"9999999999999999999999999999999999999999"}],[{"id":%s,"tag_name":"%s","draft":%s,"target_commitish":"%s"}]]\n' \
-                        "${release_id}" "${FAKE_TAG}" "${draft}" "${target}"
+                    printf '[[{"id":7,"tag_name":"v9.9.9","draft":false,"target_commitish":"9999999999999999999999999999999999999999"}],[{"id":%s,"tag_name":"%s","draft":%s,"immutable":%s,"target_commitish":"%s"}]]\n' \
+                        "${release_id}" "${FAKE_TAG}" "${draft}" "${immutable}" "${target}"
                 fi
             fi
             ;;
@@ -409,6 +412,7 @@ grep -Fx 'published' "${state_dir}/release-state" >/dev/null
 grep -Fx '42' "${state_dir}/release-id" >/dev/null
 grep -Fx 'create:42' "${state_dir}/operations" >/dev/null
 grep -Fx 'edit:42' "${state_dir}/operations" >/dev/null
+grep -F 'release-driver verify-assets --package-dir ' "${state_dir}/operations" >/dev/null
 echo 'exact-release-id-publication: OK'
 
 : >"${state_dir}/operations"
@@ -419,7 +423,17 @@ if grep -E '^(delete|create|upload|edit)(:|$)' "${state_dir}/operations" >/dev/n
     echo 'published audit performed a mutation' >&2
     exit 1
 fi
+grep -F 'release-driver verify-assets --published --package-dir ' "${state_dir}/operations" >/dev/null
 echo 'published-rerun-audit: OK'
+
+: >"${state_dir}/operations"
+export FAKE_PUBLISHED_IMMUTABLE=false
+expect_failure mutable-release-state bash "${repo_root}/scripts/publish-release.sh" state --tag "${tag}" --commit "${commit}"
+expect_failure mutable-release-audit bash "${repo_root}/scripts/publish-release.sh" "${audit_args[@]}"
+grep -F "release ${tag} is not immutable" "${test_root}/mutable-release-state.out" >/dev/null
+grep -F "release ${tag} is not immutable" "${test_root}/mutable-release-audit.out" >/dev/null
+[[ ! -s "${state_dir}/operations" ]]
+unset FAKE_PUBLISHED_IMMUTABLE
 
 # Current reviewed tooling can publish a different, exact historical source.
 reset_state

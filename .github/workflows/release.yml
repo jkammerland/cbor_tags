@@ -25,6 +25,7 @@ jobs:
       release_tag_object: ${{ steps.verify.outputs.release_tag_object }}
       release_commit: ${{ steps.verify.outputs.release_commit }}
       release_version: ${{ steps.verify.outputs.release_version }}
+      release_state: ${{ steps.verify.outputs.release_state }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -55,13 +56,21 @@ jobs:
         shell: bash
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
+          release_commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          release_state="$(bash scripts/publish-release.sh state --tag "${RELEASE_TAG}" --commit "${release_commit}")"
+          printf 'release_state=%s\n' "${release_state}" >> "${GITHUB_OUTPUT}"
+          tag_options=()
+          if [[ "${release_state}" == published ]]; then
+            tag_options+=(--published)
+          fi
           verification_output="$(
             bash scripts/release.sh verify-tag \
               --tag "${RELEASE_TAG}" \
-              --trusted-ref "refs/remotes/origin/${DEFAULT_BRANCH}"
+              --trusted-ref "refs/remotes/origin/${DEFAULT_BRANCH}" "${tag_options[@]}"
           )"
           printf '%s\n' "${verification_output}"
           while IFS='=' read -r key value; do
@@ -133,14 +142,19 @@ jobs:
         shell: bash
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_STATE: ${{ needs.verify.outputs.release_state }}
         run: |
           set -euo pipefail
           git fetch --force origin "+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
           git fetch origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          tag_options=()
+          if [[ "${RELEASE_STATE}" == published ]]; then
+            tag_options+=(--published)
+          fi
           verification_output="$(
             bash scripts/release.sh verify-tag \
               --tag "${RELEASE_TAG}" \
-              --trusted-ref "refs/remotes/origin/${DEFAULT_BRANCH}"
+              --trusted-ref "refs/remotes/origin/${DEFAULT_BRANCH}" "${tag_options[@]}"
           )"
           grep -Fx "release_tag_object=${RELEASE_TAG_OBJECT}" <<< "${verification_output}"
           grep -Fx "release_commit=${RELEASE_COMMIT}" <<< "${verification_output}"
@@ -204,22 +218,6 @@ jobs:
           name: cbor-tags-${{ needs.verify.outputs.release_tag }}-unsigned
           path: build/release-packages
 
-      - name: Recheck signed tag after environment approval
-        shell: bash
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          git fetch --force origin "+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
-          git fetch origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
-          verification_output="$(
-            bash scripts/release.sh verify-tag \
-              --tag "${RELEASE_TAG}" \
-              --trusted-ref "refs/remotes/origin/${DEFAULT_BRANCH}"
-          )"
-          grep -Fx "release_tag_object=${RELEASE_TAG_OBJECT}" <<< "${verification_output}"
-          grep -Fx "release_commit=${RELEASE_COMMIT}" <<< "${verification_output}"
-
       - name: Inspect release state
         id: state
         shell: bash
@@ -234,6 +232,27 @@ jobs:
           )"
           printf 'release_state=%s\n' "${release_state}" >> "${GITHUB_OUTPUT}"
           printf 'Release state: %s\n' "${release_state}"
+
+      - name: Recheck signed tag after environment approval
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_STATE: ${{ steps.state.outputs.release_state }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          git fetch origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          tag_options=()
+          if [[ "${RELEASE_STATE}" == published ]]; then
+            tag_options+=(--published)
+          fi
+          verification_output="$(
+            bash scripts/release.sh verify-tag \
+              --tag "${RELEASE_TAG}" \
+              --trusted-ref "refs/remotes/origin/${DEFAULT_BRANCH}" "${tag_options[@]}"
+          )"
+          grep -Fx "release_tag_object=${RELEASE_TAG_OBJECT}" <<< "${verification_output}"
+          grep -Fx "release_commit=${RELEASE_COMMIT}" <<< "${verification_output}"
 
       - name: Audit existing immutable release
         if: steps.state.outputs.release_state == 'published'
