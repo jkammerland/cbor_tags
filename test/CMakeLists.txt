@@ -307,6 +307,16 @@ foreach(CASE IN ITEMS VECTOR STRUCT)
     "-DPASS_REGEX=retry\\(value\\) only takes values the decoder reads in one piece" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
+foreach(CASE IN ITEMS ORDINARY RESUMABLE)
+  string(TOLOWER "wrap_as_array_decode_temporary_${CASE}_compile_fails" TEST_NAME)
+  add_executable(${TEST_NAME} EXCLUDE_FROM_ALL wrap_as_array_decode_temporary_compile_fail.cc)
+  target_compile_definitions(${TEST_NAME} PRIVATE CBOR_TAGS_WRAP_ARRAY_${CASE})
+  target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
+  add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
+    "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
+    "-DPASS_REGEX=decoding wrap_as_array requires lvalues or bounds adapters that borrow lvalues" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+  set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
+endforeach()
 foreach(CASE IN ITEMS ADL_ENCODE ADL_TRANSCODE MEMBER_TRANSCODE MIXIN_ENCODE MIXIN_BEFORE_MEMBER MIXIN_CONST_ELEMENT)
   string(TOLOWER "resumable_encode_hook_${CASE}_compile_fails" TEST_NAME)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL resumable_encode_hook_compile_fail.cc)
@@ -1270,6 +1280,10 @@ foreach(CASE MEMBER_DECODE ADL MIXIN_DIRECT MIXIN_HEADER MIXIN_TAG ENUM_DIRECT E
 endforeach()
 add_resumable_retry_failure(MEMBER_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_MEMBER_ENCODE)
 add_resumable_retry_failure(OBSERVER_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_OBSERVER_ENCODE)
+add_resumable_retry_failure(BASE_CLASS_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_BASE_CLASS_ENCODE)
+add_resumable_retry_failure(BASE_CLASS_DECODE "retrying a decode customization requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_BASE_CLASS_DECODE)
+add_resumable_retry_failure(BASE_CLASS_OBSERVED_ENCODE "retrying an encode customization requires a resumable hook or resumable_retry_traits encode opt-in" CBOR_RETRY_BASE_CLASS_ENCODE CBOR_RETRY_DECLARED_OBSERVER)
+add_resumable_retry_failure(BASE_CLASS_OBSERVED_DECODE "retrying a decode customization requires a resumable hook or resumable_retry_traits decode opt-in" CBOR_RETRY_BASE_CLASS_DECODE CBOR_RETRY_DECLARED_OBSERVER)
 
 # Built-in delegation cannot authorize a nested custom encoder.
 foreach(CASE ENUM_ENCODE ENUM_HIDDEN_ENCODE)

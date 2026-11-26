@@ -174,7 +174,7 @@ template <std::size_t Capacity, bool Windows> struct ring_run {
 
 template <typename Result> status_code status_of(const Result &result) { return result ? status_code::success : result.error(); }
 
-// The one-shot decode into an owning destination is the reference for both decoders
+// The ordinary decode into an owning destination is the reference for both decoders
 template <typename Owning, typename MakeSink> void check_fails_like(const std::vector<std::byte> &wire, MakeSink make_sink) {
     Owning     owning{};
     const auto want = status_of(make_decoder(wire)(owning));
@@ -220,7 +220,7 @@ TEST_SUITE("roundtrip/sinks") {
         CHECK(in_place);
     }
 
-    TEST_CASE("non-contiguous one-shot input arrives in 256-byte copies") {
+    TEST_CASE("non-contiguous ordinary input arrives in 256-byte copies") {
         const auto             blob = payload_bytes(1000);
         std::vector<std::byte> wire;
         REQUIRE(make_encoder(wire)(blob));
@@ -423,7 +423,7 @@ TEST_SUITE("cbor_wire/sinks") {
         const auto wire = to_bytes("43010203"
                                    "83010203");
 
-        SUBCASE("one-shot") {
+        SUBCASE("ordinary") {
             std::vector<int> seen;
             auto             decoder = make_decoder(wire);
             const auto       result =
@@ -478,7 +478,7 @@ TEST_SUITE("cbor_wire/sinks") {
         }
     }
 
-    TEST_CASE("truncated input leaves one-shot sinks incomplete and resumable sinks waiting") {
+    TEST_CASE("truncated input leaves ordinary sinks incomplete and resumable sinks waiting") {
         for (const char *hex : {"430102", "5f4101", "6361", "8301", "9f01", "a101", "bf01"}) {
             CAPTURE(hex);
             const auto wire = to_bytes(hex);

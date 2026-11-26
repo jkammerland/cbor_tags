@@ -2,6 +2,8 @@
 #include <cbor_tags/cbor_encoder.h>
 #include <cbor_tags/cbor_resumable.h>
 #include <cbor_tags/codec.h>
+#include <cbor_tags/codec/typed_array.h>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <doctest/doctest.h>
@@ -423,5 +425,66 @@ TEST_SUITE("roundtrip/resumable") {
         std::vector<std::int64_t> appended{99};
         appended.insert(appended.end(), expected.begin(), expected.end());
         CHECK(actual == appended);
+    }
+
+    // Each of these elements is handled by a coroutine of its own. The call
+    // stack must not get deeper with every one of them, whatever the compiler
+    // makes of a coroutine handing over to the next
+    TEST_CASE("many strings are written without piling up on the call stack") {
+        const std::vector<std::string> names(100'000, "ab");
+
+        std::vector<std::byte> reference;
+        auto                   ordinary        = make_encoder(reference);
+        const auto             ordinary_result = ordinary(names);
+        REQUIRE(ordinary_result);
+
+        // 9a 00 01 86 a0, then 62 61 62 for every string
+        REQUIRE(reference.size() == 5 + 3 * names.size());
+
+        std::vector<std::byte> output;
+        auto                   encoder   = make_resumable_encoder(output);
+        auto                   operation = encoder(names);
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == reference.size());
+        CHECK(output == reference);
+    }
+
+    TEST_CASE("many strings are read without piling up on the call stack") {
+        // 9a 00 03 0d 40, then 62 61 62 for every string
+        std::vector<std::byte> wire{std::byte{0x9a}, std::byte{0x00}, std::byte{0x03}, std::byte{0x0d}, std::byte{0x40}};
+        for (std::size_t index = 0; index < 200'000; ++index)
+            wire.insert(wire.end(), {std::byte{0x62}, std::byte{0x61}, std::byte{0x62}});
+
+        std::vector<std::string> names;
+        auto                     decoder   = make_resumable_decoder(wire);
+        auto                     operation = decoder(names);
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == wire.size());
+        CHECK(names == std::vector<std::string>(200'000, "ab"));
+    }
+
+    TEST_CASE("a large typed array is written to growing output without piling up on the call stack") {
+        const std::vector<float> samples(100'000, 1.5F);
+
+        std::vector<std::byte> reference;
+        auto                   ordinary        = make_encoder<codec::typed_array>(reference);
+        const auto             ordinary_result = ordinary(rfc8746::as_typed_array(samples));
+        REQUIRE(ordinary_result);
+
+        // The tag in 2 bytes, 5a 00 06 1a 80, then 4 bytes for every float
+        REQUIRE(reference.size() == 2 + 5 + 4 * samples.size());
+
+        std::vector<std::byte> output;
+        auto                   encoder   = make_resumable_encoder<codec::typed_array>(output);
+        auto                   operation = encoder(rfc8746::as_typed_array(samples));
+
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == reference.size());
+        CHECK(output == reference);
     }
 }

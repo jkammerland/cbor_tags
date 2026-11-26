@@ -65,6 +65,22 @@ struct resumable_source_access {
         else
             std::ranges::advance(position, static_cast<std::iter_difference_t<Position>>(count));
     }
+
+    // For the decoder's input/output aliasing check: the container a source
+    // was made over, and all of its bytes when they are in one piece. A source
+    // that can't say gets its windows compared as they come
+    template <typename Source> static const void *storage_address(const Source &source) noexcept {
+        if constexpr (requires { source.storage_address(); })
+            return source.storage_address();
+        else
+            return nullptr;
+    }
+    template <typename Source> static std::optional<std::span<const std::byte>> storage_extent(const Source &source) {
+        if constexpr (requires { source.storage_extent(); })
+            return source.storage_extent();
+        else
+            return std::nullopt;
+    }
 };
 
 template <typename Chunk>
@@ -846,13 +862,24 @@ template <ResumableChunkStorage Storage> class chunk_source {
 // needed. Nested storage remains referenced directly.
 template <typename Storage, bool Flat = ResumableByteChunk<Storage>> struct source_storage {
     explicit source_storage(Storage &storage) : storage_(&storage) {}
-    Storage &get() { return *storage_; }
-    Storage *storage_;
+    Storage                                  &get() { return *storage_; }
+    const void                               *address() const noexcept { return storage_; }
+    std::optional<std::span<const std::byte>> extent() const { return std::nullopt; }
+    Storage                                  *storage_;
 };
 
 template <typename Storage> struct source_storage<Storage, true> {
     explicit source_storage(Storage &storage) : storage_{std::ranges::ref_view<Storage>{storage}} {}
-    auto                                         &get() { return storage_; }
+    auto                                     &get() { return storage_; }
+    const void                               *address() const noexcept { return std::addressof(storage_[0].base()); }
+    std::optional<std::span<const std::byte>> extent() const {
+        if constexpr (std::ranges::contiguous_range<Storage> && std::ranges::sized_range<Storage>) {
+            auto &bytes = storage_[0].base();
+            return std::span<const std::byte>{reinterpret_cast<const std::byte *>(std::ranges::data(bytes)), std::ranges::size(bytes)};
+        } else {
+            return std::nullopt;
+        }
+    }
     std::array<std::ranges::ref_view<Storage>, 1> storage_;
 };
 
@@ -903,6 +930,10 @@ template <detail::ResumableStorage Storage> class input_source {
     std::size_t advance(iterator &from, std::size_t count) const { return chunks_.advance(from, count); }
 
   private:
+    friend struct detail::resumable_source_access;
+    const void *storage_address() const noexcept { return storage_.address(); }
+    auto        storage_extent() const { return storage_.extent(); }
+
     detail::source_storage<Storage> storage_;
     chunks_type                     chunks_;
     iterator                        committed_;

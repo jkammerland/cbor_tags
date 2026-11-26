@@ -96,7 +96,7 @@ const auto result = decoder(output);
 // output == "prefix:ok"; the input has been consumed to its end.
 ```
 
-This is a one-shot decoder contract, not a resumable or transactional one. A
+This is the ordinary decoder's contract, not a resumable or transactional one. A
 caller that needs message-size admission checks performs them at its transport
 or framing boundary. A caller that supplies a `std::ranges::sized_range` is
 responsible for that range's size/extent contract.

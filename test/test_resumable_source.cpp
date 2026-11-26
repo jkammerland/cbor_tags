@@ -965,4 +965,35 @@ TEST_SUITE("resumable/source") {
         CHECK(decoded == value);
     }
 
+    TEST_CASE("a resumable operation keeps what an ordinary encoder wrote before it") {
+        std::array<std::byte, 6>          first{};
+        std::array<std::byte, 16>         second{};
+        std::vector<std::span<std::byte>> storage;
+        auto                              output = ct::make_output_buffer(storage);
+        storage.emplace_back(first);
+        output.refresh();
+
+        // "abc" takes 4 of the 6 bytes. Nobody commits them
+        auto ordinary = ct::make_encoder(output);
+        auto written  = ordinary(std::string_view{"abc"});
+        REQUIRE(written);
+
+        // The number needs 9 bytes and 2 are left, so the operation waits and
+        // starts the number over when there is room
+        auto encoder   = ct::make_resumable_encoder(output);
+        auto operation = encoder(std::uint64_t{0x0102030405060708});
+        REQUIRE_FALSE(operation.done());
+
+        storage.emplace_back(second);
+        operation.resume();
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(*operation.result() == 9);
+
+        const std::vector<std::byte> expected{std::byte{0x63}, std::byte{'a'}, std::byte{'b'}, std::byte{'c'}, std::byte{0x1b},
+                                              std::byte{1},    std::byte{2},   std::byte{3},   std::byte{4},   std::byte{5},
+                                              std::byte{6},    std::byte{7},   std::byte{8}};
+        CHECK(bytes_of(output) == expected);
+    }
+
 } // TEST_SUITE

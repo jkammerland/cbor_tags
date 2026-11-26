@@ -128,6 +128,13 @@ TEST_SUITE("roundtrip/resumable_factory") {
         auto operation = encoder(second);
         REQUIRE(operation.done());
         REQUIRE(operation.result());
+
+        // 65536 is 1a 00 01 00 00 and "second" is 66 73 65 63 6f 6e 64. Each
+        // operation counts its own bytes: 5 and 7, not the 12 in the storage
+        CHECK(first_size == 5);
+        CHECK(operation.committed_bytes() == 7);
+        CHECK(to_hex(std::span<const std::byte>{bytes}.first(12)) == "1a00010000667365636f6e64");
+
         auto first_view  = std::span<const std::byte>{bytes}.first(first_size);
         auto second_view = std::span<const std::byte>{bytes}.subspan(first_size, operation.committed_bytes());
         CHECK(first_view.end() == second_view.begin());

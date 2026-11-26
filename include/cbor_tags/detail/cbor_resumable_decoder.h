@@ -13,8 +13,22 @@
 
 namespace cbor::tags::detail {
 
+// The decoder's private way to not tell tag observers twice
+struct observed_tag_access {
+    // The offset the decoder compares a tag's end with
+    template <typename Decoder> static std::size_t offset(const Decoder &decoder) noexcept { return decoder.current_offset(); }
+
+    template <typename Decoder> static auto once(Decoder &decoder, const std::optional<std::size_t> &tag_end) noexcept {
+        return decoder.observe_tag_once(tag_end);
+    }
+};
+
 template <typename T> inline constexpr bool    resumable_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_wrap_array<wrap_as_array<T...>> = true;
+
+template <typename T> inline constexpr bool resumable_wrap_array_has_destinations = false;
+template <typename... T>
+inline constexpr bool resumable_wrap_array_has_destinations<wrap_as_array<T...>> = wrap_as_array_has_destinations<T...>;
 
 // Keep capability detection separate from the dispatch that uses it.
 template <typename Decoder, typename T>
@@ -184,17 +198,58 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
         return await_retry(value);
     }
 
+    // A string must not be appended to the bytes it is read from, they would
+    // move under the reader. The same check as the ordinary decoder's
+    template <typename T> static bool overlaps(const T &value, std::span<const std::byte> input) {
+        if constexpr (input_output_alias_check_option_v<Options> && std::ranges::contiguous_range<const T> &&
+                      std::ranges::sized_range<const T>) {
+            if (std::ranges::empty(value) || input.empty())
+                return false;
+
+            const void *value_begin = std::ranges::data(value);
+            const void *value_end   = std::ranges::data(value) + std::ranges::size(value);
+            const void *input_begin = input.data();
+            const void *input_end   = input.data() + input.size();
+
+            const auto before = std::less<const void *>{};
+            return before(input_begin, value_end) && before(value_begin, input_end);
+        } else {
+            static_cast<void>(value);
+            static_cast<void>(input);
+            return false;
+        }
+    }
+
+    // Asked before anything is reserved or appended. Storage in pieces is only
+    // known by the piece the reader is in, the rest is compared as it is read
+    template <typename T> bool destination_is_input(const T &value) {
+        if constexpr (input_output_alias_check_option_v<Options>) {
+            if (resumable_source_access::storage_address(source_) == static_cast<const void *>(std::addressof(value)))
+                return true;
+            if (const auto extent = resumable_source_access::storage_extent(source_); extent && overlaps(value, *extent))
+                return true;
+
+            const auto window = resumable_source_access::borrow_window(source_, decoder_.reader_.position_);
+            return window && overlaps(value, *window);
+        } else {
+            static_cast<void>(value);
+            return false;
+        }
+    }
+
     // Bulk string transfer uses the same destination appender as ordinary decoding.
     template <typename T> resumable<status_code> payload(T &value, std::uint64_t length, appender<T> &append) {
-        drain_payload(value, length, append);
-        if (length == 0)
-            return status_code::success;
+        const auto status = drain_payload(value, length, append);
+        if (status != status_code::success || length == 0)
+            return status;
         return await_payload(value, length, append);
     }
 
-    template <typename T> void drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
+    template <typename T> status_code drain_payload(T &value, std::uint64_t &length, appender<T> &append) {
         while (length != 0 && !empty()) {
             if (const auto span = resumable_source_access::borrow_window(source_, decoder_.reader_.position_); span && !span->empty()) {
+                if (overlaps(value, *span))
+                    return status_code::input_output_aliasing;
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, span->size()));
                 append(value, span->first(count));
                 resumable_source_access::consume_window(source_, decoder_.reader_.position_, count);
@@ -216,13 +271,16 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
             }
             commit();
         }
+        return status_code::success;
     }
 
     // Allocate a frame only when the current payload actually needs more input.
     template <typename T> resumable<status_code> await_payload(T &value, std::uint64_t length, appender<T> &append) {
         while (length != 0) {
             co_await wait();
-            drain_payload(value, length, append);
+            const auto status = drain_payload(value, length, append);
+            if (status != status_code::success)
+                co_return status;
         }
         co_return status_code::success;
     }
@@ -561,8 +619,14 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
         } else if constexpr (IsIndefiniteWrapper<U>) {
             check_progress<indefinite_value_t<U>>();
             return bounded_container(value, 0, std::numeric_limits<std::uint64_t>::max());
-        } else if constexpr (resumable_wrap_array<U>)
-            return group(value.values_, true);
+        } else if constexpr (resumable_wrap_array<U>) {
+            static_assert(resumable_wrap_array_has_destinations<U>,
+                          "decoding wrap_as_array requires lvalues or bounds adapters that borrow lvalues");
+
+            // The places themselves. Handing on the tuple a wrapper spreads
+            // would decode into a copy of it
+            return group(std::apply([](auto &...places) { return std::tie(places...); }, value.values_), true);
+        }
 #if CBOR_TAGS_HAS_NAMED_REFLECTION
         else if constexpr (IsNamedMapWrapper<U>)
             return named_map(value.value_);
@@ -929,24 +993,28 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
     }
 
     // Lookahead uses the same ordinary decoder without committing the speculative header.
-    template <typename T> status_code peek_once(T &value) {
+    // Reads the value and goes back. end gets the offset the value ended at
+    template <typename T> status_code peek_once(T &value, std::optional<std::size_t> &end) {
         require_retry<T>();
         const auto result = decoder_(value);
+        if (result)
+            end = observed_tag_access::offset(decoder_);
+
         rollback();
         return result ? status_code::success : result.error();
     }
 
-    template <typename T> resumable<status_code> peek(T &value) {
-        const auto status = peek_once(value);
+    template <typename T> resumable<status_code> peek(T &value, std::optional<std::size_t> &end) {
+        const auto status = peek_once(value, end);
         if (status != status_code::incomplete)
             return status;
-        return await_peek(value);
+        return await_peek(value, end);
     }
 
-    template <typename T> resumable<status_code> await_peek(T &value) {
+    template <typename T> resumable<status_code> await_peek(T &value, std::optional<std::size_t> &end) {
         for (;;) {
             co_await wait();
-            const auto status = peek_once(value);
+            const auto status = peek_once(value, end);
             if (status != status_code::incomplete)
                 co_return status;
         }
@@ -971,12 +1039,18 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
             co_return status;
         const auto [major, info] = decoder_.read_initial_byte();
         rollback();
-        as_tag_any tag{};
+        as_tag_any                 tag{};
+        std::optional<std::size_t> tag_end;
         if (major == major_type::Tag) {
-            status = co_await peek(tag);
+            status = co_await peek(tag, tag_end);
             if (status != status_code::success)
                 co_return status;
         }
+
+        // The peek told the tag observers. The alternative reads the tag once
+        // more, and again after every wait, which is not news to them
+        [[maybe_unused]] const auto observed = observed_tag_access::once(decoder_, tag_end);
+
         const auto start = offset();
         status           = co_await variant_alternative<false>(value, major, info, tag.tag);
         if (status == status_code::no_match_in_variant_on_buffer && major == major_type::Simple && offset() == start) {
@@ -1006,7 +1080,7 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
     // finishes. Only metadata-only candidate selection can return eagerly.
     template <std::size_t I, typename T> resumable<status_code> selected_alternative(T &value) {
         using U = variant_alternative_t<I, T>;
-        // An ordinary variant has read the tag by now and asks the codecs with it
+        // The ordinary decoder has read the variant's tag by now and asks the codecs with it
         static_assert(!IsTag<U> || !(own_hook_beats_codec<U, payload_decode_context::tag>()),
                       "an installed codec defines decode for this type and has no resumable hook, so the type's own hook "
                       "would run here and the codec in an ordinary decoder, give the codec a resumable_decode too");
@@ -1016,7 +1090,7 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
         if constexpr (has_explicit_hook<U>() || has_mixin<U>())
             status = co_await item(decoded);
         else if constexpr (IsVariant<U>)
-            // Ordinary variant selection recurses directly into nested alternatives.
+            // The ordinary decoder's variant selection recurses directly into nested alternatives.
             // An inner variant's ordinary codec is not part of that route.
             status = co_await variant(decoded);
         else if constexpr (IsTag<U> && !IsVariant<U> && !IsOptional<U>) {
@@ -1259,6 +1333,11 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
             if (header.indefinite || header.size != value.size())
                 co_return status_code::unexpected_group_size;
         }
+        if constexpr (IsString<T>) {
+            if (destination_is_input(value))
+                co_return status_code::input_output_aliasing;
+        }
+
         appender<T> append;
         // The caller owns allocation limits. Appenders opt into element-count
         // reservation; some containers reserve descriptors rather than elements.
@@ -1328,8 +1407,11 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
                 if (chunk.size > maximum - count)
                     co_return status_code::size_limit_exceeded;
                 if constexpr (AppendReservable<T> && HasGeometricAppendReservation<appender<T>, T>) {
-                    if (chunk.size != 0)
+                    if (chunk.size != 0) {
+                        if (destination_is_input(value))
+                            co_return status_code::input_output_aliasing;
                         append.template reserve_for_append<true>(value, chunk.size);
+                    }
                 }
                 status = co_await payload(value, chunk.size, append);
                 count += chunk.size;

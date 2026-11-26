@@ -137,12 +137,16 @@ or tag by the time it selects a value. It calls the codec's form for that point
 when available, or steps back and calls `decode(T&)`. Transparent owning wrappers
 such as `std::unique_ptr` and `std::indirect` also dispatch to the payload's codec.
 Each wrapper's type restrictions still apply; for example, unique-pointer variant
-alternatives require codec-independent wire shapes.
+alternatives require codec-independent wire shapes. A variant chooses its
+alternative from the major type in the first byte, so a codec for an alternative
+keeps the major type that `T` has without the codec.
 
 Nested variants select their alternatives recursively in both ordinary and
 resumable decoding. A codec for an inner variant applies when that variant is
 decoded directly or through an optional, but not when it is itself an outer
-variant's alternative. Explicit resumable hooks still own their dispatch.
+variant's alternative. Encoders call the inner variant's codec in that place as
+well, so a codec that has to read what it writes belongs on the outer variant.
+Explicit resumable hooks still own their dispatch.
 
 For example, a sensor codec can read integer centi-degrees into a `float`:
 
@@ -165,6 +169,24 @@ struct centi_degrees : cbor::tags::codec::decoder_base<Self> {
 std::optional<float> temperature;
 auto dec = cbor::tags::make_decoder<centi_degrees>(bytes);
 auto result = dec(temperature);
+```
+
+`centi_degrees` reads an integer, not a `float`. A codec's `decode(T&)` must not
+ask the decoder for a `T` at the byte it started on, for example through a
+`std::optional<T>` or a variant with `T` among its alternatives. The decoder would
+step back and call the codec again, so that read ends with `status_code::error`.
+
+The decoder ends that loop for `decode(T&)` only. A
+`decode(T&, major, additional_info)` that passes its header on to a value
+containing a `T`, and a type whose own `decode` asks the decoder for itself,
+call themselves until the stack runs out.
+
+To bypass the one-argument overload, pass the initial byte's fields to the
+three-argument overload. An installed codec can provide that overload.
+
+```cpp
+const auto [major, additional_info] = dec.read_initial_byte();
+return dec.decode(value, major, additional_info);
 ```
 
 Codec implementations that hand a consumed header to another value call

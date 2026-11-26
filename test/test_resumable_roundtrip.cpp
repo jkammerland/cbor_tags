@@ -32,6 +32,18 @@ namespace {
 using input_chunks  = std::list<std::span<const std::byte>>;
 using output_chunks = std::list<std::span<std::byte>>;
 
+std::string make_label() { return std::string(40, 'x'); }
+
+// The label is put together in the call, so what the wrapper gets is a temporary
+struct relabelled {
+    int         id{7};
+    std::string label{"abcdefghijklmnopqrstuvwxyz0123456789"};
+
+    template <typename Encoder> resumable<status_code> resumable_encode(Encoder &encoder) const {
+        return encoder(wrap_as_array{id, label + "!"});
+    }
+};
+
 // Native hooks retain field progress when either string crosses a chunk edge.
 struct string_pair {
     std::string first;
@@ -580,7 +592,7 @@ template <typename Self> struct weight_doubling_codec : codec::base<Self> {
     using codec::base<Self>::decode;
     using codec::base<Self>::encode;
 
-    void encode(const weighted &value) { static_cast<Self &>(*this)(wrap_as_array{value.id, value.weight * 2}); }
+    void encode(const weighted &value) { static_cast<Self &>(*this).encode(wrap_as_array{value.id, value.weight * 2}); }
 
     status_code decode(weighted &value) {
         int        id{};
@@ -1390,6 +1402,10 @@ TEST_SUITE("roundtrip/resumable") {
         CHECK(expected.front().ordinary_encode_calls == ordinary_encodes);
         CHECK(expected.front().resumable_encode_calls == 1);
 
+        // [[65536, "nested continuation"]]. The decoder below reads what this
+        // encoder wrote with the same hooks, so only this says what it wrote
+        CHECK(to_hex(bytes) == "81821a00010000736e657374656420636f6e74696e756174696f6e");
+
         input_chunks                             inputs;
         auto                                     source = make_input_source(inputs);
         std::vector<explicitly_resumable_record> actual;
@@ -1526,6 +1542,9 @@ TEST_SUITE("roundtrip/resumable") {
         REQUIRE(encoder.result());
         CHECK(expected.ordinary_calls == ordinary_encodes);
         CHECK(expected.resumable_calls == 1);
+
+        // [65536, "shared continuation"], see the test with the nested hooks
+        CHECK(to_hex(bytes) == "821a000100007373686172656420636f6e74696e756174696f6e");
 
         input_chunks                 inputs;
         auto                         source = make_input_source(inputs);
@@ -1761,5 +1780,116 @@ TEST_SUITE("roundtrip/resumable") {
             CHECK(actual.id == expected.id);
             CHECK(actual.radius == expected.radius);
         }
+    }
+
+    // An operation goes on after the statement that started it, and so must
+    // the values a wrapper was given in that statement
+    TEST_CASE("wrap_as_array keeps the temporaries it is given for a resumable encoder") {
+        SUBCASE("output that has no room when the operation starts") {
+            std::array<std::byte, 64> storage{};
+            output_chunks             output;
+
+            auto encoder   = make_resumable_encoder(output);
+            auto operation = encoder(wrap_as_array{7, make_label()});
+            REQUIRE_FALSE(operation.done());
+
+            output.emplace_back(storage);
+            operation.resume();
+
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            REQUIRE(*operation.result() == 44);
+
+            // 82 07 78 28 and 40 times x
+            std::string expected = "82077828";
+            for (int index = 0; index < 40; ++index)
+                expected += "78";
+            CHECK(to_hex(std::span{storage}.first(44)) == expected);
+        }
+
+        SUBCASE("a hook that returns its call on a value made in it") {
+            const relabelled       value;
+            std::vector<std::byte> output;
+
+            auto encoder   = make_resumable_encoder(output);
+            auto operation = encoder(value);
+
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+
+            // 82 07 78 25, then the label with ! behind it
+            CHECK(to_hex(output) == "820778256162636465666768696a6b6c6d6e6f707172737475767778797a3031323334353637383921");
+        }
+    }
+
+    TEST_CASE("wrap_as_array spreads a tuple it can write to and nests any other") {
+        std::tuple<int, int>       pair{1, 2};
+        const std::tuple<int, int> fixed{1, 2};
+
+        const auto written = [](const auto &...value) {
+            std::vector<std::byte> output;
+            auto                   encoder = make_encoder(output);
+            auto                   result  = encoder(value...);
+            REQUIRE(result);
+            return to_hex(output);
+        };
+
+        CHECK(written(wrap_as_array{pair}) == "820102");
+        CHECK(written(wrap_as_array{fixed}) == "81820102");
+        CHECK(written(wrap_as_array{std::tuple<int, int>{1, 2}}) == "81820102");
+
+        // Values next to references, and a wrapper that is kept around
+        int        number = 3;
+        const auto kept   = wrap_as_array{number, std::string{"ab"}, 5};
+        number            = 4;
+        CHECK(written(kept) == "830462616205");
+
+        std::vector<std::byte> output;
+        auto                   encoder   = make_resumable_encoder(output);
+        auto                   operation = encoder(kept);
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(to_hex(output) == "830462616205");
+    }
+
+    TEST_CASE("both decoders write the tuple a wrap_as_array spreads") {
+        // [1, "ab"]
+        const auto input = to_bytes("8201626162");
+
+        std::tuple<int, std::string> ordinary;
+        auto                         decoder = make_decoder(input);
+        auto                         result  = decoder(wrap_as_array{ordinary});
+        REQUIRE(result);
+        CHECK(ordinary == std::tuple<int, std::string>{1, "ab"});
+
+        std::tuple<int, std::string> resumed;
+        auto                         resumable_decoder = make_resumable_decoder(input);
+        auto                         operation         = resumable_decoder(wrap_as_array{resumed});
+        REQUIRE(operation.done());
+        REQUIRE(operation.result());
+        CHECK(resumed == std::tuple<int, std::string>{1, "ab"});
+    }
+
+    TEST_CASE("wrap_as_array decodes through temporary bounds adapters") {
+        const std::string      name{"CBOR"};
+        std::vector<std::byte> input;
+        auto                   encoder = make_encoder(input);
+        REQUIRE(encoder(wrap_as_array{name}));
+
+        std::string ordinary;
+        auto        decoder = make_decoder(input);
+        REQUIRE(decoder.decode(wrap_as_array{as_bounded_size<0, 16>(ordinary)}) == status_code::success);
+        CHECK(ordinary == name);
+
+        std::string            resumed;
+        std::vector<std::byte> available;
+        auto                   resumable_decoder = make_resumable_decoder(available);
+        auto                   operation         = resumable_decoder(wrap_as_array{as_bounded_size(resumed, 0, 16)});
+        REQUIRE_FALSE(operation.done());
+
+        available = input;
+        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.result());
+        CHECK(resumed == name);
     }
 }

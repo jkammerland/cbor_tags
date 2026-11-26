@@ -44,7 +44,7 @@ template <typename Self> struct swapped_points : ct::codec::base<Self> {
     }
 };
 
-// Tagged, so an ordinary variant reads the tag and then asks the codec with it.
+// Tagged, so in a variant the ordinary decoder reads the tag and then asks the codec with it.
 // Decoded on its own nobody asks the codec, and that still compiles
 struct reading {
     static constexpr std::uint64_t cbor_tag = 100;

@@ -13,6 +13,7 @@
 #include <limits>
 #include <list>
 #include <map>
+#include <memory_resource>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -452,22 +453,25 @@ TEST_SUITE("roundtrip/resumable_storage") {
         }
     }
 
-    TEST_CASE("nested output tail growth preserves tentative ordinary writes") {
-        std::vector<std::byte>                                   tail(1);
+    TEST_CASE("nested output tail growth keeps what was written before it") {
+        // Room for the 7 and for a part of 65536, which is 1a 00 01 00 00
+        std::vector<std::byte>                                   tail(3);
         std::list<std::ranges::ref_view<std::vector<std::byte>>> chunks;
         chunks.emplace_back(tail);
         auto encoder   = make_resumable_encoder(chunks);
-        auto operation = encoder(65536);
+        auto operation = encoder(std::uint8_t{7}, 65536);
         REQUIRE_FALSE(operation.done());
-        CHECK(operation.committed_bytes() == 0);
+        CHECK(operation.committed_bytes() == 1);
 
+        // The vector moves its bytes. The 7 goes along and the number comes after it
         tail.resize(16);
         REQUIRE(operation.resume() == resume_state::done);
         REQUIRE(operation.result());
-        auto committed = std::span<const std::byte>{tail}.first(operation.committed_bytes());
-        int  actual{};
-        REQUIRE(make_decoder(committed)(actual));
-        CHECK(actual == 65536);
+        CHECK(operation.committed_bytes() == 6);
+
+        const std::vector<std::byte> expected{std::byte{0x07}, std::byte{0x1a}, std::byte{0x00},
+                                              std::byte{0x01}, std::byte{0x00}, std::byte{0x00}};
+        CHECK(std::vector<std::byte>(tail.begin(), tail.begin() + 6) == expected);
     }
 
     TEST_CASE("committed byte counts survive cancellation") {
@@ -741,5 +745,100 @@ TEST_SUITE("roundtrip/resumable_storage") {
         REQUIRE(operation.result());
         CHECK(*operation.result() == wire.size());
         CHECK(std::ranges::equal(view.values(), expected));
+    }
+
+    // The ordinary decoder ends with input_output_aliasing for these. A string
+    // that is appended to the bytes it is read from moves them under the reader
+    TEST_CASE("a byte string is not decoded into the storage it is read from") {
+        // 58 28 and 40 payload bytes
+        std::vector<std::byte> wire{std::byte{0x58}, std::byte{0x28}};
+        for (int index = 0; index < 40; ++index)
+            wire.push_back(static_cast<std::byte>(index));
+        const std::vector<std::byte> payload(wire.begin() + 2, wire.end());
+
+        SUBCASE("the vector the decoder reads from") {
+            auto buffer = wire;
+
+            auto decoder   = make_resumable_decoder(buffer);
+            auto operation = decoder(buffer);
+
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::input_output_aliasing);
+            CHECK(buffer == wire);
+        }
+
+        SUBCASE("a chunk that borrows the destination's bytes") {
+            auto                                   buffer = wire;
+            std::deque<std::span<const std::byte>> input{std::span<const std::byte>{buffer}};
+
+            auto decoder   = make_resumable_decoder(input);
+            auto operation = decoder(buffer);
+
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::input_output_aliasing);
+            CHECK(buffer == wire);
+        }
+
+        SUBCASE("a span over the destination's bytes, before the payload is there") {
+            // Only the 58 28 is input so far, nothing of the payload to compare with yet
+            auto                       buffer = wire;
+            std::span<const std::byte> input{buffer.data(), 2};
+
+            auto decoder   = make_resumable_decoder(input);
+            auto operation = decoder(buffer);
+
+            REQUIRE(operation.done());
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::input_output_aliasing);
+            CHECK(buffer == wire);
+        }
+
+        SUBCASE("storage of its own is filled as before") {
+            auto                   buffer = wire;
+            std::vector<std::byte> decoded;
+
+            auto decoder   = make_resumable_decoder(buffer);
+            auto operation = decoder(decoded);
+
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(*operation.result() == wire.size());
+            CHECK(decoded == payload);
+        }
+
+        SUBCASE("an indefinite string checks a newly supplied chunk before reserving") {
+            // The resource permits the prefilled destination only. An
+            // attempted reservation fails without moving the supplied bytes.
+            std::array<std::byte, 2>            storage{};
+            std::pmr::monotonic_buffer_resource resource{storage.data(), storage.size(), std::pmr::null_memory_resource()};
+            std::pmr::vector<std::byte>         buffer{{std::byte{0x41}, std::byte{0x07}}, &resource};
+
+            const std::array                       prefix{std::byte{0x5f}};
+            const std::array                       suffix{std::byte{0xff}};
+            std::deque<std::span<const std::byte>> input{prefix};
+            auto                                   decoder   = make_resumable_decoder(input);
+            auto                                   operation = decoder(buffer);
+            REQUIRE_FALSE(operation.done());
+
+            input.emplace_back(buffer);
+            input.emplace_back(suffix);
+            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::input_output_aliasing);
+        }
+
+        SUBCASE("unchecked_aliasing_decoder_options leaves the check out") {
+            auto                   buffer = wire;
+            std::vector<std::byte> decoded;
+
+            auto decoder   = make_resumable_decoder_with_options<unchecked_aliasing_decoder_options>(buffer);
+            auto operation = decoder(decoded);
+
+            REQUIRE(operation.done());
+            REQUIRE(operation.result());
+            CHECK(decoded == payload);
+        }
     }
 }

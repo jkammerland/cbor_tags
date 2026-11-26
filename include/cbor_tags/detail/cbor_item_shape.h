@@ -53,6 +53,10 @@ template <typename Buffer, IsOptions Options, template <typename> typename... Co
 struct codec_payload_mixin_customization<decoder<Buffer, Options, Codecs...>> {
     using self_type = decoder<Buffer, Options, Codecs...>;
 
+    // A mixin other than the two every decoder is made of. Without one there
+    // is nothing that could ask for a value's first byte
+    static constexpr bool has_codecs = (!is_core_decoder_mixin<Codecs> || ...);
+
     template <typename T, payload_decode_context Context, typename Codec> static consteval bool accepts_codec() {
         if constexpr (std::is_void_v<T> || !std::is_base_of_v<cbor::tags::codec::decoder_base<self_type>, Codec>) {
             return false;

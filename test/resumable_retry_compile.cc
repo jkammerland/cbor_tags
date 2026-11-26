@@ -38,7 +38,7 @@ struct tagged_record {
 
 enum class retry_level : std::uint32_t { low = 7 };
 
-// The same codec is legal ordinary but has no replay declaration.
+// Fine in an ordinary encoder, but nothing says it may be retried.
 template <typename Self> struct undeclared_encoder : codec::encoder_base<Self> {
     using codec::encoder_base<Self>::encode;
     void encode(std::uint32_t value) { static_cast<Self &>(*this).encode(std::uint64_t{value}); }
@@ -197,6 +197,61 @@ template <typename T> bool check_declared_replay(const T &expected) {
     return true;
 }
 
+// A class with no codec of its own. Nothing built in writes or reads it
+// either, so the call ends in the codec of its base class
+struct base_shape {
+    base_shape() = default;
+    explicit base_shape(int side) : side(side) {}
+    int side{};
+};
+struct square_shape : base_shape {
+    using base_shape::base_shape;
+};
+
+template <typename Self> struct shape_codec : codec::encoder_base<Self> {
+    using codec::encoder_base<Self>::encode;
+    void encode(const base_shape &value) { static_cast<Self &>(*this).encode(static_cast<std::uint64_t>(value.side)); }
+};
+
+template <typename Self> struct shape_reader : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+    status_code decode(base_shape &value, major_type major, std::byte info) {
+        std::uint64_t side{};
+        const auto    status = static_cast<Self &>(*this).decode(side, major, info);
+        if (status == status_code::success)
+            value.side = static_cast<int>(side);
+        return status;
+    }
+};
+
+// Remembering the last tag is safe to repeat for any value type.
+template <typename Self> struct last_tag_observer : codec::base<Self> {
+    using codec::base<Self>::decode;
+    using codec::base<Self>::encode;
+
+    void          observe_encoded_cbor_tag(std::uint64_t tag) { last_tag = tag; }
+    void          observe_decoded_cbor_tag(std::uint64_t tag) { last_tag = tag; }
+    std::uint64_t last_tag{};
+};
+
+namespace cbor::tags {
+template <typename T, typename Self> struct resumable_retry_traits<T, last_tag_observer<Self>> {
+    static constexpr bool encode = true;
+    static constexpr bool decode = true;
+};
+
+#if !defined(CBOR_RETRY_BASE_CLASS_ENCODE)
+template <typename Self> struct resumable_retry_traits<square_shape, shape_codec<Self>> {
+    static constexpr bool encode = true;
+};
+#endif
+#if !defined(CBOR_RETRY_BASE_CLASS_DECODE)
+template <typename Self> struct resumable_retry_traits<square_shape, shape_reader<Self>> {
+    static constexpr bool decode = true;
+};
+#endif
+} // namespace cbor::tags
+
 int main() {
     std::vector<std::byte> bytes;
 #if defined(CBOR_RETRY_SHARED)
@@ -235,6 +290,22 @@ int main() {
     record value;
     auto   factory   = make_resumable_encoder(bytes);
     auto   operation = factory(value);
+#elif defined(CBOR_RETRY_BASE_CLASS_ENCODE)
+    const square_shape value{1000};
+#if defined(CBOR_RETRY_DECLARED_OBSERVER)
+    auto factory = make_resumable_encoder<shape_codec, last_tag_observer>(bytes);
+#else
+    auto factory = make_resumable_encoder<shape_codec>(bytes);
+#endif
+    auto operation = factory(value);
+#elif defined(CBOR_RETRY_BASE_CLASS_DECODE)
+    square_shape value;
+#if defined(CBOR_RETRY_DECLARED_OBSERVER)
+    auto factory = make_resumable_decoder<shape_reader, last_tag_observer>(bytes);
+#else
+    auto factory = make_resumable_decoder<shape_reader>(bytes);
+#endif
+    auto operation = factory(value);
 #elif defined(CBOR_RETRY_MEMBER_DECODE)
     record value;
     auto   factory   = make_resumable_decoder(bytes);
@@ -332,6 +403,41 @@ int main() {
         !check_declared_replay(std::map<std::uint32_t, bool>{{42, true}}) ||
         !check_declared_replay(std::map<bool, std::uint32_t>{{true, 42}}))
         return 5;
+
+    // With its declaration the base-class codec is retried: 1000 is 19 03 e8
+    // however the output is split
+    const square_shape square{1000};
+    const std::array   square_wire{std::byte{0x19}, std::byte{0x03}, std::byte{0xe8}};
+    for (std::size_t split = 0; split <= square_wire.size(); ++split) {
+        std::array<std::byte, 3>        output{};
+        std::list<std::span<std::byte>> chunks{std::span{output}.first(split)};
+        auto                            shape_encoder   = make_resumable_encoder<shape_codec, last_tag_observer>(chunks);
+        auto                            shape_operation = shape_encoder(square);
+        if (split != output.size()) {
+            if (shape_operation.done())
+                return 6;
+            chunks.push_back(std::span{output}.subspan(split));
+            shape_operation.resume();
+        }
+        if (!shape_operation.done() || !shape_operation.result() || output != square_wire)
+            return 6;
+    }
+
+    // And read back the same way, however the input is split
+    for (std::size_t split = 0; split <= square_wire.size(); ++split) {
+        std::list<std::span<const std::byte>> chunks{std::span{square_wire}.first(split)};
+        square_shape                          read;
+        auto                                  shape_decoder   = make_resumable_decoder<shape_reader, last_tag_observer>(chunks);
+        auto                                  shape_operation = shape_decoder(read);
+        if (split != square_wire.size()) {
+            if (shape_operation.done())
+                return 7;
+            chunks.push_back(std::span{square_wire}.subspan(split));
+            shape_operation.resume();
+        }
+        if (!shape_operation.done() || !shape_operation.result() || read.side != 1000)
+            return 7;
+    }
     (void)factory(std::uint32_t{1});
 #endif
 }

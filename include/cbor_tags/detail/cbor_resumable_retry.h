@@ -78,9 +78,41 @@ consteval bool resumable_codec_decode_retry_allowed() {
     return (!custom && !RetryDecodeObserver<Codec>) || resumable_retry_declared<T, Codec, false>();
 }
 
+// The decoder a resumable one is made of, without the installed codecs
+template <typename Transcoder> struct decoder_without_codecs;
+template <typename Buffer, typename Options, template <typename> typename... Mixins>
+struct decoder_without_codecs<decoder<Buffer, Options, Mixins...>> {
+    using type = decoder<Buffer, Options, cbor_header_decoder, cbor_indefinite_decoder>;
+};
+
+// A codec can accept a value through a conversion even when the exact-form
+// probe reports a core overload.
+template <typename Transcoder, typename T, payload_decode_context Context> consteval bool resumable_decode_ends_in_codec() {
+    using core = typename decoder_without_codecs<Transcoder>::type;
+    if constexpr (Context == payload_decode_context::tag) {
+        return RetryDecodeTag<Transcoder, T> && !RetryDecodeTag<core, T>;
+    } else {
+        return RetryDecodeHeader<Transcoder, T> && !RetryDecodeHeader<core, T>;
+    }
+}
+
+template <typename Codec, typename T, payload_decode_context Context>
+concept RetryDecodeCandidate = (Context == payload_decode_context::tag && RetryDecodeTag<Codec, T>) ||
+                               (Context != payload_decode_context::tag && RetryDecodeHeader<Codec, T>) ||
+                               (Context == payload_decode_context::direct && (RetryDecodeDirect<Codec, T> || RetryDecodeRvalue<Codec, T>));
+
 template <typename Transcoder, typename T, payload_decode_context Context, typename... Codecs>
 consteval bool resumable_decode_retry_allowed() {
-    constexpr bool allowed = (!IsClassWithDecodingOverload<Transcoder, T> || resumable_retry_declared<T, void, false>()) &&
+    constexpr bool declared_where_needed = [] {
+        if constexpr (sizeof...(Codecs) == 0 || IsClassWithDecodingOverload<Transcoder, T>)
+            return true;
+        else
+            // A tag observer can opt in for every type without decoding any of them.
+            return !resumable_decode_ends_in_codec<Transcoder, T, Context>() ||
+                   ((RetryDecodeCandidate<Codecs, T, Context> && resumable_retry_declared<T, Codecs, false>()) || ...);
+    }();
+    constexpr bool allowed = declared_where_needed &&
+                             (!IsClassWithDecodingOverload<Transcoder, T> || resumable_retry_declared<T, void, false>()) &&
                              (resumable_codec_decode_retry_allowed<Transcoder, T, Codecs, Context>() && ...);
     if constexpr (IsEnum<T>) {
         using customization = codec_payload_mixin_customization<Transcoder>;
@@ -121,10 +153,25 @@ template <typename Transcoder, typename T, typename Codec> consteval bool resuma
 template <typename T> inline constexpr bool    resumable_retry_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_retry_wrap_array<wrap_as_array<T...>> = true;
 
+// The encoder a resumable one is made of, without the installed codecs
+template <typename Transcoder> struct encoder_without_codecs;
+template <typename Buffer, typename Options, template <typename> typename... Mixins>
+struct encoder_without_codecs<encoder<Buffer, Options, Mixins...>> {
+    using type = encoder<Buffer, Options, cbor_header_encoder, cbor_indefinite_encoder, cbor_optional_encoder, cbor_variant_encoder>;
+};
+
 // Built-in delegation does not establish a customization's whole-call contract.
 // Follow its children until a declared customization takes ownership. Remember
 // visited types so recursive application schemas remain finite at compile time.
 template <typename Transcoder, typename... Codecs> struct resumable_encode_retry {
+    // Whether the encoder writes the type by itself. When it does not, the call
+    // that compiles ends in an installed codec: one that takes a base class of
+    // the type, or something the type converts to
+    template <typename U> static consteval bool written_without_codecs() {
+        using core = typename encoder_without_codecs<Transcoder>::type;
+        return requires(core &encoder, const U &value) { encoder.encode(value); };
+    }
+
     template <typename Object, typename... Parents> static consteval bool named_fields() {
         using tuple = std::remove_cvref_t<decltype(to_tuple(std::declval<const Object &>()))>;
         return []<std::size_t... I>(std::index_sequence<I...>) {
@@ -214,8 +261,11 @@ template <typename Transcoder, typename... Codecs> struct resumable_encode_retry
         } else if constexpr (IsAggregate<U>) {
             using tuple = std::remove_cvref_t<decltype(to_tuple(std::declval<const U &>()))>;
             return fields<tuple, Parents..., visit>();
-        } else {
+        } else if constexpr (CoreOnly || written_without_codecs<U>()) {
             return true;
+        } else {
+            // Match the declaration to a codec that can receive the value.
+            return ((RetryEncodeDirect<Codecs, T> && resumable_retry_declared<T, Codecs, true>()) || ...);
         }
     }
 };

@@ -2,7 +2,10 @@
 
 The encoder and decoder (`make_encoder`, `make_decoder`) process the requested
 items within one call. Running out of input or output space ends that call. Use a resumable
-operation to wait for more storage and continue where it stopped.
+operation to wait for more storage and continue where it stopped. This guide
+calls the encoder and decoder that `make_encoder` and `make_decoder` return
+*ordinary*, and the ones from `make_resumable_encoder` and
+`make_resumable_decoder` *resumable*.
 
 Include `<cbor_tags/cbor_resumable.h>`, bind caller-owned storage once, then add
 more input or output space and call argument-free `resume()`. Operation creation
@@ -171,7 +174,7 @@ output instead of starting another operation on it.
 
 Use `make_input_source(storage)` or `make_output_buffer(storage)` when the
 source or output buffer must outlive one encoder or decoder, or share its
-position between operation kinds. Encoders and decoders borrow them; validators
+position between operation kinds. Encoders and decoders borrow them. Validators
 and generators require a source.
 
 Default adapters support flat and nested byte ranges, including owning inner
@@ -194,6 +197,13 @@ Mutation and codec driving are serialized. Repeated `resume()` without new
 input or output space is safe, but the producer should wait for a storage change
 rather than busy-loop. Running out of input or output space never ends an
 operation by itself.
+
+Decode into storage other than the input. A text or byte string destination
+whose bytes are the decoder's input ends the operation with
+`status_code::input_output_aliasing`, as with an ordinary decoder; see
+[unchecked input/output aliasing](options.md#unchecked-inputoutput-aliasing).
+For input in several pieces the check covers the piece being read. Keeping the
+destination apart from the other pieces is up to the caller.
 
 ## Borrow decoded strings and items
 
@@ -508,9 +518,12 @@ int main() {
 ```
 
 Inside a hook, `co_await decoder(fields...)` or `co_await encoder(fields...)`
-retains progress in those fields across input or output deliveries. A hook may
-wait only through these calls or the [retry helper](#delegate-to-a-codec).
-Perform unrelated asynchronous work between calls to `resume()`.
+retains progress in those fields across input or output deliveries. A hook must
+wait only through these calls or [`retry(value)`](#delegate-to-a-codec). The
+operation does not track any other wait: `resume()` would still report
+`need_input` or `need_output`, and cancelling or destroying the operation
+destroys the hook under a continuation held elsewhere. Perform unrelated
+asynchronous work between calls to `resume()`.
 
 Member, ADL, and mixin `encode`/`decode` customizations need a resumable hook or
 an explicit [retry declaration](#retry-declarations). Library codecs follow the
@@ -530,6 +543,12 @@ Reservable destinations may allocate from validated lengths before payload
 arrival; use `as_bounded_size<0, limit>(values)` or a bounded allocator to impose
 application limits, with allocation failure reported as `out_of_memory`.
 
+A value inside another value is handled by a call inside its parent's, so stack
+use follows the nesting depth of the data. Each level takes more stack than it
+does in an ordinary encoder or decoder. The input chooses that depth where the
+destination is a recursive type, and for a validator up to its `max_depth`; see
+[Recursive Decode Paths](decoder_resource_limits.md#recursive-decode-paths).
+
 Changing transport chunk boundaries must preserve decoded values. Test custom
 codecs at every input/output split relevant to their wire representation.
 
@@ -538,15 +557,31 @@ ADL, member, and codec-mixin hooks return exactly `resumable<status_code>`;
 an lvalue. An encode hook takes it as `const`, and a member encode hook is a
 `const` member, so a const value reaches the hook too. Explicit hooks take
 precedence over ordinary codecs; see the
-[custom hook example](../examples/45_resumable_custom_hook.cpp).
+[custom hook example](../examples/45_resumable_custom_hook.cpp), which uses ADL
+hooks. As members they read:
+
+```cpp
+struct message {
+    std::uint32_t sequence{};
+    std::string   text;
+
+    template <typename Encoder>
+    ct::resumable<ct::status_code> resumable_encode(Encoder& encoder) const {
+        co_return co_await encoder(ct::wrap_as_array{sequence, text});
+    }
+
+    template <typename Decoder>
+    ct::resumable<ct::status_code> resumable_decode(Decoder& decoder) {
+        co_return co_await decoder(ct::wrap_as_array{sequence, text});
+    }
+};
+```
 
 Install mixins with `make_resumable_encoder<Codec...>` or
 `make_resumable_decoder<Codec...>`, and select options with
 `make_resumable_*_with_options<Options, Codec...>`. Member/ADL hooks follow the
 automatic metadata-tag convention; mixin hooks own their complete wire shape.
-A mixin's hook runs for values of the type it names. A value that only converts
-to that type, or whose type derives from it, is not the mixin's, and installed
-ordinary codecs work the same way.
+A resumable mixin hook runs for the type it names.
 A mixin's hook for a type goes before that type's own member or ADL hook, the
 same order that `make_encoder` and `make_decoder` use for installed codecs. A
 mixin with only `encode` or `decode` cannot override a type that has its own
@@ -581,66 +616,9 @@ type. Calling `decoder(value)` inside a hook for `value` would invoke the hook
 again. `decoder.retry(value)` bypasses resumable hooks, tries the ordinary
 `decode` overloads immediately, and waits and retries if the input is incomplete.
 
-This hook decodes a double, then checks that it is finite. Input arrives one
-byte at a time, so the same awaited call retries repeatedly before succeeding:
-
-```cpp
-#include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/cbor_resumable.h"
-
-#include <cassert>
-#include <cmath>
-#include <cstddef>
-#include <vector>
-
-namespace ct = cbor::tags;
-
-// Delegate double decoding, then apply an application rule.
-template <typename Self> struct finite_doubles : ct::codec::decoder_base<Self> {
-    using ct::codec::decoder_base<Self>::decode;
-
-    ct::resumable<ct::status_code> resumable_decode(double &value) {
-        auto &decoder = static_cast<Self &>(*this);
-        const auto status = co_await decoder.retry(value);
-        if (status != ct::status_code::success)
-            co_return status;
-        co_return std::isfinite(value) ? ct::status_code::success : ct::status_code::error;
-    }
-};
-
-int main() {
-    const double sent = 1.25;
-    std::vector<std::byte> wire;
-    auto encoder = ct::make_encoder(wire);
-    const auto encode_result = encoder(sent);
-    assert(encode_result);
-
-    // The hook awaits one retry operation while input arrives byte by byte.
-    std::vector<std::byte> input;
-    auto decoder = ct::make_resumable_decoder<finite_doubles>(input);
-    double received{};
-    auto operation = decoder(received);
-    assert(!operation.done());
-
-    std::size_t next_byte{};
-    for (;;) {
-        input.push_back(wire.at(next_byte++));
-        if (operation.resume() == ct::resume_state::done) {
-            break;
-        }
-    }
-
-    const auto decode_result = operation.result();
-    assert(decode_result);
-    assert(received == sent);
-    return 0;
-}
-```
-
-See the executable [retry example](../examples/48_resumable_retry.cpp).
-The inherited `decode` overloads retain ordinary double decoding.
-The validation hook runs only during resumable dispatch. It also stays bypassed
-inside a larger value decoded through a [retry declaration](#retry-declarations).
+The [retry example](../examples/48_resumable_retry.cpp) decodes a double
+through the ordinary codec and then checks that it is finite. If the hook
+refuses infinity, the destination still holds it.
 
 `retry(value)` keeps that call's input consumption or output writes tentative
 until it succeeds. A retry restores the cursor; it does **not** restore the
@@ -654,11 +632,6 @@ variants, tuples, and records must use `decoder(value)` to retain their progress
 On an encoder, `retry(value)` can also encode those composite values because its
 output remains tentative until the whole call succeeds. The complete input or
 output for a retry must fit retained storage.
-
-A hook must wait only through `encoder(values...)`, `decoder(values...)`, or
-`retry(value)`. Unrelated waits are not tracked by the operation: `resume()` would
-still report `need_input` or `need_output`, and destroying the operation would
-invalidate a continuation held elsewhere.
 
 ### Typed arrays
 
@@ -691,8 +664,10 @@ Other wrappers need an applicable hook or retry declaration.
 `resumable_retry_traits<T, Codec = void>` defaults both `encode` and `decode`
 to `false`. Specialize it before instantiating an operation; a flag the
 specialization leaves out stays `false`. Omit `Codec` for member or ADL
-customizations; for a mixin, specialize on its `Codec<Transcoder>` instantiation for the
-encoder or decoder that runs the retried call:
+customizations; for a mixin, write a partial specialization over every
+`Transcoder`, as in the second declaration. It is looked up with the ordinary
+encoder or decoder that the resumable one makes the retried call on, a type
+you cannot spell:
 
 ```cpp
 // transactional_record's decoder must publish changes only after success.
@@ -716,7 +691,12 @@ only on success, or ensure repeating them is harmless under the application's
 contract. The library does not prove the declaration. A declaration for a value
 does not authorize an installed mixin override; each applicable customization
 must declare its direction, including header/tag dispatch inside optionals and
-variants. Tag-observer mixins also need a declaration for calls being retried:
+variants. A codec that takes a type through a base class of it, or through a
+conversion, needs the declaration for the type that is encoded or decoded.
+When a value relies on conversion-based mixin overloads, the check can establish
+that a viable codec declares retry support. If several overloads are viable,
+ensure the codec selected by the ordinary call has its own declaration.
+Tag-observer mixins also need a declaration for calls being retried:
 a complete tag can be observed before the rest of a tagged header suspends.
 Calling `retry(value)` from a hook uses the same declaration checks.
 Built-in encoding also checks customizations reached through enums, container

@@ -90,7 +90,11 @@ class resumable_encode_context : public resumable_codec_mixin<Codecs<resumable_e
     using options                               = Options;
     static constexpr resume_state waiting_state = resume_state::need_output;
 
-    resumable_encode_context(Source &source, resume_control &control) : source_(source), control_(control), encoder_(source) {}
+    resumable_encode_context(Source &source, resume_control &control) : source_(source), control_(control), encoder_(source) {
+        // What is in the buffer by now is somebody else's, an ordinary
+        // encoder's say. A retry of this operation goes back to here, not over it
+        source_.commit();
+    }
 
     // Hooks compose values through operator() or retry a complete codec call.
     template <typename... T> resumable<status_code> operator()(T &&...value) {
@@ -110,13 +114,12 @@ class resumable_encode_context : public resumable_codec_mixin<Codecs<resumable_e
 
   private:
     // Other library code uses these through resumable_context_access
-    Source       &source() noexcept { return source_; }
-    std::size_t   offset() const { return source_.committed_position().offset(); }
-    auto          remaining_output() const { return source_.remaining_output(); }
-    encoder_type &encoder() noexcept { return encoder_; }
-    auto          wait() noexcept { return control_.wait(); }
-    void          commit() { source_.commit(); }
-    void          rollback() { source_.restore(source_.committed_position()); }
+    Source     &source() noexcept { return source_; }
+    std::size_t offset() const { return source_.committed_position().offset(); }
+    auto        remaining_output() const { return source_.remaining_output(); }
+    auto        wait() noexcept { return control_.wait(); }
+    void        commit() { source_.commit(); }
+    void        rollback() { source_.restore(source_.committed_position()); }
 
     // Payload chunks commit independently, so a long string never has to fit in
     // one output window. Contiguous ranges keep the source's bulk-write path.

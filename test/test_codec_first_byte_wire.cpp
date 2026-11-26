@@ -6,6 +6,7 @@
 #include <cbor_tags/codec.h>
 #include <cbor_tags/codec/shared_ptr.h>
 #include <cbor_tags/codec/unique_ptr.h>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -194,6 +195,69 @@ template <typename Self> struct marked_numbers : codec::decoder_base<Self> {
     }
 };
 
+status_code parse_port(std::string_view text, std::uint16_t &port) {
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), port);
+    return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() ? status_code::success : status_code::error;
+}
+
+// A port comes as a number or as decimal text. The variant in here asks for
+// the very type this codec is for, at the byte the codec started on
+template <typename Self> struct self_asking_port : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(std::uint16_t &port) {
+        std::variant<std::uint16_t, std::string> wire;
+        const auto                               status = static_cast<Self &>(*this).decode(wire);
+        if (status != status_code::success)
+            return status;
+
+        if (const auto *number = std::get_if<std::uint16_t>(&wire)) {
+            port = *number;
+            return status_code::success;
+        }
+        return parse_port(std::get<std::string>(wire), port);
+    }
+};
+
+// The same port with the header read first. decode(value, major, info) is the
+// decoder's own read of a number, it does not come back to the codec
+template <typename Self> struct port_or_text : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(std::uint16_t &port) {
+        auto &self               = static_cast<Self &>(*this);
+        const auto [major, info] = self.read_initial_byte();
+
+        if (major == major_type::UnsignedInteger)
+            return self.decode(port, major, info);
+
+        std::string text;
+        const auto  status = self.decode(text, major, info);
+        return status == status_code::success ? parse_port(text, port) : status;
+    }
+};
+
+// float asks for a double and double asks for a float, both at the same byte
+template <typename Self> struct each_others : codec::decoder_base<Self> {
+    using codec::decoder_base<Self>::decode;
+
+    status_code decode(float &value) {
+        std::optional<double> wide;
+        const auto            status = static_cast<Self &>(*this).decode(wide);
+        if (status == status_code::success && wide)
+            value = static_cast<float>(*wide);
+        return status;
+    }
+
+    status_code decode(double &value) {
+        std::optional<float> narrow;
+        const auto           status = static_cast<Self &>(*this).decode(narrow);
+        if (status == status_code::success && narrow)
+            value = *narrow;
+        return status;
+    }
+};
+
 } // namespace
 
 // All of them only write the value once they have it, so the resumable
@@ -225,6 +289,18 @@ template <std::uint64_t Tag, typename Self> struct resumable_retry_traits<readin
 template <typename Self> struct resumable_retry_traits<std::uint32_t, marked_numbers<Self>> {
     static constexpr bool decode = true;
 };
+template <typename Self> struct resumable_retry_traits<std::uint16_t, self_asking_port<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<std::uint16_t, port_or_text<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<float, each_others<Self>> {
+    static constexpr bool decode = true;
+};
+template <typename Self> struct resumable_retry_traits<double, each_others<Self>> {
+    static constexpr bool decode = true;
+};
 
 // A unique pointer gets a new pointee on every run
 template <typename T, typename Self> struct resumable_retry_traits<std::unique_ptr<T>, codec::unique_ptr<Self>> {
@@ -242,7 +318,7 @@ using input_chunks = std::list<std::span<const std::byte>>;
 constexpr std::string_view TRAILER_HEX{"182a"};
 constexpr int              TRAILER{42};
 
-// One T and the trailer, with a one-shot decoder over the whole input
+// One T and the trailer, with an ordinary decoder over the whole input
 template <typename T, typename Input, template <typename> typename... Codecs> T read_one_shot(const Input &input) {
     T   value{};
     int trailer{};
@@ -279,7 +355,7 @@ template <typename T, template <typename> typename... Codecs> T read_resumable(c
     return value;
 }
 
-// The bytes through a one-shot decoder, from a vector and from a deque. Each
+// The bytes through an ordinary decoder, from a vector and from a deque. Each
 // value that comes back is handed to look
 template <typename T, template <typename> typename... Codecs> void check_one_shot_reads(std::string_view hex, const auto &look) {
     CAPTURE(hex);
@@ -287,11 +363,11 @@ template <typename T, template <typename> typename... Codecs> void check_one_sho
     const std::deque<std::byte> segments(bytes.begin(), bytes.end());
 
     {
-        INFO("one-shot");
+        INFO("ordinary");
         look(read_one_shot<T, std::vector<std::byte>, Codecs...>(bytes));
     }
     {
-        INFO("one-shot, input that isn't contiguous");
+        INFO("ordinary, input that isn't contiguous");
         look(read_one_shot<T, std::deque<std::byte>, Codecs...>(segments));
     }
 }
@@ -316,6 +392,53 @@ template <typename T, template <typename> typename... Codecs> void check_reads_a
 // All four have to come out as the value written here
 template <typename T, template <typename> typename... Codecs> void check_reads(std::string_view hex, const T &expected) {
     check_reads_as<T, Codecs...>(hex, [&](const T &value) { CHECK(value == expected); });
+}
+
+// The bytes are no T. An ordinary decoder has to end with this status, a
+// resumable one has to refuse them however the input is cut up
+template <typename T, template <typename> typename... Codecs> void check_rejects(std::string_view hex, status_code expected) {
+    CAPTURE(hex);
+    const auto                  bytes = to_bytes(std::string(hex) + std::string(TRAILER_HEX));
+    const std::deque<std::byte> segments(bytes.begin(), bytes.end());
+
+    const auto ordinary = [&](const auto &input) {
+        T value{};
+
+        auto decoder = make_decoder<Codecs...>(input);
+        auto result  = decoder(value);
+
+        REQUIRE_FALSE(result);
+        CHECK(result.error() == expected);
+    };
+    {
+        INFO("ordinary");
+        ordinary(bytes);
+    }
+    {
+        INFO("ordinary, input that isn't contiguous");
+        ordinary(segments);
+    }
+
+    for (const auto piece : {bytes.size(), std::size_t{1}}) {
+        INFO("resumable");
+        CAPTURE(piece);
+        const std::span<const std::byte> input{bytes};
+        input_chunks                     storage;
+        auto                             source = make_input_source(storage);
+
+        T value{};
+
+        auto decoder   = make_resumable_decoder<Codecs...>(source);
+        auto operation = decoder(value);
+
+        for (std::size_t offset = 0; offset < input.size() && !operation.done(); offset += piece) {
+            storage.emplace_back(input.subspan(offset, std::min(piece, input.size() - offset)));
+            operation.resume();
+        }
+
+        REQUIRE(operation.done());
+        CHECK_FALSE(operation.result());
+    }
 }
 
 // For a pointer: it has to come back holding this
@@ -465,6 +588,67 @@ TEST_SUITE("cbor_wire/codec_first_byte") {
 
     TEST_CASE("the other alternative of that variant is read as before") {
         check_reads<std::variant<reading<100>, int>, offset_readings>("05", std::variant<reading<100>, int>{std::in_place_index<1>, 5});
+    }
+
+    TEST_CASE("a tagged alternative that fails partway leaves the next one the same bytes") {
+        // reading<1> is read by the decoder, tagged_marker (tag 100) by its codec
+        using either = std::variant<reading<1>, tagged_marker>;
+
+        check_reads<either, markers>("c105", either{reading<1>{5}});
+        check_reads<either, markers>("d86407", either{tagged_marker{}});
+
+        // 1(100(7)). reading<1> takes the 1 and gives up at the 100 inside.
+        // tagged_marker has to start at the 1 as well, not at that 100
+        check_rejects<either, markers>("c1d86407", status_code::no_match_in_variant_on_buffer);
+
+        // 216("\aabc"), a tag with 1 more byte. Two bytes back from where
+        // reading<216> gave up there is d8 64 07, which is 100(7) again
+        check_rejects<std::variant<reading<216>, tagged_marker>, markers>("d8d86407616263", status_code::no_match_in_variant_on_buffer);
+    }
+
+    TEST_CASE("a tagged alternative that fails partway leaves a codec inside an optional the same bytes") {
+        // The codec is one step further in here: the optional hands on the
+        // header it was given, and tagged_marker's codec steps back from there
+        using either = std::variant<reading<1>, std::optional<tagged_marker>>;
+
+        check_reads<either, markers>("c105", either{reading<1>{5}});
+        check_reads<either, markers>("f6", either{std::optional<tagged_marker>{}});
+
+        // 1(100(7)) again. The optional's tagged_marker has to start at the 1
+        check_rejects<either, markers>("c1d86407", status_code::no_match_in_variant_on_buffer);
+    }
+
+    TEST_CASE("a variant inside a variant leaves the outer alternatives the same bytes") {
+        using inner = std::variant<reading<1>, reading<2>>;
+        using outer = std::variant<inner, tagged_marker>;
+
+        check_reads<outer, markers>("c205", outer{inner{reading<2>{5}}});
+        check_reads<outer, markers>("d86407", outer{tagged_marker{}});
+
+        // The inner variant reads the tag number, the outer one must not count it twice
+        check_rejects<outer, markers>("c1d86407", status_code::no_match_in_variant_on_buffer);
+        check_rejects<std::variant<std::variant<reading<216>, reading<2>>, tagged_marker>, markers>(
+            "d8d86407616263", status_code::no_match_in_variant_on_buffer);
+    }
+
+    TEST_CASE("a decode(T &) codec that asks for its own type at the same byte ends with an error") {
+        // Text never comes back to the codec
+        check_reads<std::uint16_t, self_asking_port>("6438303830", std::uint16_t{8080});
+
+        // 8080 as a number does. The variant in the codec steps back for the
+        // number and calls the codec, which reads that variant again
+        check_rejects<std::uint16_t, self_asking_port>("191f90", status_code::error);
+        check_rejects<std::vector<std::uint16_t>, self_asking_port>("81191f90", status_code::error);
+
+        // Around two codecs it is the same
+        check_rejects<float, each_others>("fa3fc00000", status_code::error);
+    }
+
+    TEST_CASE("a decode(T &) codec reads its own type through the header form") {
+        check_reads<std::uint16_t, port_or_text>("6438303830", std::uint16_t{8080});
+        check_reads<std::uint16_t, port_or_text>("191f90", std::uint16_t{8080});
+        check_reads<std::optional<std::uint16_t>, port_or_text>("191f90", std::uint16_t{8080});
+        check_reads<std::variant<std::uint16_t, bool>, port_or_text>("191f90", std::uint16_t{8080});
     }
 
     TEST_CASE("a decode(T &) codec reads what a unique pointer points at") {
