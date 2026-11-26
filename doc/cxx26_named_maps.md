@@ -45,7 +45,7 @@ auto enc = make_encoder(output);
 //   "name": "Ada",
 //   "employer": "AcmeCo"
 // }
-auto result = enc(as_named_map{person});
+if (!enc(as_named_map{person})) return 1;
 ```
 
 The encoded CBOR bytes are:
@@ -93,7 +93,7 @@ auto dec = make_decoder(input);
 //   "employer": "AcmeCo",
 //   "age": 42
 // }
-auto result = dec(as_named_map{decoded});
+if (!dec(as_named_map{decoded})) return 1;
 ```
 
 ```cpp
@@ -181,7 +181,7 @@ auto enc = make_encoder(output);
 //   "age": 42,
 //   "nickname": "ace"
 // }
-auto result = enc(as_named_map{data});
+if (!enc(as_named_map{data})) return 1;
 ```
 
 The encoded CBOR bytes are:
@@ -329,7 +329,7 @@ auto enc = make_encoder(output);
 //   "nickname": "ace",
 //   "team": "compiler"
 // }
-auto result = enc(as_named_map{profile});
+if (!enc(as_named_map{profile})) return 1;
 ```
 
 Generate CDDL:

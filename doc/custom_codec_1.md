@@ -60,7 +60,7 @@ mechanisms as normal tagged values. If the tag should be supplied at the call
 site, pass it explicitly:
 
 ```cpp
-auto result = enc(cc1::as_ref(static_tag<1001>{}, message));
+if (!enc(cc1::as_ref(static_tag<1001>{}, message))) return 1;
 ```
 
 ## Lazy Tag Payloads
@@ -160,7 +160,7 @@ The normal user-facing API stays the same:
 std::vector<std::byte> out;
 auto enc = make_encoder<codec::custom_1>(out);
 
-auto result = enc(cc1::as_ref(static_tag<1001>{}, message));
+if (!enc(cc1::as_ref(static_tag<1001>{}, message))) return 1;
 ```
 
 Using `byte_segments` as the output buffer lets callers write the separate byte
@@ -174,7 +174,7 @@ segments without first combining them into one buffer:
 byte_segments segments;
 auto enc = make_encoder<codec::custom_1>(segments);
 
-auto result = enc(cc1::as_ref(static_tag<1001>{}, message));
+if (!enc(cc1::as_ref(static_tag<1001>{}, message))) return 1;
 
 std::vector<iovec> iovecs;
 iovecs.reserve(segments.size());

@@ -22,11 +22,11 @@ std::vector<std::int32_t> values{1, -2, 3};
 std::vector<std::byte> bytes;
 
 auto enc = make_encoder<cbor::tags::codec::typed_array>(bytes);
-auto result = enc(as_typed_array(values));
+if (!enc(as_typed_array(values))) return 1;
 
 typed_array<std::int32_t> decoded;
 auto dec = make_decoder<cbor::tags::codec::typed_array>(bytes);
-result = dec(decoded);
+if (!dec(decoded)) return 1;
 ```
 
 Supported element types:
@@ -101,12 +101,12 @@ The structural tags are exposed as fixed-tag wrappers:
 
 ```cpp
 std::vector<int> values{1, 2, 3};
-auto result = enc(as_homogeneous_array(values)); // #6.41(array)
+if (!enc(as_homogeneous_array(values))) return 1; // #6.41(array)
 
 std::vector<std::uint64_t> dimensions{2, 2};
 typed_array<std::uint16_t> cells{{1, 2, 3, 4}};
-result = enc(as_multi_dimensional_array(dimensions, cells));              // #6.40([dim, array])
-result = enc(as_multi_dimensional_column_major_array(dimensions, cells)); // #6.1040([dim, array])
+if (!enc(as_multi_dimensional_array(dimensions, cells))) return 1;              // #6.40([dim, array])
+if (!enc(as_multi_dimensional_column_major_array(dimensions, cells))) return 1; // #6.1040([dim, array])
 ```
 
 ## Copied And Borrowed Decode Forms
@@ -115,8 +115,8 @@ Use `as_typed_array(values)` to encode an existing numeric range:
 
 ```cpp
 std::vector<double> values{1.0, -2.5};
-auto result = enc(as_typed_array(values));
-result = enc(as_typed_array_be(values));
+if (!enc(as_typed_array(values))) return 1;
+if (!enc(as_typed_array_be(values))) return 1;
 ```
 
 The same factories decode into writable storage. Destination containers retain
@@ -130,8 +130,8 @@ destination.reserve(1024);
 auto dec = make_decoder<cbor::tags::codec::typed_array>(bytes);
 auto result = dec(as_bounded_size<0, 1024>(as_typed_array(destination)));
 if (!result) {
-    // This decoder is terminal; handle result.error().
-    return;
+    // Handle result.error().
+    return 1;
 }
 
 // destination.size() is the decoded element count.
@@ -146,7 +146,7 @@ dynamic-extent spans:
 ```cpp
 std::array<double, 2> storage{};
 auto dec = make_decoder<cbor::tags::codec::typed_array>(bytes);
-auto result = dec(as_typed_array(std::span{storage}));
+if (!dec(as_typed_array(std::span{storage}))) return 1;
 
 // Success requires exactly two elements; their values are copied into storage.
 // A shorter or longer payload returns unexpected_group_size, leaving it unchanged.
@@ -186,7 +186,7 @@ Decode into `typed_array<T>` when you want the result object to store its own
 
 ```cpp
 typed_array<double> decoded;
-auto result = dec(decoded);
+if (!dec(decoded)) return 1;
 
 auto& values = decoded.values();
 ```
@@ -195,7 +195,7 @@ Use `typed_array_be<T>` for big-endian float and double payloads:
 
 ```cpp
 typed_array_be<double> decoded_be;
-auto result = dec(decoded_be);
+if (!dec(decoded_be)) return 1;
 ```
 
 Decode into `typed_array_view<T>` when you want to keep a view of the encoded
@@ -203,7 +203,7 @@ byte string and convert each element to `T` as you iterate:
 
 ```cpp
 typed_array_view<double> view;
-auto result = dec(view);
+if (!dec(view)) return 1;
 
 for (double value : view.values()) {
     // use value
@@ -219,7 +219,7 @@ For big-endian payload views, use `typed_array_view_be<T>`:
 
 ```cpp
 typed_array_view_be<float> view;
-auto result = dec(view);
+if (!dec(view)) return 1;
 ```
 
 For non-contiguous input buffers, use `typed_array_view_for<T, Decoder>` so the
@@ -228,7 +228,7 @@ view stores the decoder's non-contiguous byte-string view type:
 ```cpp
 auto dec = make_decoder<cbor::tags::codec::typed_array>(input);
 typed_array_view_for<std::int32_t, decltype(dec)> view;
-auto result = dec(view);
+if (!dec(view)) return 1;
 ```
 
 Use `typed_array_view_be_for<T, Decoder>` for non-contiguous big-endian views.
@@ -284,7 +284,7 @@ namespace cddl = ct::cddl;
 namespace rfc8746 = cbor::tags::rfc8746;
 
 std::vector<std::int32_t> values{1, 2, 3};
-auto result = enc(ct::as_bounded_size<1, 3>(rfc8746::as_typed_array(values)));
+if (!enc(ct::as_bounded_size<1, 3>(rfc8746::as_typed_array(values)))) return 1;
 
 using bounded_samples = ct::bounded_size<rfc8746::typed_array<std::int32_t>, 1, 3>;
 cddl::schema_to<bounded_samples>(schema);
@@ -294,20 +294,16 @@ cddl::schema_to<bounded_samples>(schema);
 Use runtime bounds when the element limit comes from application configuration:
 
 ```cpp
-namespace ct = cbor::tags;
-
 std::size_t max_samples = configured_sample_limit();
+std::vector<std::int32_t> values{1, 2, 3};
+std::vector<std::byte> bytes;
 
-auto result = enc(ct::as_bounded_size(
-    rfc8746::as_typed_array(values), 1, max_samples));
+auto enc = make_encoder<codec::typed_array>(bytes);
+if (!enc(as_bounded_size(as_typed_array(values), 1, max_samples))) return 1;
 
-rfc8746::typed_array<std::int32_t> decoded;
-result = dec(ct::as_bounded_size(decoded, 1, max_samples));
-
-std::vector<std::int32_t> destination;
-destination.reserve(max_samples);
-result = dec(ct::as_bounded_size(
-    rfc8746::as_typed_array(destination), 1, max_samples));
+typed_array<std::int32_t> decoded;
+auto dec = make_decoder<codec::typed_array>(bytes);
+if (!dec(as_bounded_size(decoded, 1, max_samples))) return 1;
 ```
 
 All scalar typed-array forms support static and runtime bounds for their

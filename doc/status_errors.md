@@ -17,8 +17,7 @@ diagnostic:
 namespace ct = cbor::tags;
 
 bool read_count(const std::vector<std::byte> &input, std::uint64_t &count) {
-    auto decoder = ct::make_decoder(input);
-    const auto result = decoder(count);
+    const auto result = ct::make_decoder(input)(count);
     if (!result) {
         std::cerr << ct::status_message(result.error()) << '\n';
         return false;
@@ -40,15 +39,13 @@ std::uint64_t value{};
 
 // 0x1c is an integer header with reserved additional information.
 const std::vector<std::byte> invalid{std::byte{0x1c}};
-auto invalid_decoder = ct::make_decoder(invalid);
-const auto invalid_result = invalid_decoder(value);
+const auto invalid_result = ct::make_decoder(invalid)(value);
 assert(!invalid_result);
 assert(invalid_result.error() == ct::status_code::invalid_additional_info);
 
 // 0x18 is a valid integer header, but its argument byte is missing.
 const std::vector<std::byte> truncated{std::byte{0x18}};
-auto truncated_decoder = ct::make_decoder(truncated);
-const auto truncated_result = truncated_decoder(value);
+const auto truncated_result = ct::make_decoder(truncated)(value);
 assert(!truncated_result);
 assert(truncated_result.error() == ct::status_code::incomplete);
 ```
@@ -70,8 +67,7 @@ const std::vector<std::byte> input{
     std::byte{0xff},                                  // Break.
 };
 std::string text;
-auto decoder = ct::make_decoder(input);
-const auto result = decoder(text);
+const auto result = ct::make_decoder(input)(text);
 assert(!result);
 assert(result.error() == ct::status_code::malformed_structure);
 assert(text == "ok"); // Partial output remains after failure.

@@ -7,8 +7,7 @@ application message-size limit before decoding:
 if (input.size() > max_message_bytes)
     return input_too_large;
 
-auto decoder = cbor::tags::make_decoder(input);
-return decoder(value);
+return cbor::tags::make_decoder(input)(value);
 ```
 
 For streaming or resumable parsing, enforce the same policy against the cumulative bytes received.
@@ -25,11 +24,11 @@ define their own destination contract.
 std::string source = "payload";
 std::vector<std::byte> buffer;
 auto enc = make_encoder(buffer);
-auto result = enc(source);
+if (!enc(source)) return 1;
 
 std::string destination = "prefix:";
 auto dec = make_decoder(buffer);
-result = dec(destination);
+if (!dec(destination)) return 1;
 assert(destination == "prefix:payload");
 ```
 
@@ -85,8 +84,7 @@ decoded destination contents.
 // std::ranges::sized_range.
 // It contains: 0x65, 'o', 'k' -- a tstr header that declares five bytes.
 std::string output{"prefix:"};
-auto decoder = cbor::tags::make_decoder(input);
-const auto result = decoder(output);
+const auto result = cbor::tags::make_decoder(input)(output);
 
 // result.error() == cbor::tags::status_code::incomplete
 // output == "prefix:ok"; the input has been consumed to its end.
@@ -167,7 +165,7 @@ output.push_back(9);
 
 const auto remaining = static_cast<std::size_t>(output.capacity()) - output.size();
 auto dec = cbor::tags::make_decoder(input);
-auto result = dec(cbor::tags::as_bounded_size(output, 0, remaining));
+if (!dec(cbor::tags::as_bounded_size(output, 0, remaining))) return 1;
 // On success: output == [9,1,2,3]. The next item is still available to dec.
 ```
 
@@ -212,7 +210,6 @@ std::pmr::vector<std::pmr::string> values{&arena};
 auto dec = ct::make_decoder(input);
 std::size_t max_items = 64;
 auto result = dec(ct::as_bounded_size(values, 0, max_items));
-
 if (!result && result.error() == ct::status_code::out_of_memory) {
     // The bounded arena was exhausted.
 }
@@ -270,7 +267,7 @@ range-wrapper examples.
 - Static and runtime bounds validate only the immediately wrapped field. Wrap
   nested containers separately when they also require limits.
 - A bound constrains one incoming or outgoing CBOR item, not the accumulated size
-  of a pre-populated destination. Decoding appends to owning containers.
+  of a pre-populated destination.
 - `bounded_size<T, Min, Max>` generates matching type-based CDDL.
   `dynamic_bounded_size<T>` contains instance data and cannot produce type-based
   CDDL.

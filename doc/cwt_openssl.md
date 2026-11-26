@@ -17,8 +17,8 @@ if (bytes) {
         auto verified = cwt::verify_sign1<cwt::openssl_esp256_backend>(key, *message);
         if (verified) {
             std::vector<std::byte> token;
-            auto encoder = make_encoder<codec::cwt>(token);
-            auto result = encoder(cwt::as_cwt(cwt::as_cose_sign1(*message)));
+            auto result = make_encoder<codec::cwt>(token)(
+                cwt::as_cwt(cwt::as_cose_sign1(*message)));
             // Check result before sending token.
         }
     }

@@ -336,52 +336,37 @@ int main() {
     auto data = std::vector<std::byte>{};
     auto enc = make_encoder(data);
 
-    // Encode Api1 with a tag of 0x10 - note that the tag does not have to be part of the struct
-    auto result = enc(make_tag_pair(static_tag<0x10>{}, Api1{.a = 42, .b = 43}));
-
-    // Encode a 0 length binary string in the middle of the buffer
-    result = enc(std::vector<std::byte>{});
-
-    // Encode Api2 with a tag of 0x20
-    result = enc(make_tag_pair(static_tag<0x20>{}, Api2{"hello", "world"}));
+    // Write two tagged items with an empty byte string between them.
+    if (!enc(make_tag_pair(static_tag<0x10>{}, Api1{.a = 42, .b = 43}),
+             std::vector<std::byte>{},
+             make_tag_pair(static_tag<0x20>{}, Api2{"hello", "world"}))) return 1;
 
     // Decoding - accept bstr and any tagged value
     auto dec = make_decoder(data);
     std::variant<std::vector<std::byte>, as_tag_any> value;
 
-    // Define a visitor for our variant type
     auto visitor = [&dec](auto&& value) {
         if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, as_tag_any>) {
             if (value.tag == 0x10) {
-                Api1 a;
-                if (dec(a)) {
-                    std::cout << "Api1: a=" << a.a << ", b=" << a.b << "\n";
-                }
+                Api1 item;
+                if (!dec(item)) return false;
+                std::cout << "Api1: a=" << item.a << ", b=" << item.b << "\n";
             } else if (value.tag == 0x20) {
-                Api2 a;
-                if (dec(a)) {
-                    std::cout << "Api2: a=" << a.a << ", b=" << a.b << "\n";
-                }
+                Api2 item;
+                if (!dec(item)) return false;
+                std::cout << "Api2: a=" << item.a << ", b=" << item.b << "\n";
             } else {
-                std::cout << "Unknown tag: " << value.tag << "\n";
+                std::cerr << "Unknown tag: " << value.tag << "\n";
+                return false;
             }
         } else {
-            // Since it was not a tag, it must be a bstr, otherwise the decoding would return the unexpected type.
             std::cout << "Binary data received (aka bstr)\n";
         }
+        return true;
     };
 
-    // Decode the three items
-    if (dec(value)) {
-        std::visit(visitor, value);
-    }
-
-    if (dec(value)) {
-        std::visit(visitor, value);
-    }
-
-    if (dec(value)) {
-        std::visit(visitor, value);
+    for (int i = 0; i < 3; ++i) {
+        if (!dec(value) || !std::visit(visitor, value)) return 1;
     }
 
     return 0;
@@ -1010,11 +995,11 @@ auto value = std::make_shared<int>(42);
 std::vector<std::shared_ptr<int>> sent{value, value};
 
 auto enc = make_encoder<codec::shared_ptr>(buffer);
-auto result = enc(sent);
+if (!enc(sent)) return 1;
 
 std::vector<std::shared_ptr<int>> received;
 auto dec = make_decoder<codec::shared_ptr>(buffer);
-result = dec(received);
+if (!dec(received)) return 1;
 
 // received[0].get() == received[1].get(): both point to the same int.
 ```
