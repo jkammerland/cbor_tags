@@ -181,36 +181,12 @@ The decoder ends that loop for `decode(T&)` only. A
 containing a `T`, and a type whose own `decode` asks the decoder for itself,
 call themselves until the stack runs out.
 
-To read `T` the way the decoder does without the codec, read the first byte with
-`dec.read_initial_byte()` and pass it to `dec.decode(value, major,
-additional_info)`. This codec accepts a port as a number or as decimal text:
+To bypass the one-argument overload, pass the initial byte's fields to the
+three-argument overload. An installed codec can provide that overload.
 
 ```cpp
-template <typename Self>
-struct port_or_text : cbor::tags::codec::decoder_base<Self> {
-    using cbor::tags::codec::decoder_base<Self>::decode;
-
-    cbor::tags::status_code decode(std::uint16_t& port) {
-        auto& dec = static_cast<Self&>(*this);
-        const auto [major, additional_info] = dec.read_initial_byte();
-
-        if (major == cbor::tags::major_type::UnsignedInteger) {
-            return dec.decode(port, major, additional_info);
-        }
-
-        std::string text;
-        const auto status = dec.decode(text, major, additional_info);
-        if (status != cbor::tags::status_code::success) {
-            return status;
-        }
-
-        // All of the text has to be the number: "80abc" is not a port
-        const auto end    = text.data() + text.size();
-        const auto parsed = std::from_chars(text.data(), end, port);
-        const bool whole  = parsed.ec == std::errc{} && parsed.ptr == end;
-        return whole ? cbor::tags::status_code::success : cbor::tags::status_code::error;
-    }
-};
+const auto [major, additional_info] = dec.read_initial_byte();
+return dec.decode(value, major, additional_info);
 ```
 
 Codec implementations that hand a consumed header to another value call

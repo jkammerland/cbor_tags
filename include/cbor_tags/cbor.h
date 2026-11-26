@@ -497,9 +497,14 @@ template <typename... T> wrap_as_array(T &&...) -> wrap_as_array<T...>;
 template <typename... TupleArgs> wrap_as_array(std::tuple<TupleArgs...> &) -> wrap_as_array<std::tuple<TupleArgs...> &>;
 
 namespace detail {
-// Every place of the wrapper is something of the caller's. A decoder needs
-// that: what it writes into a kept temporary is gone with the wrapper
-template <typename... T> inline constexpr bool wrap_as_array_holds_lvalues = (std::is_lvalue_reference_v<T> && ...);
+template <typename T> inline constexpr bool                                   is_borrowing_bound                              = false;
+template <typename T, std::size_t Min, std::size_t Max> inline constexpr bool is_borrowing_bound<bounded_size<T &, Min, Max>> = true;
+template <typename T> inline constexpr bool                                   is_borrowing_bound<dynamic_bounded_size<T &>>   = true;
+
+// A temporary bounds adapter can still write into the caller's lvalue.
+template <typename... T>
+inline constexpr bool wrap_as_array_has_destinations =
+    ((std::is_lvalue_reference_v<T> || is_borrowing_bound<std::remove_cvref_t<T>>) && ...);
 } // namespace detail
 
 struct as_indefinite_array {};

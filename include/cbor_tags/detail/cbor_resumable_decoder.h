@@ -26,8 +26,9 @@ struct observed_tag_access {
 template <typename T> inline constexpr bool    resumable_wrap_array                      = false;
 template <typename... T> inline constexpr bool resumable_wrap_array<wrap_as_array<T...>> = true;
 
-template <typename T> inline constexpr bool    resumable_wrap_array_holds_lvalues                      = false;
-template <typename... T> inline constexpr bool resumable_wrap_array_holds_lvalues<wrap_as_array<T...>> = wrap_as_array_holds_lvalues<T...>;
+template <typename T> inline constexpr bool resumable_wrap_array_has_destinations = false;
+template <typename... T>
+inline constexpr bool resumable_wrap_array_has_destinations<wrap_as_array<T...>> = wrap_as_array_has_destinations<T...>;
 
 // Keep capability detection separate from the dispatch that uses it.
 template <typename Decoder, typename T>
@@ -619,8 +620,8 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
             check_progress<indefinite_value_t<U>>();
             return bounded_container(value, 0, std::numeric_limits<std::uint64_t>::max());
         } else if constexpr (resumable_wrap_array<U>) {
-            static_assert(resumable_wrap_array_holds_lvalues<U>,
-                          "a wrap_as_array to decode into holds lvalues only, a temporary in it would take the value and be gone");
+            static_assert(resumable_wrap_array_has_destinations<U>,
+                          "decoding wrap_as_array requires lvalues or bounds adapters that borrow lvalues");
 
             // The places themselves. Handing on the tuple a wrapper spreads
             // would decode into a copy of it
@@ -1406,8 +1407,11 @@ class resumable_decode_context : public resumable_codec_mixin<Codecs<resumable_d
                 if (chunk.size > maximum - count)
                     co_return status_code::size_limit_exceeded;
                 if constexpr (AppendReservable<T> && HasGeometricAppendReservation<appender<T>, T>) {
-                    if (chunk.size != 0)
+                    if (chunk.size != 0) {
+                        if (destination_is_input(value))
+                            co_return status_code::input_output_aliasing;
                         append.template reserve_for_append<true>(value, chunk.size);
+                    }
                 }
                 status = co_await payload(value, chunk.size, append);
                 count += chunk.size;

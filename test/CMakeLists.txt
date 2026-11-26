@@ -314,7 +314,7 @@ foreach(CASE IN ITEMS ORDINARY RESUMABLE)
   target_link_libraries(${TEST_NAME} PRIVATE cbor::tags)
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_COMMAND}
     "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DTEST_TARGET=${TEST_NAME}" "-DCONFIG=$<CONFIG>"
-    "-DPASS_REGEX=a wrap_as_array to decode into holds lvalues only" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
+    "-DPASS_REGEX=decoding wrap_as_array requires lvalues or bounds adapters that borrow lvalues" -P "${CMAKE_CURRENT_SOURCE_DIR}/expect_compile_failure.cmake")
   set_tests_properties(${TEST_NAME} PROPERTIES LABELS "compile-fail")
 endforeach()
 foreach(CASE IN ITEMS ADL_ENCODE ADL_TRANSCODE MEMBER_TRANSCODE MIXIN_ENCODE MIXIN_BEFORE_MEMBER MIXIN_CONST_ELEMENT)

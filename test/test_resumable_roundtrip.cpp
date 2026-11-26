@@ -1869,4 +1869,27 @@ TEST_SUITE("roundtrip/resumable") {
         REQUIRE(operation.result());
         CHECK(resumed == std::tuple<int, std::string>{1, "ab"});
     }
+
+    TEST_CASE("wrap_as_array decodes through temporary bounds adapters") {
+        const std::string      name{"CBOR"};
+        std::vector<std::byte> input;
+        auto                   encoder = make_encoder(input);
+        REQUIRE(encoder(wrap_as_array{name}));
+
+        std::string ordinary;
+        auto        decoder = make_decoder(input);
+        REQUIRE(decoder.decode(wrap_as_array{as_bounded_size<0, 16>(ordinary)}) == status_code::success);
+        CHECK(ordinary == name);
+
+        std::string            resumed;
+        std::vector<std::byte> available;
+        auto                   resumable_decoder = make_resumable_decoder(available);
+        auto                   operation         = resumable_decoder(wrap_as_array{as_bounded_size(resumed, 0, 16)});
+        REQUIRE_FALSE(operation.done());
+
+        available = input;
+        REQUIRE(operation.resume() == resume_state::done);
+        REQUIRE(operation.result());
+        CHECK(resumed == name);
+    }
 }

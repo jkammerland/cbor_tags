@@ -174,10 +174,8 @@ output instead of starting another operation on it.
 
 Use `make_input_source(storage)` or `make_output_buffer(storage)` when the
 source or output buffer must outlive one encoder or decoder, or share its
-position between operation kinds. Encoders and decoders borrow them; validators
-and generators require a source. A resumable encode operation starts after
-everything that is in the output buffer, including what an ordinary encoder
-wrote there, and keeps it.
+position between operation kinds. Encoders and decoders borrow them. Validators
+and generators require a source.
 
 Default adapters support flat and nested byte ranges, including owning inner
 containers and borrowed spans. Input may bind through a const reference to the
@@ -583,9 +581,7 @@ Install mixins with `make_resumable_encoder<Codec...>` or
 `make_resumable_decoder<Codec...>`, and select options with
 `make_resumable_*_with_options<Options, Codec...>`. Member/ADL hooks follow the
 automatic metadata-tag convention; mixin hooks own their complete wire shape.
-A mixin's hook runs for values of the type it names. A value that only converts
-to that type, or whose type derives from it, is not the mixin's, and installed
-ordinary codecs work the same way.
+A resumable mixin hook runs for the type it names.
 A mixin's hook for a type goes before that type's own member or ADL hook, the
 same order that `make_encoder` and `make_decoder` use for installed codecs. A
 mixin with only `encode` or `decode` cannot override a type that has its own
@@ -620,93 +616,9 @@ type. Calling `decoder(value)` inside a hook for `value` would invoke the hook
 again. `decoder.retry(value)` bypasses resumable hooks, tries the ordinary
 `decode` overloads immediately, and waits and retries if the input is incomplete.
 
-This hook decodes a double, then checks that it is finite. Input arrives one
-byte at a time, so the same awaited call retries repeatedly before succeeding.
-An infinity is then decoded and refused by the hook's rule:
-
-```cpp
-#include "cbor_tags/cbor_encoder.h"
-#include "cbor_tags/cbor_resumable.h"
-
-#include <cassert>
-#include <cmath>
-#include <cstddef>
-#include <iostream>
-#include <limits>
-#include <vector>
-
-namespace ct = cbor::tags;
-
-// Delegate double decoding, then apply an application rule.
-template <typename Self> struct finite_doubles : ct::codec::decoder_base<Self> {
-    using ct::codec::decoder_base<Self>::decode;
-
-    ct::resumable<ct::status_code> resumable_decode(double &value) {
-        auto &decoder = static_cast<Self &>(*this);
-        const auto status = co_await decoder.retry(value);
-        if (status != ct::status_code::success)
-            co_return status;
-        co_return std::isfinite(value) ? ct::status_code::success : ct::status_code::error;
-    }
-};
-
-int main() {
-    const double sent = 1.25;
-    std::vector<std::byte> wire;
-    auto encoder = ct::make_encoder(wire);
-    const auto encode_result = encoder(sent);
-    assert(encode_result);
-
-    // The hook awaits one retry operation while input arrives byte by byte.
-    std::vector<std::byte> input;
-    auto decoder = ct::make_resumable_decoder<finite_doubles>(input);
-    double received{};
-    auto operation = decoder(received);
-    assert(!operation.done());
-
-    std::size_t next_byte{};
-    for (;;) {
-        input.push_back(wire.at(next_byte++));
-        if (operation.resume() == ct::resume_state::done) {
-            break;
-        }
-    }
-
-    const auto decode_result = operation.result();
-    assert(decode_result);
-    assert(received == sent);
-    std::cout << "decoded " << received << '\n';
-
-    // An infinity is a valid double on the wire. The hook's own rule refuses it
-    std::vector<std::byte> infinite_wire;
-    auto infinite_encoder = ct::make_encoder(infinite_wire);
-    const auto infinite_result = infinite_encoder(std::numeric_limits<double>::infinity());
-    assert(infinite_result);
-
-    auto rejecting_decoder = ct::make_resumable_decoder<finite_doubles>(infinite_wire);
-    double refused{};
-    auto rejection = rejecting_decoder(refused);
-    assert(rejection.done());
-    assert(!rejection.result());
-
-    // The destination was written before the rule ran, so it holds the infinity
-    std::cout << "refused " << refused << ": " << ct::status_message(rejection.result().error())
-              << '\n';
-    return 0;
-}
-```
-
-```text
-decoded 1.25
-refused inf: Unexpected CBOR processing error
-```
-
-The refused value is in its destination: `retry(value)` wrote it before the
-hook looked at it. See the executable
-[retry example](../examples/48_resumable_retry.cpp).
-The inherited `decode` overloads retain ordinary double decoding.
-The validation hook runs only during resumable dispatch. It also stays bypassed
-inside a larger value decoded through a [retry declaration](#retry-declarations).
+The [retry example](../examples/48_resumable_retry.cpp) decodes a double
+through the ordinary codec and then checks that it is finite. If the hook
+refuses infinity, the destination still holds it.
 
 `retry(value)` keeps that call's input consumption or output writes tentative
 until it succeeds. A retry restores the cursor; it does **not** restore the

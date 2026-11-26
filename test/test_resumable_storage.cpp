@@ -13,6 +13,7 @@
 #include <limits>
 #include <list>
 #include <map>
+#include <memory_resource>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -805,6 +806,27 @@ TEST_SUITE("roundtrip/resumable_storage") {
             REQUIRE(operation.result());
             CHECK(*operation.result() == wire.size());
             CHECK(decoded == payload);
+        }
+
+        SUBCASE("an indefinite string checks a newly supplied chunk before reserving") {
+            // The resource permits the prefilled destination only. An
+            // attempted reservation fails without moving the supplied bytes.
+            std::array<std::byte, 2>            storage{};
+            std::pmr::monotonic_buffer_resource resource{storage.data(), storage.size(), std::pmr::null_memory_resource()};
+            std::pmr::vector<std::byte>         buffer{{std::byte{0x41}, std::byte{0x07}}, &resource};
+
+            const std::array                       prefix{std::byte{0x5f}};
+            const std::array                       suffix{std::byte{0xff}};
+            std::deque<std::span<const std::byte>> input{prefix};
+            auto                                   decoder   = make_resumable_decoder(input);
+            auto                                   operation = decoder(buffer);
+            REQUIRE_FALSE(operation.done());
+
+            input.emplace_back(buffer);
+            input.emplace_back(suffix);
+            REQUIRE(operation.resume() == resume_state::done);
+            REQUIRE_FALSE(operation.result());
+            CHECK(operation.result().error() == status_code::input_output_aliasing);
         }
 
         SUBCASE("unchecked_aliasing_decoder_options leaves the check out") {

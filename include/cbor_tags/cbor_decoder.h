@@ -2554,8 +2554,8 @@ template <typename T> struct cbor_header_decoder {
 
     constexpr status_code                           decode(as_array value) { return validate_size(major_type::Array, value.size_); }
     template <typename... Ts> constexpr status_code decode(wrap_as_array<Ts...> value) {
-        static_assert(detail::wrap_as_array_holds_lvalues<Ts...>,
-                      "a wrap_as_array to decode into holds lvalues only, a temporary in it would take the value and be gone");
+        static_assert(detail::wrap_as_array_has_destinations<Ts...>,
+                      "decoding wrap_as_array requires lvalues or bounds adapters that borrow lvalues");
 
         auto result = validate_size(major_type::Array, value.size_);
         if (result != status_code::success) {
