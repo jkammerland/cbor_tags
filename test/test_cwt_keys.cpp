@@ -116,6 +116,17 @@ TEST_CASE("legacy eddsa accepts edwards signature curves") {
     CHECK_FALSE(cwt::validate_key_use(ec2, cwt::algorithm::eddsa));
 }
 
+TEST_CASE("legacy ecdsa rejects secp256k1") {
+    cwt::ec2_public_key key;
+    key.curve = 8;
+    key.x.assign(32, std::byte{1});
+    key.y = std::vector<std::byte>(32, std::byte{1});
+
+    CHECK_FALSE(cwt::validate_key_use(key, cwt::algorithm::es256));
+    CHECK_FALSE(cwt::validate_key_use(key, cwt::algorithm::es384));
+    CHECK_FALSE(cwt::validate_key_use(key, cwt::algorithm::es512));
+}
+
 TEST_CASE("cwt rsa and okp public keys round trip") {
     cwt::rsa_public_key rsa;
     rsa.modulus  = {std::byte{0x80}, std::byte{1}};

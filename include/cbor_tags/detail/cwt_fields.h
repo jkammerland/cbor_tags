@@ -43,13 +43,22 @@ template <typename Value>
 concept AllocatedOrderedFieldContainer = requires(const Value &current) { Value(current.key_comp(), current.get_allocator()); };
 
 template <typename Value>
-concept OrderedFieldContainer = requires(const Value &current) { Value(current.key_comp()); };
+concept AssociativeFieldContainer =
+    requires(const Value &current) { current.key_comp(); } || requires(const Value &current) { current.key_eq(); };
 
 template <typename Value>
+concept FixedCapacityFieldContainer = requires(const Value &current) {
+    { current.full() } -> std::convertible_to<bool>;
+    current.capacity();
+};
+
+// Fixed-capacity containers and associative containers whose storage cannot
+// be reconstructed through their allocator keep the caller's destination.
+template <typename Value>
 concept ReplaceableFieldContainer = std::ranges::range<Value> && (IsString<Value> || IsRangeOfCborValues<Value>) && !IsView<Value> &&
-                                    !IsFixedArray<Value> && std::assignable_from<Value &, Value> &&
+                                    !IsFixedArray<Value> && !FixedCapacityFieldContainer<Value> && std::assignable_from<Value &, Value> &&
                                     (UnorderedFieldContainer<Value> || AllocatedOrderedFieldContainer<Value> ||
-                                     OrderedFieldContainer<Value> || std::default_initializable<Value>);
+                                     (!AssociativeFieldContainer<Value> && std::default_initializable<Value>));
 
 // Stage a replacement using the destination's container policies.
 template <ReplaceableFieldContainer Value> Value empty_like(const Value &current) {
@@ -59,8 +68,6 @@ template <ReplaceableFieldContainer Value> Value empty_like(const Value &current
         return staged;
     } else if constexpr (AllocatedOrderedFieldContainer<Value>) {
         return Value(current.key_comp(), current.get_allocator());
-    } else if constexpr (OrderedFieldContainer<Value>) {
-        return Value(current.key_comp());
     } else {
         return tags::detail::make_decode_value_for<Value>(current);
     }

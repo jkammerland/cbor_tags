@@ -233,7 +233,7 @@ template <typename Backend, typename Key, detail::CountersignatureTarget Target,
 
 // countersign0(key, target, bytes, more) with a writable container: storage
 // and AAD, or AAD and detached payload? Say which. std::span<std::byte>{bytes}
-// is storage, std::as_const(bytes) is an AAD
+// is storage, std::span<const std::byte>{bytes} is AAD.
 template <typename Backend, typename Key, detail::CountersignatureTarget Target, detail::WritableBytesNotStorage Bytes>
 void countersign0(Key &&, Target &, Bytes &&, std::span<const std::byte>,
                   std::optional<std::span<const std::byte>> = std::nullopt) = delete;

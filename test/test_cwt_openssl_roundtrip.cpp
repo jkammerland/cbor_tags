@@ -148,7 +148,7 @@ TEST_SUITE("roundtrip/cwt") {
 
 #if CBOR_TAGS_TEST_HAS_CWT_OPENSSL
 TEST_SUITE("roundtrip/cwt") {
-    TEST_CASE("a refused signature or key leaves the caller's OpenSSL error queue as it was") {
+    TEST_CASE("openssl diagnostics preserve a caller's error mark") {
         auto                         key = make_p256_key();
         const std::vector<std::byte> payload{std::byte{0x01}};
         auto                         message = sign1<crypto_esp256_backend>(key.get(), {}, {}, payload);
@@ -172,17 +172,26 @@ TEST_SUITE("roundtrip/cwt") {
             CHECK(ERR_peek_error() == 0UL);
         }
 
-        SUBCASE("an entry of the caller's stays the only one") {
+        SUBCASE("a caller's entry and its mark survive") {
             ERR_clear_error();
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
             ERR_raise(ERR_LIB_USER, 1);
 #else
             ERR_put_error(ERR_LIB_USER, 0, 1, __FILE__, __LINE__);
 #endif
+            const auto queued = ERR_peek_error();
+            REQUIRE(ERR_set_mark() == 1);
 
             CHECK_FALSE(verify_sign1<crypto_esp256_backend>(key.get(), *message));
             CHECK_FALSE(cwt::import_p256_public_key(off_curve));
 
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
+            // Counted marks also allow the backend to clean up its own entries.
+            CHECK(ERR_peek_last_error() == queued);
+#else
+            CHECK(ERR_peek_error() == queued);
+#endif
+            CHECK(ERR_pop_to_mark() == 1);
             const auto entry = ERR_get_error();
             CHECK(ERR_GET_LIB(entry) == ERR_LIB_USER);
             CHECK(ERR_GET_REASON(entry) == 1);

@@ -21,13 +21,26 @@ namespace cbor::tags::cwt::detail {
 
 template <typename T, void (*FreeFn)(T *)> using ossl_ptr = std::unique_ptr<T, decltype(FreeFn)>;
 
-// Discard the call's OpenSSL errors on return. New errors can evict older
-// entries when the thread's queue is full.
 struct openssl_error_scope {
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L && !defined(LIBRESSL_VERSION_NUMBER)
     openssl_error_scope() noexcept { ERR_set_mark(); }
     ~openssl_error_scope() { ERR_pop_to_mark(); }
+#else
+    // Single-bit marks cannot be nested on a caller's queue entry.
+    openssl_error_scope() noexcept = default;
+    ~openssl_error_scope() {
+        if (initially_empty)
+            ERR_clear_error();
+    }
+#endif
+
     openssl_error_scope(const openssl_error_scope &)            = delete;
     openssl_error_scope &operator=(const openssl_error_scope &) = delete;
+
+#if OPENSSL_VERSION_NUMBER < 0x30000000L || defined(LIBRESSL_VERSION_NUMBER)
+  private:
+    bool initially_empty = ERR_peek_error() == 0UL;
+#endif
 };
 
 [[nodiscard]] inline expected<void, status_code> validate_openssl_es256_key(EVP_PKEY *key) {

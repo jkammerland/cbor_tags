@@ -219,6 +219,9 @@ TEST_SUITE("roundtrip/cwt") {
         CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, std::size_t{0}));
         CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, 0));
         CHECK_FALSE(verify_sign<signature_presence_es256_backend>(nullptr, *message, 1U));
+        enum signer_index { first_signer = 0 };
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, first_signer));
+        CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, std::integral_constant<std::size_t, 0>{}));
 
         // Behind an index {} is the AAD as well
         CHECK(verify_sign<signature_presence_es256_backend>(nullptr, *message, std::size_t{0}, {}));

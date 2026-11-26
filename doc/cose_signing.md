@@ -174,8 +174,8 @@ The example's application policy requires exactly two signatures in an agreed
 order and verifies each index with its corresponding trusted key. It rejects
 a wrong key, a damaged signature and a missing signer. The no-index
 `verify_sign(key, message, aad)` overload checks every signature using that one
-key, and `{}` in the AAD position is an empty AAD; use the indexed overload,
-which takes an integer there, or `verify_signature` when signers have different
+key. Use the indexed overload to check one signer by position, or
+`verify_signature` when signers have different
 keys. Key selection and whether one, all or a threshold of signers is required
 remain application policy. Apply the claim policy from example 25 after that
 signature policy succeeds.
@@ -184,9 +184,8 @@ signature policy succeeds.
 
 - Signing helpers reject unprotected `alg`/`crit` and conflicting algorithms.
   Unknown noncritical headers are discarded.
-- Signing and verification reject a label that is in both the protected and the
-  unprotected header, as [RFC 9052 §3](https://www.rfc-editor.org/rfc/rfc9052.html#section-3)
-  requires. That includes labels the library does not know.
+- Signing and verification reject labels present in both header maps, including
+  unknown labels.
 
 ## Borrowed sending and receiving
 

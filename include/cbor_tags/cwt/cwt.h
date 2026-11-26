@@ -576,22 +576,22 @@ verify_signature(VerificationKey &&key, const basic_cose_sign<Borrowed> &message
 
 // The index is deduced, so {} in its place can only be an empty AAD and the
 // call checks every signature. A plain std::size_t there would take {} as 0
-template <typename Backend, typename VerificationKey, bool Borrowed, std::integral Index>
+template <typename Backend, typename VerificationKey, bool Borrowed, std::convertible_to<std::size_t> Index>
 [[nodiscard]] inline expected<void, status_code> verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message,
-                                                             Index signature_index, std::span<const std::byte> external_aad = {},
+                                                             Index &&signature_index, std::span<const std::byte> external_aad = {},
                                                              std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
-    return detail::verify_sign_with_policy<Backend>(std::forward<VerificationKey>(key), message,
-                                                    detail::verification_algorithm_policy::explicit_algorithm,
-                                                    static_cast<std::size_t>(signature_index), external_aad, detached_payload);
+    return detail::verify_sign_with_policy<Backend>(
+        std::forward<VerificationKey>(key), message, detail::verification_algorithm_policy::explicit_algorithm,
+        static_cast<std::size_t>(std::forward<Index>(signature_index)), external_aad, detached_payload);
 }
 
-template <typename Backend, typename VerificationKey, bool Borrowed, std::integral Index>
+template <typename Backend, typename VerificationKey, bool Borrowed, std::convertible_to<std::size_t> Index>
 [[nodiscard]] inline expected<void, status_code>
-verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message, Index signature_index, implicit_algorithm_profile_t,
+verify_sign(VerificationKey &&key, const basic_cose_sign<Borrowed> &message, Index &&signature_index, implicit_algorithm_profile_t,
             std::span<const std::byte> external_aad = {}, std::optional<std::span<const std::byte>> detached_payload = std::nullopt) {
-    return detail::verify_sign_with_policy<Backend>(std::forward<VerificationKey>(key), message,
-                                                    detail::verification_algorithm_policy::implicit_algorithm,
-                                                    static_cast<std::size_t>(signature_index), external_aad, detached_payload);
+    return detail::verify_sign_with_policy<Backend>(
+        std::forward<VerificationKey>(key), message, detail::verification_algorithm_policy::implicit_algorithm,
+        static_cast<std::size_t>(std::forward<Index>(signature_index)), external_aad, detached_payload);
 }
 
 template <typename Backend, typename VerificationKey, bool Borrowed>

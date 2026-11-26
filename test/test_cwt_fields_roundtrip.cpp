@@ -5,10 +5,18 @@
 #include <doctest/doctest.h>
 #include <list>
 #include <map>
+#include <memory>
 #include <memory_resource>
 #include <ostream>
 #include <span>
 #include <unordered_map>
+
+#if __has_include(<boost/circular_buffer.hpp>)
+#include <boost/circular_buffer.hpp>
+#endif
+#if __has_include(<flat_map>)
+#include <flat_map>
+#endif
 
 using namespace cbor::tags;
 
@@ -180,4 +188,48 @@ TEST_SUITE("roundtrip/cwt") {
             CHECK(received.at(11) == 200);
         }
     }
+
+#if __has_include(<boost/circular_buffer.hpp>)
+    TEST_CASE("custom fields retain a circular buffer's configured capacity") {
+        const std::array       values{7, 8};
+        const auto             source = cwt::fields(cwt::field<1>(values));
+        std::vector<std::byte> buffer;
+        REQUIRE(make_encoder<codec::cwt>(buffer)(source));
+
+        boost::circular_buffer<int> received(4);
+        auto                        destination = cwt::fields(cwt::field<1>(received));
+        REQUIRE(make_decoder<codec::cwt>(buffer)(destination));
+        CHECK(received.capacity() == 4);
+        CHECK(std::ranges::equal(received, values));
+    }
+#endif
+
+#if defined(__cpp_lib_flat_map)
+    TEST_CASE("custom fields use a flat map's configured storage allocators") {
+        const std::map         values{std::pair{1, 100}, std::pair{11, 200}};
+        const auto             source = cwt::fields(cwt::field<1>(values));
+        std::vector<std::byte> buffer;
+        REQUIRE(make_encoder<codec::cwt>(buffer)(source));
+
+        std::pmr::monotonic_buffer_resource keys;
+        std::pmr::monotonic_buffer_resource mapped;
+        using map_type = std::flat_map<int, int, std::less<int>, std::pmr::vector<int>, std::pmr::vector<int>>;
+        map_type received{std::pmr::vector<int>{&keys}, std::pmr::vector<int>{&mapped}};
+        auto     destination = cwt::fields(cwt::field<1>(received));
+
+        // Any scratch allocation must use the bound map's storage resources.
+        const auto                                                            restore_default = &std::pmr::set_default_resource;
+        std::unique_ptr<std::pmr::memory_resource, decltype(restore_default)> previous{
+            std::pmr::set_default_resource(std::pmr::null_memory_resource()), restore_default};
+        const auto decoded = make_decoder<codec::cwt>(buffer)(destination);
+        previous.reset();
+
+        REQUIRE(decoded);
+        REQUIRE(received.size() == 2);
+        CHECK(received.at(1) == 100);
+        CHECK(received.at(11) == 200);
+        CHECK(received.keys().get_allocator().resource() == &keys);
+        CHECK(received.values().get_allocator().resource() == &mapped);
+    }
+#endif
 }
